@@ -31,7 +31,16 @@ import { Type } from "typebox";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { AGENT_DIR, cwdHash, readJSON, writeJSON, updateJSON, writeSessionMeta } from "../../core";
+import {
+	AGENT_DIR,
+	CONTRACT_VERSION,
+	cwdHash,
+	isFutureContract,
+	readJSON,
+	writeJSON,
+	updateJSON,
+	writeSessionMeta,
+} from "../../core";
 import type {
 	ProjectMemory as ProjectProfile,
 	MemoryFact,
@@ -72,6 +81,9 @@ function defaultProject(cwd: string): ProjectProfile {
 
 function loadProject(cwd: string): ProjectProfile {
 	const profile = readJSON<ProjectProfile>(projectPath(cwd), defaultProject(cwd));
+	// A file written by a newer contract may have a shape we'd misread; degrade
+	// to a clean default (saveProject won't clobber the newer file — see below).
+	if (isFutureContract(profile)) return defaultProject(cwd);
 	return {
 		...defaultProject(cwd),
 		...profile,
@@ -84,10 +96,14 @@ function saveProject(cwd: string, profile: ProjectProfile): void {
 	profile.lastScanned = Date.now();
 	// Read-merge-write: re-read the file and keep whatever foreign fields
 	// (quest's research/lastModified) are currently on disk, so this possibly
-	// stale in-memory snapshot can't clobber a newer write from pi-quest.
+	// stale in-memory snapshot can't clobber a newer write from pi-quest. Bail
+	// out (leave the file untouched) if it was written by a newer contract.
 	updateJSON<ProjectProfile>(
 		projectPath(cwd),
-		(onDisk) => withForeignFromDisk(profile, onDisk),
+		(onDisk) =>
+			isFutureContract(onDisk)
+				? onDisk
+				: { ...withForeignFromDisk(profile, onDisk), contractVersion: CONTRACT_VERSION },
 		profile,
 	);
 }

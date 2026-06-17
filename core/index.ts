@@ -6,7 +6,7 @@
  * helpers. This is the only module all three depend on; see ./contract for the
  * versioned on-disk contract and core/README.md for the rationale.
  */
-export { CONTRACT_VERSION } from "./contract";
+export { CONTRACT_VERSION, isFutureContract } from "./contract";
 export type {
 	ExtensionKey,
 	SessionMeta,
