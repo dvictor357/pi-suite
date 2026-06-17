@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
-import type { Quest } from "./types";
+import type { GitIntegration, Quest } from "./types";
 import {
 	readJSON,
 	writeJSON,
@@ -40,7 +40,7 @@ export function emptyQuest(
 	team?: string,
 	planningMode: "auto" | "approve" = "auto",
 	verifyOnComplete = true,
-	gitIntegration?: Quest["gitIntegration"],
+	gitIntegration?: Partial<GitIntegration>,
 ): Quest {
 	return {
 		version: 1,

@@ -23,3 +23,23 @@ export { cwdHash } from "./hash";
 export { readJSON, writeJSON, appendLine, setErrorSink } from "./fs";
 export { AGENT_DIR, SESSION_META_PATH, todoListPath, projectMemoryPath } from "./paths";
 export { readSessionMeta, writeSessionMeta } from "./session-meta";
+
+import { join } from "node:path";
+import { appendLine, setErrorSink } from "./fs";
+import { AGENT_DIR } from "./paths";
+
+/** Shared suite-wide error log. One file for all three extensions. */
+export const ERROR_LOG_PATH = join(AGENT_DIR, "pi-suite-errors.log");
+
+/**
+ * Install a default error sink the moment any extension imports core, so a
+ * failed read/write is captured in a shared log instead of being silently
+ * black-holed (the previous no-op default). All three extensions share one
+ * core module instance at runtime, so a single suite-wide log is both simpler
+ * and more coherent than three competing per-extension sinks. Tests or an
+ * extension may still override this via `setErrorSink`.
+ */
+setErrorSink((context, error) => {
+	const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+	appendLine(ERROR_LOG_PATH, `[${new Date().toISOString()}] ${context}: ${detail}`);
+});

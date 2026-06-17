@@ -19,19 +19,21 @@ are now deprecated in favor of this suite.
 
 ```
 pi-suite/
-├── core/             # shared cross-extension contract (types, paths, helpers)
+├── core/             # shared cross-extension contract (types, paths, helpers) + *.test.ts
 ├── extensions/
 │   ├── quest/        # pi-quest   → extensions/quest/index.ts
 │   ├── todo/         # pi-todo    → extensions/todo/index.ts
 │   └── memory/       # pi-memory  → extensions/memory/index.ts
-├── types/            # ambient shims for pi host packages (typecheck only)
 ├── docs/             # architecture & design notes
 ├── tsconfig.json     # one typecheck gate over core + all extensions
 └── .prettierrc.json  # one formatting convention for the whole suite
 ```
 
 Each extension imports the shared contract from `core/` via a relative path
-(`../../core`) — there is nothing to publish.
+(`../../core`) — there is nothing to publish. The pi host packages
+(`@earendil-works/pi-*`, `typebox`) are declared as `peerDependencies` (provided
+by the pi runtime at load) and pinned as `devDependencies` so `tsc` checks real
+API usage rather than `any` stand-ins.
 
 ## Why one repo
 
@@ -58,12 +60,13 @@ To run just one extension, install the suite and disable the others with `pi con
 ## Develop
 
 ```bash
-npm install        # dev tooling: typescript, prettier
-npm run typecheck  # tsc --noEmit over core + all extensions
+npm install        # dev tooling: typescript, prettier, tsx, pi host types
+npm run typecheck  # tsc --noEmit over core + all extensions (against real pi types)
+npm test           # node:test via tsx — core contract (cwdHash, writeJSON, session-meta)
 npm run format     # prettier --write (tabs; see .editorconfig / .prettierrc.json)
 ```
 
-CI runs `typecheck` and `format:check` on every push and PR.
+CI runs `typecheck`, `test`, and `format:check` on every push and PR.
 
 ## Status
 
