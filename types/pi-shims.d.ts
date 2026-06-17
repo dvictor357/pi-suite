@@ -22,6 +22,7 @@ declare module "@earendil-works/pi-ai" {
 declare module "@earendil-works/pi-tui" {
 	export const matchesKey: any;
 	export const Key: any;
+	export const Text: any;
 }
 
 declare module "typebox" {
