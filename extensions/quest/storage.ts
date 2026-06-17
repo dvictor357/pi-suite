@@ -4,28 +4,39 @@ import type { GitIntegration, Quest } from "./types";
 import {
 	readJSON,
 	writeJSON,
+	updateJSON,
 	projectMemoryPath,
-	loadProjectMemory,
 	questActivePath,
 	questArchiveDir,
 	questArchiveIndexPath,
+	CONTRACT_VERSION,
+	isFutureContract,
 } from "./utils";
 
 export function syncConventionsToMemory(quest: Quest, cwd: string): void {
 	try {
 		if (!quest.conventions.length) return;
-		const existing = loadProjectMemory(cwd) ?? {
-			name: basename(cwd),
-			conventions: [],
-			lastScanned: 0,
-		};
-		const conventions = Array.isArray(existing.conventions) ? existing.conventions : [];
-		const merged = [...new Set([...conventions, ...quest.conventions])];
-		writeJSON(projectMemoryPath(cwd), {
-			...existing,
-			conventions: merged,
-			lastModified: Date.now(),
-		});
+		// Read-merge-write the shared memory file: merge quest's conventions into
+		// whatever is on disk, skipping if pi-memory wrote a newer contract.
+		updateJSON<Record<string, any>>(
+			projectMemoryPath(cwd),
+			(existing) => {
+				if (isFutureContract(existing)) return existing; // don't clobber a newer-suite file
+				const base =
+					existing && Object.keys(existing).length
+						? existing
+						: { name: basename(cwd), conventions: [], lastScanned: 0 };
+				const conventions = Array.isArray(base.conventions) ? base.conventions : [];
+				const merged = [...new Set([...conventions, ...quest.conventions])];
+				return {
+					...base,
+					conventions: merged,
+					lastModified: Date.now(),
+					contractVersion: CONTRACT_VERSION,
+				};
+			},
+			{},
+		);
 	} catch (e) {
 		console.error(
 			"[pi-quest] syncConventionsToMemory:",

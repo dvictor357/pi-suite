@@ -20,7 +20,7 @@ import {
 	TEAMS_DIR,
 	FORMAT_DIRECTIVE,
 } from "./constants";
-import { readJSON, writeJSON, projectMemoryPath } from "./utils";
+import { updateJSON, projectMemoryPath, CONTRACT_VERSION, isFutureContract } from "./utils";
 import {
 	emptyQuest,
 	loadQuest,
@@ -1504,19 +1504,23 @@ export default function (pi: ExtensionAPI) {
 			renderStatus(ctx, quest);
 			writeQuestSessionMeta(ctx.cwd, quest);
 
-			try {
-				const memoryPath = projectMemoryPath(ctx.cwd);
-				const memory = readJSON<Record<string, any>>(memoryPath, {});
-				if (!memory.research) memory.research = {};
-				memory.research[params.key] = {
-					value: params.value,
-					category: params.category ?? null,
-					timestamp,
-				};
-				writeJSON(memoryPath, memory);
-			} catch {
-				/* best-effort */
-			}
+			// Mirror the finding onto pi-memory's project file for cross-quest
+			// awareness. Read-merge-write so a concurrent pi-memory save isn't
+			// clobbered, and skip if pi-memory wrote a newer contract.
+			updateJSON<Record<string, any>>(
+				projectMemoryPath(ctx.cwd),
+				(memory) => {
+					if (isFutureContract(memory)) return memory;
+					const research = { ...(memory.research ?? {}) };
+					research[params.key] = {
+						value: params.value,
+						category: params.category ?? null,
+						timestamp,
+					};
+					return { ...memory, research, contractVersion: CONTRACT_VERSION };
+				},
+				{},
+			);
 
 			const action = existing ? "Updated" : "Saved";
 			return {

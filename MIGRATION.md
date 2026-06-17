@@ -34,20 +34,27 @@ the original repos yet.
 
 ## Contract drift to resolve during review
 
-These are real mismatches found while extracting the contract — decide the fix during
-the review rather than carrying the drift forward:
+These were real mismatches found while extracting the contract:
 
-1. **`research` key.** pi-quest's `quest_memory_save` writes `memory.research[key] =
-{ value, category, timestamp }` onto pi-memory's project file, but pi-memory's
-   `ProjectProfile` has no `research` field — it stores knowledge as `facts: MemoryFact[]`.
-   Decide: should quest research become `MemoryFact`s (scope `project`), or should
-   pi-memory adopt `research` as a first-class field? `core` currently types it as an
-   optional field on `ProjectMemory` and flags it.
-2. **`lastModified` vs `lastScanned`.** pi-quest writes `lastModified` when merging
-   conventions; pi-memory tracks `lastScanned`. Pick one timestamp semantics.
-3. **`verifyOnComplete` default.** pi-quest's loader defaults a legacy quest missing this
-   field to `false`, while `emptyQuest` and the docs default to `true`. (Quest-internal,
-   noted for completeness.)
+1. **`research` key. — RESOLVED.** pi-quest's `quest_memory_save` writes
+   `memory.research[key] = { value, category, timestamp }` onto pi-memory's project file.
+   Decision: `research` stays a **first-class, preserved optional field** on
+   `ProjectMemory` (keeping its keyed-update semantics), rather than being folded into
+   `facts`. pi-memory does not produce it but must not destroy it: `reconcileProfile`
+   (`extensions/memory/profile.ts`) overlays only detected fields onto the stored profile,
+   and `saveProject` read-merges the on-disk `research`/`lastModified` so a stale save
+   can't clobber quest's newer data.
+2. **`lastModified` vs `lastScanned`. — PARTIALLY RESOLVED.** Both are now preserved
+   (no data loss): pi-memory owns `lastScanned` (last tech-stack scan); pi-quest writes
+   `lastModified` and it survives rescans. Unifying them into one timestamp semantics is
+   still open, but no longer causes data loss.
+3. **`verifyOnComplete` default. — OPEN.** pi-quest's loader defaults a legacy quest
+   missing this field to `false`, while `emptyQuest` and the docs default to `true`.
+   Quest-internal; tracked as a Tier-2 fix, not yet applied.
+
+Cross-extension on-disk shapes now carry a `contractVersion` (stamped on write, checked
+on read via `isFutureContract`): a file written by a newer suite is not misread or
+clobbered. See `core/contract.ts`.
 
 ## Order
 

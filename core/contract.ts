@@ -13,11 +13,29 @@
  */
 export const CONTRACT_VERSION = 1;
 
+/**
+ * True if a persisted blob was written by a NEWER contract than this code
+ * implements (its `contractVersion` exceeds {@link CONTRACT_VERSION}). Such a
+ * file may use a shape this code would misread, so callers should refuse to use
+ * or overwrite it rather than silently corrupt shared cross-extension state.
+ * Files with no `contractVersion` (pre-versioning, or never stamped) are NOT
+ * future — they are read and upgraded normally.
+ */
+export function isFutureContract(blob: { contractVersion?: number } | null | undefined): boolean {
+	return (
+		blob != null &&
+		typeof blob.contractVersion === "number" &&
+		blob.contractVersion > CONTRACT_VERSION
+	);
+}
+
 // ── Session meta (status-bar / awareness handoff, written by all three) ──────
 
 export type ExtensionKey = "memory" | "todo" | "quest";
 
 export interface SessionMeta {
+	/** Contract version this file was written with; see {@link CONTRACT_VERSION}. */
+	contractVersion?: number;
 	cwd?: string;
 	cwdHash?: string;
 	updatedAt?: number;
@@ -69,6 +87,8 @@ export interface MemoryFact {
 }
 
 export interface ProjectMemory {
+	/** Contract version this file was written with; see {@link CONTRACT_VERSION}. */
+	contractVersion?: number;
 	name: string;
 	packageManager: string | null;
 	language: string | null;
@@ -86,9 +106,11 @@ export interface ProjectMemory {
 	lastScanned: number;
 	fingerprint?: Record<string, number>;
 
-	// ── Fields below are written by OTHER extensions onto the memory file and
-	// are not (yet) part of pi-memory's own ProjectProfile. Flagged for
-	// reconciliation during the per-repo review pass — see MIGRATION.md.
+	// ── Fields below are written by pi-quest onto the memory file, not by
+	// pi-memory's own detection. pi-memory does not produce them but MUST
+	// preserve them across rescans (see extensions/memory/profile.ts) — this is
+	// the resolution of MIGRATION.md drift #1: research stays a first-class,
+	// preserved field rather than being folded into `facts`.
 
 	/** Written by pi-quest's `quest_memory_save`. Keyed research findings. */
 	research?: Record<string, ProjectResearchFinding>;
