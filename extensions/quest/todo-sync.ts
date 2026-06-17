@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { readJSON, writeJSON, loadProjectMemory } from "./utils";
+import { readJSON, writeJSON, updateJSON, loadProjectMemory } from "./utils";
 import { SESSION_META_PATH, todoListPath as todoPath } from "../../core";
 import type { Quest, QuestTask, SyncedTodoItem, SyncedTodoList } from "./types";
 
@@ -64,6 +64,32 @@ export function syncQuestToTodo(quest: Quest, cwd: string): void {
 		writeJSON(path, next);
 	} catch (e) {
 		console.error("[pi-quest] syncQuestToTodo:", e); /* optional — pi-todo may not be installed */
+	}
+}
+
+/**
+ * Remove all quest-sourced items from pi-todo's list, leaving the user's own
+ * todos intact. Used on abort/cancel so a dead quest's `[Quest]` items don't
+ * linger in pi-todo. Read-merge-write; no write if there was nothing to remove.
+ */
+export function clearQuestFromTodo(cwd: string): void {
+	try {
+		updateJSON<SyncedTodoList>(
+			todoPath(cwd),
+			(existing) => {
+				const items = Array.isArray(existing.items) ? existing.items : [];
+				const kept = items.filter(
+					(i) => i?.source !== "quest" && !i?.content?.startsWith("[Quest]"),
+				);
+				return kept.length === items.length ? existing : { ...existing, items: kept };
+			},
+			{ cwd, items: [], version: 1 },
+		);
+	} catch (e) {
+		console.error(
+			"[pi-quest] clearQuestFromTodo:",
+			e,
+		); /* optional — pi-todo may not be installed */
 	}
 }
 

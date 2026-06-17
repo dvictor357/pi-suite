@@ -30,10 +30,11 @@ import {
 	listArchives,
 } from "./storage";
 import { loadTeams, ensureBuiltInTeams, teamInstallFromGit } from "./teams";
-import { syncQuestToTodo, compactAwarenessBlock } from "./todo-sync";
+import { syncQuestToTodo, clearQuestFromTodo, compactAwarenessBlock } from "./todo-sync";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { nextPendingTask, formatQuestStatus, buildSteeringMessage } from "./steering";
 import { QuestKanban } from "./kanban";
+import { detectDependencyCycle, getMaxDependencyDepth } from "./graph";
 
 export default function (pi: ExtensionAPI) {
 	let questCache: Quest | null = null;
@@ -51,58 +52,6 @@ export default function (pi: ExtensionAPI) {
 		if (config) {
 			quest.team = teamName;
 		}
-	}
-
-	function detectDependencyCycle(tasks: { dependencies: number[] }[]): number[] | null {
-		const n = tasks.length;
-		const visited = new Array(n).fill(0); // 0=unvisited, 1=visiting, 2=done
-		const path: number[] = [];
-
-		function dfs(i: number): number[] | null {
-			if (visited[i] === 1) {
-				// Found cycle — extract the cycle portion
-				const cycleStart = path.indexOf(i);
-				return path.slice(cycleStart).concat(i);
-			}
-			if (visited[i] === 2) return null;
-			visited[i] = 1;
-			path.push(i);
-			for (const dep of tasks[i]?.dependencies ?? []) {
-				const result = dfs(dep);
-				if (result) return result;
-			}
-			path.pop();
-			visited[i] = 2;
-			return null;
-		}
-
-		for (let i = 0; i < n; i++) {
-			const result = dfs(i);
-			if (result) return result;
-		}
-		return null;
-	}
-
-	function getMaxDependencyDepth(tasks: { dependencies: number[] }[]): number {
-		const n = tasks.length;
-		const memo = new Array<number>(n).fill(-1);
-		function depth(i: number, visited: Set<number>): number {
-			if (memo[i] !== -1) return memo[i];
-			if (visited.has(i)) return 0; // cycle handled separately
-			visited.add(i);
-			let max = 0;
-			for (const dep of tasks[i]?.dependencies ?? []) {
-				max = Math.max(max, 1 + depth(dep, visited));
-			}
-			visited.delete(i);
-			memo[i] = max;
-			return max;
-		}
-		let result = 0;
-		for (let i = 0; i < n; i++) {
-			result = Math.max(result, depth(i, new Set()));
-		}
-		return result;
 	}
 
 	// ── Tools ────────────────────────────────────────────────────────────────
@@ -1583,6 +1532,7 @@ export default function (pi: ExtensionAPI) {
 			questCache = null;
 			renderStatus(ctx, null);
 			writeQuestSessionMeta(ctx.cwd, null);
+			clearQuestFromTodo(ctx.cwd); // flush stale [Quest] items from pi-todo
 			return {
 				content: [
 					{
@@ -2624,7 +2574,7 @@ export default function (pi: ExtensionAPI) {
 					questCache = null;
 					renderStatus(ctx, null);
 					writeQuestSessionMeta(ctx.cwd, null);
-					syncQuestToTodo(quest, ctx.cwd);
+					clearQuestFromTodo(ctx.cwd); // flush quest items, not re-sync them as completed
 					ctx.ui.notify(
 						`Quest "${name}" cancelled and archived (${done}/${quest.tasks.length} tasks done).`,
 						"info",
