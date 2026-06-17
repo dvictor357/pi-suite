@@ -1,0 +1,142 @@
+import { basename } from "node:path";
+import { readJSON, writeJSON, loadProjectMemory } from "./utils";
+import { SESSION_META_PATH, todoListPath as todoPath } from "../../core";
+import type { Quest, QuestTask, SyncedTodoItem, SyncedTodoList } from "./types";
+
+export { todoPath };
+
+export function questTaskToTodo(
+	quest: Quest,
+	task: QuestTask,
+	index: number,
+	previous?: SyncedTodoItem,
+): SyncedTodoItem {
+	const now = Date.now();
+	const failed = task.status === "failed";
+	const completed = task.status === "done" || task.status === "skipped" || failed;
+	const status: SyncedTodoItem["status"] =
+		task.status === "running" || task.status === "verifying"
+			? "in_progress"
+			: completed
+				? "completed"
+				: "pending";
+	const result = failed
+		? `[failed] ${task.result ?? task.verifyResult ?? "Task failed"}`
+		: (task.result ?? undefined);
+
+	return {
+		content: `[Quest] #${index + 1} ${task.content}`,
+		status,
+		agent: task.agent,
+		context: task.context,
+		result,
+		source: "quest",
+		sourceId: quest.name,
+		sourceIndex: index,
+		createdAt: previous?.createdAt ?? task.startedAt ?? now,
+		completedAt: completed ? (previous?.completedAt ?? task.completedAt ?? now) : null,
+	};
+}
+
+export function syncQuestToTodo(quest: Quest, cwd: string): void {
+	try {
+		const path = todoPath(cwd);
+		const existing = readJSON<SyncedTodoList>(path, { cwd, items: [], version: 1 });
+		const existingItems = Array.isArray(existing.items) ? existing.items : [];
+		const previousQuestItems = new Map<number, SyncedTodoItem>();
+		for (const item of existingItems) {
+			if (item?.source === "quest" && typeof item.sourceIndex === "number") {
+				previousQuestItems.set(item.sourceIndex, item);
+			}
+		}
+		const nonQuestItems = existingItems.filter(
+			(item) => item?.source !== "quest" && !item?.content?.startsWith("[Quest]"),
+		);
+		const questItems = quest.tasks.map((task, index) =>
+			questTaskToTodo(quest, task, index, previousQuestItems.get(index)),
+		);
+		const next: SyncedTodoList = {
+			cwd: existing.cwd ?? cwd,
+			title: existing.title ?? `Quest: ${quest.name}`,
+			items: [...nonQuestItems, ...questItems],
+			version: 1,
+		};
+		writeJSON(path, next);
+	} catch (e) {
+		console.error("[pi-quest] syncQuestToTodo:", e); /* optional — pi-todo may not be installed */
+	}
+}
+
+export function compactAwarenessBlock(cwd: string): string {
+	try {
+		const memory = loadProjectMemory(cwd);
+		const todo = readJSON<SyncedTodoList | null>(todoPath(cwd), null);
+		const meta = readJSON<any>(SESSION_META_PATH, { extensions: {} });
+		const memoryMeta = meta.extensions?.memory ?? {};
+		const todoMeta = meta.extensions?.todo ?? {};
+		const lines: string[] = [];
+
+		const now = new Date();
+		lines.push(
+			`Date: ${now.toLocaleString("en-US", { weekday: "short", year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" })}`,
+		);
+
+		const language = memory?.language ?? memoryMeta.language;
+		const framework = memory?.framework ?? memoryMeta.framework;
+		const packageManager = memory?.packageManager ?? memoryMeta.packageManager;
+		const conventions = Array.isArray(memory?.conventions) ? memory.conventions.slice(0, 5) : [];
+		const tech = [language, framework, packageManager].filter(Boolean).join(" • ");
+		if (memory || tech || conventions.length) {
+			lines.push(
+				`Memory: ${memory?.name ?? memoryMeta.name ?? basename(cwd)}${tech ? ` (${tech})` : ""}`,
+			);
+			if (conventions.length)
+				lines.push(
+					`Conventions: ${conventions.join("; ")}${memory?.conventions?.length > conventions.length ? "…" : ""}`,
+				);
+		}
+
+		const research = memory?.research as
+			| Record<string, { value: string; category?: string; timestamp: number }>
+			| undefined;
+		if (research) {
+			const entries = Object.entries(research)
+				.sort(([, a], [, b]) => b.timestamp - a.timestamp)
+				.slice(0, 5);
+			if (entries.length) {
+				const lines2 = entries.map(([k, v]) => {
+					const cat = v.category ? `[${v.category}] ` : "";
+					const val = v.value.length > 80 ? v.value.slice(0, 77) + "…" : v.value;
+					return `- ${k}: ${cat}${val}`;
+				});
+				lines.push(`Research:\n${lines2.join("\n")}`);
+			}
+		}
+
+		const items = Array.isArray(todo?.items) ? todo.items : [];
+		const total = typeof todoMeta.total === "number" ? todoMeta.total : items.length;
+		if (total > 0) {
+			const completed =
+				typeof todoMeta.completed === "number"
+					? todoMeta.completed
+					: items.filter((i) => i.status === "completed").length;
+			const inProgress =
+				typeof todoMeta.inProgress === "number"
+					? todoMeta.inProgress
+					: items.filter((i) => i.status === "in_progress").length;
+			const delegated =
+				typeof todoMeta.delegated === "number"
+					? todoMeta.delegated
+					: items.filter((i) => i.status === "delegated").length;
+			lines.push(
+				`Todo: ${completed}/${total} done${inProgress ? ` · ${inProgress} active` : ""}${delegated ? ` · ${delegated} delegated` : ""}`,
+			);
+		}
+
+		const block = lines.length ? `\n\n## Project Awareness\n${lines.join("\n")}` : "";
+		return block.length > 1200 ? `${block.slice(0, 1197)}...` : block;
+	} catch (e) {
+		console.error("[pi-quest] compactAwarenessBlock:", e);
+		return "";
+	}
+}
