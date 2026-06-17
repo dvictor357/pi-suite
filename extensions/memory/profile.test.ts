@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ProjectMemory } from "../../core";
-import { reconcileProfile } from "./profile";
+import { reconcileProfile, withForeignFromDisk } from "./profile";
 
 function stored(): ProjectMemory {
 	return {
@@ -77,4 +77,25 @@ test("reconcileProfile does not mutate its inputs", () => {
 	reconcileProfile(s, f);
 	assert.equal(s.language, "JavaScript", "stored input untouched");
 	assert.equal(f.conventions.length, 0, "fresh input untouched");
+});
+
+test("withForeignFromDisk prefers the on-disk research/lastModified (stale-snapshot guard)", () => {
+	const profile = stored(); // a possibly-stale in-memory snapshot with old research
+	const onDisk: Partial<ReturnType<typeof stored>> = {
+		research: { "new-key": { value: "fresher finding", timestamp: 99999 } },
+		lastModified: 99999,
+	};
+	const merged = withForeignFromDisk(profile, onDisk);
+	assert.deepEqual(merged.research, onDisk.research, "on-disk research wins over stale snapshot");
+	assert.equal(merged.lastModified, 99999);
+	// memory's own fields still come from the profile being saved
+	assert.deepEqual(merged.conventions, profile.conventions);
+	assert.equal(merged.language, profile.language);
+});
+
+test("withForeignFromDisk falls back to the profile's foreign fields when disk has none", () => {
+	const profile = stored();
+	const merged = withForeignFromDisk(profile, {});
+	assert.deepEqual(merged.research, profile.research, "no on-disk research → keep what we have");
+	assert.equal(merged.lastModified, profile.lastModified);
 });

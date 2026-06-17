@@ -20,7 +20,7 @@ export type {
 } from "./contract";
 
 export { cwdHash } from "./hash";
-export { readJSON, writeJSON, appendLine, setErrorSink } from "./fs";
+export { readJSON, writeJSON, updateJSON, appendLine, setErrorSink } from "./fs";
 export { AGENT_DIR, SESSION_META_PATH, todoListPath, projectMemoryPath } from "./paths";
 export { readSessionMeta, writeSessionMeta } from "./session-meta";
 
