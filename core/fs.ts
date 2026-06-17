@@ -1,4 +1,11 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname } from "node:path";
 
 /**
@@ -22,11 +29,19 @@ export function readJSON<T>(path: string, fallback: T): T {
 	return fallback;
 }
 
-/** Serialize `data` as pretty JSON, creating parent directories as needed. Best-effort. */
+/**
+ * Serialize `data` as pretty JSON, creating parent directories as needed.
+ *
+ * Writes to a temp file and atomically `rename`s it into place, so a crash
+ * mid-write can never leave a partially-written (corrupt) file that the
+ * best-effort readers would silently discard. Best-effort: never throws.
+ */
 export function writeJSON(path: string, data: unknown): void {
 	try {
 		mkdirSync(dirname(path), { recursive: true });
-		writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+		const tmp = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+		writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+		renameSync(tmp, path);
 	} catch (e) {
 		errorSink(`writeJSON(${path})`, e);
 	}
