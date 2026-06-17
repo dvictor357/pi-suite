@@ -16,7 +16,7 @@ Because every cross-extension read is best-effort (`try/catch` → fallback), a 
 between the copies doesn't error — it corrupts silently. The fix is a single shared
 contract module (`core/`) that all three import.
 
-## Why a monorepo, and why Model A specifically
+## Why one repo
 
 We verified `pi`'s installer behavior directly from
 `@earendil-works/pi-coding-agent/dist/core/package-manager.js`:
@@ -30,23 +30,23 @@ We verified `pi`'s installer behavior directly from
    resolves each entry relative to the repo root; if a listed entry is a directory, it is
    auto-discovered for an `index.ts`. So **one repo can expose many extensions.**
 
-### The two viable models
+### The two viable approaches
 
-| Model          | Shape                                                                         | Install                                     | Trade-off                                                                                               |
-| -------------- | ----------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| **A (chosen)** | One repo, `pi.extensions` lists all three; shared `core/` via relative import | `pi install git:…/pi-suite` loads all three | No npm publish needed; `pi config` toggles individual extensions off. Not independently installable.    |
-| B              | Monorepo publishing three npm packages that depend on a published `core`      | `pi install npm:@you/pi-quest`              | Independent install — but **requires npm publishing**, because `git:` cannot target a workspace subdir. |
+| Approach                 | Shape                                                                         | Install                                     | Trade-off                                                                                               |
+| ------------------------ | ----------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Single repo** (chosen) | One repo, `pi.extensions` lists all three; shared `core/` via relative import | `pi install git:…/pi-suite` loads all three | No npm publish needed; `pi config` toggles individual extensions off. Not independently installable.    |
+| Published packages       | Monorepo publishing three npm packages that depend on a published `core`      | `pi install npm:@you/pi-quest`              | Independent install — but **requires npm publishing**, because `git:` cannot target a workspace subdir. |
 
-Model A was chosen because:
+The single-repo approach was chosen because:
 
 - It keeps the existing `git:` distribution path (no publishing pipeline).
 - `pi.extensions` is purpose-built for multiple extensions in one repo.
 - The shared `core/` becomes plain relative imports — the cleanest possible extraction.
 - `pi config` preserves per-extension enable/disable, softening the only real downside.
 
-Model B remains available later: if independent install ever becomes a hard requirement,
-publish each extension to npm with `core` as a dependency. It does not need to gate the
-consolidation now.
+The published-packages approach remains available later: if independent install ever
+becomes a hard requirement, publish each extension to npm with `core` as a dependency. It
+does not need to gate the consolidation now.
 
 ## Module boundaries
 

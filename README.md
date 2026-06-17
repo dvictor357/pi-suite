@@ -1,7 +1,7 @@
 # pi-suite
 
-A loop-engineering toolkit for [pi](https://pi.dev) — three extensions that share one
-cross-extension contract:
+A loop-engineering toolkit for [pi](https://pi.dev) — three extensions, previously
+maintained as separate repos, now consolidated here behind one cross-extension contract:
 
 | Extension     | Role                                                                                                      |
 | ------------- | --------------------------------------------------------------------------------------------------------- |
@@ -10,9 +10,10 @@ cross-extension contract:
 | **pi-memory** | Persistent project & user memory — tech-stack detection, conventions, structured facts.                   |
 
 They were built to work together (quest syncs tasks into todo and conventions/research
-into memory). This monorepo makes that relationship explicit: a single shared
-[`core/`](core/README.md) module owns the storage contract, so the three can no longer
-drift apart silently.
+into memory). Consolidating them into one repo makes that relationship explicit: a single
+shared [`core/`](core/README.md) module owns the storage contract, so the three can no
+longer drift apart silently. The standalone `pi-quest`, `pi-todo`, and `pi-memory` repos
+are now deprecated in favor of this suite.
 
 ## Layout
 
@@ -32,7 +33,7 @@ pi-suite/
 Each extension imports the shared contract from `core/` via a relative path
 (`../../core`) — there is nothing to publish.
 
-## Why one repo (Model A)
+## Why one repo
 
 `pi`'s installer reads the **root** `package.json` of a git source and loads every
 entry in its `pi.extensions` array. So one repo can ship all three extensions, and a
@@ -44,10 +45,9 @@ independent npm installation, which `pi`'s `git:` route cannot do for a subdirec
 See [docs/architecture.md](docs/architecture.md) for the full rationale and the
 evidence from `pi`'s package manager.
 
-## Install (after extensions land)
+## Install
 
-This repo is currently the shared contract + scaffold. Once the extension directories are
-migrated in, install the suite with:
+Install all three extensions together with a single command:
 
 ```bash
 pi install git:github.com/dvictor357/pi-suite
@@ -67,9 +67,9 @@ CI runs `typecheck` and `format:check` on every push and PR.
 
 ## Status
 
-This repo currently contains the shared `core/` contract and the project scaffold.
-The three extensions are migrated in from their standalone repos under review — see
-[MIGRATION.md](MIGRATION.md).
+All three extensions have been migrated in from their standalone repos onto the shared
+`core/` contract; those repos are now deprecated and archived. See
+[MIGRATION.md](MIGRATION.md) for the migration record.
 
 ## License
 
