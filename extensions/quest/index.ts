@@ -296,6 +296,12 @@ export default function (pi: ExtensionAPI) {
 				.join("\n");
 
 			const choice = await ctx.ui.select(message, params.options);
+			if (choice === undefined) {
+				return {
+					content: [{ type: "text", text: "User dismissed the selection without choosing." }],
+					details: { question: params.question, choice: null, index: -1, options: params.options },
+				};
+			}
 			const idx = params.options.indexOf(choice);
 
 			return {
@@ -1703,7 +1709,7 @@ export default function (pi: ExtensionAPI) {
 											``,
 											`After resolving verification, /quest resume.`,
 										].join("\n"),
-										{ deliverAs: "steer", triggerTurn: true },
+										{ deliverAs: "steer" },
 									);
 								} finally {
 									autoPilotLocked = false;
@@ -1763,7 +1769,7 @@ export default function (pi: ExtensionAPI) {
 										``,
 										`/quest resume after resolving verification.`,
 									].join("\n"),
-									{ deliverAs: "steer", triggerTurn: true },
+									{ deliverAs: "steer" },
 								);
 							} finally {
 								autoPilotLocked = false;
@@ -1847,7 +1853,7 @@ export default function (pi: ExtensionAPI) {
 							]
 								.filter(Boolean)
 								.join("\n"),
-							{ deliverAs: "steer", triggerTurn: true },
+							{ deliverAs: "steer" },
 						);
 					} finally {
 						autoPilotLocked = false;
@@ -1940,7 +1946,7 @@ export default function (pi: ExtensionAPI) {
 									`- Skip failed tasks with quest_update(status="skipped")`,
 									`- /quest resume to continue`,
 								].join("\n"),
-								{ deliverAs: "steer", triggerTurn: true },
+								{ deliverAs: "steer" },
 							);
 						} finally {
 							autoPilotLocked = false;
@@ -2016,7 +2022,7 @@ export default function (pi: ExtensionAPI) {
 						try {
 							pi.sendUserMessage(
 								`## Quest Paused: Stalled ⚠\n\nTask #${next.index + 1} "${next.task.content}" has been attempted ${quest.sameTaskCount} times without completion.\nUse quest_update to mark it failed or skipped, then /quest resume.`,
-								{ deliverAs: "steer", triggerTurn: true },
+								{ deliverAs: "steer" },
 							);
 						} finally {
 							autoPilotLocked = false;
@@ -2095,7 +2101,7 @@ export default function (pi: ExtensionAPI) {
 					try {
 						pi.sendUserMessage(
 							`## Quest Paused: Checkpoint ⏸\n\n${quest.tasksSincePause}/${MAX_BURST} tasks completed. Progress:\n${formatQuestStatus(quest)}\n\n/quest resume to continue.`,
-							{ deliverAs: "steer", triggerTurn: true },
+							{ deliverAs: "steer" },
 						);
 					} finally {
 						autoPilotLocked = false;
@@ -2120,7 +2126,6 @@ export default function (pi: ExtensionAPI) {
 			try {
 				pi.sendUserMessage(buildSteeringMessage(quest, next.task, next.index, ctx.cwd), {
 					deliverAs: "steer",
-					triggerTurn: true,
 				});
 			} finally {
 				autoPilotLocked = false;
@@ -2278,7 +2283,7 @@ export default function (pi: ExtensionAPI) {
 							]
 								.filter(Boolean)
 								.join("\n"),
-							{ deliverAs: "steer", triggerTurn: true },
+							{ deliverAs: "steer" },
 						);
 					} finally {
 						autoPilotLocked = false;
