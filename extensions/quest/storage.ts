@@ -110,7 +110,9 @@ export function loadQuest(cwd: string): Quest | null {
 				raw.planApproved = false;
 			}
 			if (typeof raw.verifyOnComplete !== "boolean") {
-				raw.verifyOnComplete = false;
+				// Default to true to match emptyQuest and the quest_create docs — a
+				// legacy quest missing this field should verify, not silently skip.
+				raw.verifyOnComplete = true;
 			}
 			if (!raw.commits || !Array.isArray(raw.commits)) {
 				raw.commits = [];
