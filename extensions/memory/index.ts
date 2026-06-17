@@ -37,6 +37,7 @@ import type {
 	MemoryFact,
 	UserMemory as UserProfile,
 } from "../../core";
+import { reconcileProfile } from "./profile";
 
 const USER_PATH = join(AGENT_DIR, "memory", "user.json");
 const PROJECTS_DIR = join(AGENT_DIR, "memory", "projects");
@@ -781,15 +782,13 @@ function detectProject(cwd: string): ProjectProfile {
 	};
 }
 
-/** Reconcile: merge auto-detected fields into stored profile, preserving manually set conventions. */
+/**
+ * Reconcile: overlay freshly auto-detected tech-stack fields onto the stored
+ * profile, preserving manual conventions/facts AND any field pi-memory does not
+ * own (e.g. quest's `research`/`lastModified`). See `reconcileProfile`.
+ */
 function reconcile(cwd: string, stored: ProjectProfile): ProjectProfile {
-	const fresh = detectProject(cwd);
-	return {
-		...fresh,
-		conventions: stored.conventions, // preserve manual
-		facts: stored.facts, // preserve manual facts
-		lastScanned: Date.now(),
-	};
+	return reconcileProfile(stored, detectProject(cwd));
 }
 
 async function detectUser(cwd: string): Promise<Partial<UserProfile>> {
@@ -1639,10 +1638,9 @@ export default function (pi: ExtensionAPI) {
 				case "rescan": {
 					projectProfile = null;
 					const project = loadProject(ctx.cwd);
-					// Force a full re-detect, then merge auto-detected fields into stored conventions.
-					const fresh = detectProject(ctx.cwd);
-					fresh.conventions = project.conventions;
-					fresh.facts = project.facts;
+					// Force a full re-detect, overlaying detected fields onto the stored
+					// profile so manual conventions/facts and quest's research survive.
+					const fresh = reconcile(ctx.cwd, project);
 					saveProject(ctx.cwd, fresh);
 					projectProfile = fresh;
 					renderMemoryStatus(ctx, fresh);

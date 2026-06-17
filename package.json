@@ -15,7 +15,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test core/*.test.ts",
+    "test": "node --import tsx --test core/*.test.ts extensions/*/*.test.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
