@@ -31,13 +31,13 @@ import { Type } from "typebox";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { AGENT_DIR, cwdHash, readJSON, writeJSON, writeSessionMeta } from "../../core";
+import { AGENT_DIR, cwdHash, readJSON, writeJSON, updateJSON, writeSessionMeta } from "../../core";
 import type {
 	ProjectMemory as ProjectProfile,
 	MemoryFact,
 	UserMemory as UserProfile,
 } from "../../core";
-import { reconcileProfile } from "./profile";
+import { reconcileProfile, withForeignFromDisk } from "./profile";
 
 const USER_PATH = join(AGENT_DIR, "memory", "user.json");
 const PROJECTS_DIR = join(AGENT_DIR, "memory", "projects");
@@ -82,7 +82,14 @@ function loadProject(cwd: string): ProjectProfile {
 
 function saveProject(cwd: string, profile: ProjectProfile): void {
 	profile.lastScanned = Date.now();
-	writeJSON(projectPath(cwd), profile);
+	// Read-merge-write: re-read the file and keep whatever foreign fields
+	// (quest's research/lastModified) are currently on disk, so this possibly
+	// stale in-memory snapshot can't clobber a newer write from pi-quest.
+	updateJSON<ProjectProfile>(
+		projectPath(cwd),
+		(onDisk) => withForeignFromDisk(profile, onDisk),
+		profile,
+	);
 }
 
 function defaultUser(): UserProfile {

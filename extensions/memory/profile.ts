@@ -35,3 +35,23 @@ export function reconcileProfile(stored: ProjectMemory, fresh: ProjectMemory): P
 		lastScanned: fresh.lastScanned,
 	};
 }
+
+/**
+ * Overlay the foreign fields currently on disk onto the profile being written.
+ *
+ * pi-memory writes its whole in-memory profile, which may be a stale snapshot:
+ * pi-quest can have written fresh `research`/`lastModified` to the file since
+ * this profile was loaded. Taking those fields from the on-disk copy (read
+ * immediately before the write, inside an atomic read-modify-write) means a
+ * stale save can't clobber quest's newer data.
+ */
+export function withForeignFromDisk(
+	profile: ProjectMemory,
+	onDisk: Partial<ProjectMemory>,
+): ProjectMemory {
+	return {
+		...profile,
+		research: onDisk.research ?? profile.research,
+		lastModified: onDisk.lastModified ?? profile.lastModified,
+	};
+}

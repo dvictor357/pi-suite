@@ -47,6 +47,37 @@ export function writeJSON(path: string, data: unknown): void {
 	}
 }
 
+/**
+ * Atomically read-modify-write a JSON file shared by more than one extension.
+ *
+ * Reads the current value (or `fallback`), applies `mutate`, and writes the
+ * result. The read and write are both synchronous with no suspension point
+ * between them, so within a single process no other handler can interleave; the
+ * write itself is atomic (temp + rename), so a concurrent process can never
+ * observe a torn file. Use this instead of a bare `readJSON` + `writeJSON` pair
+ * whenever the file is co-owned, so a stale in-memory snapshot can't silently
+ * clobber another writer's update.
+ *
+ * If `mutate` returns the SAME reference it was given, no write happens — a
+ * cheap way for a caller to bail out (e.g. "this file is newer than I
+ * understand; leave it alone"). Returns the resulting value. Best-effort: never
+ * throws (errors go to the error sink).
+ *
+ * Note: this guards intra-process interleaving and torn writes, not lost
+ * updates between two separate OS processes racing on the same file.
+ */
+export function updateJSON<T>(path: string, mutate: (current: T) => T, fallback: T): T {
+	try {
+		const current = readJSON<T>(path, fallback);
+		const next = mutate(current);
+		if (next !== current) writeJSON(path, next);
+		return next;
+	} catch (e) {
+		errorSink(`updateJSON(${path})`, e);
+		return fallback;
+	}
+}
+
 /** Append a single line to a file, creating parent directories as needed. Best-effort. */
 export function appendLine(path: string, line: string): void {
 	try {

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readJSON, writeJSON, appendLine, setErrorSink } from "./fs";
+import { readJSON, writeJSON, updateJSON, appendLine, setErrorSink } from "./fs";
 
 function freshDir(): string {
 	return mkdtempSync(join(tmpdir(), "pi-suite-fs-"));
@@ -69,6 +69,67 @@ test("readJSON returns fallback and reports via error sink for corrupt JSON", ()
 		assert.deepEqual(readJSON(p, { fallback: true }), { fallback: true });
 		assert.equal(errors.length, 1, "corrupt read should hit the error sink once");
 		assert.match(errors[0], /readJSON/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("updateJSON applies the mutation against current state and persists", () => {
+	const dir = freshDir();
+	try {
+		const p = join(dir, "counter.json");
+		writeJSON(p, { n: 1 });
+		const result = updateJSON<{ n: number }>(p, (cur) => ({ n: cur.n + 1 }), { n: 0 });
+		assert.deepEqual(result, { n: 2 });
+		assert.deepEqual(readJSON(p, null), { n: 2 }, "mutation persisted to disk");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("updateJSON uses fallback (and creates the file) when absent", () => {
+	const dir = freshDir();
+	try {
+		const p = join(dir, "new.json");
+		updateJSON<{ items: string[] }>(p, (cur) => ({ items: [...cur.items, "a"] }), { items: [] });
+		assert.deepEqual(readJSON(p, null), { items: ["a"] });
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("updateJSON does NOT write when the mutator returns the same reference", () => {
+	const dir = freshDir();
+	try {
+		const p = join(dir, "guard.json");
+		// File never created — mutator bails by returning its input unchanged.
+		updateJSON<{ v: number }>(p, (cur) => cur, { v: 7 });
+		const leftovers = readdirSync(dir);
+		assert.deepEqual(leftovers, [], "no file written when mutator returns input unchanged");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("updateJSON merges the LATEST on-disk state, not a stale snapshot", () => {
+	const dir = freshDir();
+	try {
+		const p = join(dir, "shared.json");
+		// Two writers: A captures a stale snapshot, B writes in between, then A
+		// commits via updateJSON. A's merge must see B's write.
+		writeJSON(p, { mine: "a0", foreign: "f0" });
+		const staleSnapshot = readJSON<{ mine: string; foreign: string }>(p, { mine: "", foreign: "" });
+		writeJSON(p, { mine: "a0", foreign: "f1" }); // foreign writer lands first
+		updateJSON<{ mine: string; foreign: string }>(
+			p,
+			(onDisk) => ({ mine: "a1", foreign: onDisk.foreign }), // keep latest foreign
+			staleSnapshot,
+		);
+		assert.deepEqual(
+			readJSON(p, null),
+			{ mine: "a1", foreign: "f1" },
+			"foreign write not clobbered",
+		);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
