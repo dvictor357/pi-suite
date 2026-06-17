@@ -29,6 +29,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 import { AGENT_DIR, cwdHash, readJSON, writeJSON, writeSessionMeta } from "../../core";
 import type { TodoItem, TodoList, TodoStatus as Status } from "../../core";
+import { displayOrder } from "./display";
 
 const MAX_ITEMS = 30;
 const TRUNCATE_AT = 10;
@@ -46,10 +47,18 @@ function archivePath(cwd: string, timestamp: number): string {
 	return join(ARCHIVE_DIR, `${cwdHash(cwd)}-${timestamp}.json`);
 }
 
-function storeMtime(cwd: string): number | null {
+/**
+ * A cheap change-stamp for the store file: modification time AND size. Either
+ * changing invalidates the in-memory cache, so an out-of-band write (e.g. when
+ * pi-quest updates the todo file) is detected even if mtime resolution is too
+ * coarse to distinguish two writes within the same tick.
+ */
+function storeStamp(cwd: string): string | null {
 	try {
 		const p = storePath(cwd);
-		return existsSync(p) ? statSync(p).mtimeMs : null;
+		if (!existsSync(p)) return null;
+		const s = statSync(p);
+		return `${s.mtimeMs}:${s.size}`;
 	} catch {
 		return null;
 	}
@@ -237,21 +246,15 @@ const ICON: Record<Status, string> = {
 	completed: "☑",
 	delegated: "⇢",
 };
-const STATUS_ORDER: Record<Status, number> = {
-	in_progress: 0,
-	delegated: 1,
-	pending: 2,
-	completed: 3,
-};
 
 function formatItems(items: TodoItem[], truncate = false): string {
-	const sorted = [...items].sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]);
+	const sorted = displayOrder(items);
 	let lines = sorted.map((i, idx) => {
 		const extras: string[] = [];
 		if (i.agent) extras.push(`→ ${i.agent}`);
 		if (i.result) extras.push(`✓ ${i.result.slice(0, 60)}`);
 		const extra = extras.length ? `  ${extras.join(" · ")}` : "";
-		return `${ICON[i.status]} ${i.content}${extra}`;
+		return `${idx}. ${ICON[i.status]} ${i.content}${extra}`;
 	});
 	if (truncate && lines.length > TRUNCATE_AT) {
 		const shown = lines.slice(0, 8);
@@ -337,18 +340,18 @@ export default function (pi: ExtensionAPI) {
 	// while still reloading when another extension writes the todo file.
 	let cachedList: TodoList | null = null;
 	let cachedCwd: string | null = null;
-	let cachedMtime: number | null = null;
+	let cachedStamp: string | null = null;
 
 	function refreshCacheMetadata(cwd: string, list: TodoList): TodoList {
 		cachedList = list;
 		cachedCwd = cwd;
-		cachedMtime = storeMtime(cwd);
+		cachedStamp = storeStamp(cwd);
 		return list;
 	}
 
 	function getCached(cwd: string): TodoList {
-		const currentMtime = storeMtime(cwd);
-		if (!cachedList || cachedCwd !== cwd || cachedMtime !== currentMtime) {
+		const currentStamp = storeStamp(cwd);
+		if (!cachedList || cachedCwd !== cwd || cachedStamp !== currentStamp) {
 			return refreshCacheMetadata(cwd, loadTodos(cwd));
 		}
 		return cachedList;
@@ -476,11 +479,14 @@ export default function (pi: ExtensionAPI) {
 				delegated: "accent",
 				pending: "muted",
 			};
-			const sorted = [...items].sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]);
+			const sorted = displayOrder(items);
 			const lines = sorted
-				.map((i) => {
+				.map((i, idx) => {
 					const agent = i.agent ? ` → ${i.agent}` : "";
-					return theme.fg(colorFor[i.status] as any, `${ICON[i.status]} ${i.content}${agent}`);
+					return theme.fg(
+						colorFor[i.status] as any,
+						`${idx}. ${ICON[i.status]} ${i.content}${agent}`,
+					);
 				})
 				.join("\n");
 			return new Text(lines, 0, 0);
@@ -607,7 +613,7 @@ export default function (pi: ExtensionAPI) {
 						return;
 					}
 					const list = getCached(ctx.cwd);
-					const item = list.items[idx];
+					const item = displayOrder(list.items)[idx];
 					if (!item) {
 						ctx.ui.notify(`No item at index ${idx}.`, "error");
 						return;
@@ -631,7 +637,7 @@ export default function (pi: ExtensionAPI) {
 					const idx = parseInt(sub, 10);
 					if (!isNaN(idx) && idx >= 0) {
 						const list = getCached(ctx.cwd);
-						const item = list.items[idx];
+						const item = displayOrder(list.items)[idx];
 						if (!item) {
 							ctx.ui.notify(`No item at index ${idx}.`, "error");
 							return;
