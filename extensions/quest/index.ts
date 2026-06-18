@@ -5,7 +5,7 @@
  * tools, commands, and event handlers.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { join } from "node:path";
@@ -43,6 +43,20 @@ export default function (pi: ExtensionAPI) {
 	function getQuest(cwd?: string): Quest | null {
 		if (!questCache && cwd) questCache = loadQuest(cwd);
 		return questCache;
+	}
+
+	/**
+	 * The canonical save path — used wherever quest state changes. Persists the
+	 * quest, caches it in memory, refreshes the status badge, writes session-meta,
+	 * and syncs the tasks into pi-todo. (Some callers deliberately do a subset,
+	 * e.g. research saves that don't touch tasks skip the pi-todo sync.)
+	 */
+	function persist(ctx: ExtensionContext, quest: Quest): void {
+		saveQuest(quest, ctx.cwd);
+		questCache = quest;
+		renderStatus(ctx, quest);
+		writeQuestSessionMeta(ctx.cwd, quest);
+		syncQuestToTodo(quest, ctx.cwd);
 	}
 
 	function validateAndSetTeam(quest: Quest, teamName?: string): void {
@@ -145,11 +159,7 @@ export default function (pi: ExtensionAPI) {
 				params.gitIntegration,
 			);
 			validateAndSetTeam(quest, params.team);
-			saveQuest(quest, ctx.cwd);
-			questCache = quest;
-			renderStatus(ctx, quest);
-			writeQuestSessionMeta(ctx.cwd, quest);
-			syncQuestToTodo(quest, ctx.cwd);
+			persist(ctx, quest);
 
 			const modeNote =
 				params.planningMode === "approve"
@@ -433,11 +443,7 @@ export default function (pi: ExtensionAPI) {
 					quest.sameTaskCount = 0;
 					quest.pauseReason = null;
 
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 
 					ctx.ui.notify(
 						`✅ Plan approved. Quest "${quest.name}" is now ACTIVE — ${quest.tasks.length} tasks.`,
@@ -479,11 +485,7 @@ export default function (pi: ExtensionAPI) {
 					quest.status = "planning";
 					quest.pauseReason =
 						"Plan review: user wants edits. Use quest_approve(edits=[...]) to modify tasks and approve.";
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 
 					return {
 						content: [
@@ -512,11 +514,7 @@ export default function (pi: ExtensionAPI) {
 					quest.tasks = [];
 					quest.status = "planning";
 					quest.pauseReason = "User requested re-plan.";
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 
 					return {
 						content: [
@@ -537,11 +535,7 @@ export default function (pi: ExtensionAPI) {
 				quest.status = "planning";
 				quest.pauseReason =
 					"Plan saved, awaiting user approval. Use /quest approve or quest_approve to start.";
-				saveQuest(quest, ctx.cwd);
-				questCache = quest;
-				renderStatus(ctx, quest);
-				writeQuestSessionMeta(ctx.cwd, quest);
-				syncQuestToTodo(quest, ctx.cwd);
+				persist(ctx, quest);
 
 				return {
 					content: [
@@ -575,11 +569,7 @@ export default function (pi: ExtensionAPI) {
 				quest.status = "planning";
 			}
 
-			saveQuest(quest, ctx.cwd);
-			questCache = quest;
-			renderStatus(ctx, quest);
-			writeQuestSessionMeta(ctx.cwd, quest);
-			syncQuestToTodo(quest, ctx.cwd);
+			persist(ctx, quest);
 
 			const approvalMsg = needsApproval
 				? [
@@ -704,11 +694,7 @@ export default function (pi: ExtensionAPI) {
 
 					quest.lastFiredTaskIndex = -1;
 					quest.sameTaskCount = 0;
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 
 					const done = quest.tasks.filter((t) => t.status === "done").length;
 					const next = nextPendingTask(quest);
@@ -760,11 +746,7 @@ export default function (pi: ExtensionAPI) {
 
 					quest.lastFiredTaskIndex = -1;
 					quest.sameTaskCount = 0;
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 
 					return {
 						content: [
@@ -790,11 +772,7 @@ export default function (pi: ExtensionAPI) {
 
 				quest.lastFiredTaskIndex = -1;
 				quest.sameTaskCount = 0;
-				saveQuest(quest, ctx.cwd);
-				questCache = quest;
-				renderStatus(ctx, quest);
-				writeQuestSessionMeta(ctx.cwd, quest);
-				syncQuestToTodo(quest, ctx.cwd);
+				persist(ctx, quest);
 
 				return {
 					content: [
@@ -822,11 +800,7 @@ export default function (pi: ExtensionAPI) {
 					task.verified = false;
 					task.verifyResult = null;
 
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 
 					const verifierAgent =
 						team?.members.find((m) => m.agent === "verifier" || m.role === "tester")?.agent ??
@@ -898,11 +872,7 @@ export default function (pi: ExtensionAPI) {
 			quest.lastFiredTaskIndex = -1;
 			quest.sameTaskCount = 0;
 
-			saveQuest(quest, ctx.cwd);
-			questCache = quest;
-			renderStatus(ctx, quest);
-			writeQuestSessionMeta(ctx.cwd, quest);
-			syncQuestToTodo(quest, ctx.cwd);
+			persist(ctx, quest);
 
 			const done = quest.tasks.filter((t) => t.status === "done").length;
 			const total = quest.tasks.length;
@@ -1062,11 +1032,7 @@ export default function (pi: ExtensionAPI) {
 
 				const approved = await ctx.ui.confirm("Approve Quest Plan", confirmMsg);
 				if (!approved) {
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 
 					return {
 						content: [
@@ -1093,11 +1059,7 @@ export default function (pi: ExtensionAPI) {
 			quest.sameTaskCount = 0;
 			quest.pauseReason = null;
 
-			saveQuest(quest, ctx.cwd);
-			questCache = quest;
-			renderStatus(ctx, quest);
-			writeQuestSessionMeta(ctx.cwd, quest);
-			syncQuestToTodo(quest, ctx.cwd);
+			persist(ctx, quest);
 
 			const next = nextPendingTask(quest);
 			return {
@@ -1203,11 +1165,7 @@ export default function (pi: ExtensionAPI) {
 				timestamp: Date.now(),
 			});
 
-			saveQuest(quest, ctx.cwd);
-			questCache = quest;
-			renderStatus(ctx, quest);
-			writeQuestSessionMeta(ctx.cwd, quest);
-			syncQuestToTodo(quest, ctx.cwd);
+			persist(ctx, quest);
 
 			return {
 				content: [
@@ -1678,11 +1636,7 @@ export default function (pi: ExtensionAPI) {
 									t.verifyResult = "[SKIP] Verification skipped by user.";
 									t.completedAt = Date.now();
 								}
-								saveQuest(quest, ctx.cwd);
-								questCache = quest;
-								renderStatus(ctx, quest);
-								writeQuestSessionMeta(ctx.cwd, quest);
-								syncQuestToTodo(quest, ctx.cwd);
+								persist(ctx, quest);
 								ctx.ui.notify(
 									`${verifyingTasks.length} task(s) verified (skipped). Continuing...`,
 									"info",
@@ -1695,11 +1649,7 @@ export default function (pi: ExtensionAPI) {
 						quest.pauseReason = `Waiting for verification on ${verifyingTasks.length} task(s): ${verifyingTasks.map((t) => t.content).join(", ")}. Resolve with quest_update(verifyOutcome=...).`;
 						quest.lastFiredTaskIndex = -1;
 						quest.sameTaskCount = 0;
-						saveQuest(quest, ctx.cwd);
-						questCache = quest;
-						renderStatus(ctx, quest);
-						writeQuestSessionMeta(ctx.cwd, quest);
-						syncQuestToTodo(quest, ctx.cwd);
+						persist(ctx, quest);
 
 						if (ctx.hasUI) {
 							ctx.ui.notify(
@@ -1736,11 +1686,7 @@ export default function (pi: ExtensionAPI) {
 						quest.pauseReason = `Verification pending on ${verifyingTasks.length} task(s): ${verifyingTasks.map((t) => t.content).join(", ")}. Complete verification to unblock dependent tasks.`;
 						quest.lastFiredTaskIndex = -1;
 						quest.sameTaskCount = 0;
-						saveQuest(quest, ctx.cwd);
-						questCache = quest;
-						renderStatus(ctx, quest);
-						writeQuestSessionMeta(ctx.cwd, quest);
-						syncQuestToTodo(quest, ctx.cwd);
+						persist(ctx, quest);
 						if (ctx.hasUI) {
 							ctx.ui.notify(
 								`Quest paused: ${verifyingTasks.length} task(s) need verification before dependents can proceed.\n${vfyList}`,
@@ -1759,11 +1705,7 @@ export default function (pi: ExtensionAPI) {
 					quest.completedAt = Date.now();
 					syncConventionsToMemory(quest, ctx.cwd);
 					archiveQuest(quest, ctx.cwd);
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 
 					const git = quest.gitIntegration;
 					const gitSection =
@@ -1840,11 +1782,7 @@ export default function (pi: ExtensionAPI) {
 							quest.lastFiredTaskIndex = -1;
 							quest.sameTaskCount = 0;
 							quest.pauseReason = null;
-							saveQuest(quest, ctx.cwd);
-							questCache = quest;
-							renderStatus(ctx, quest);
-							writeQuestSessionMeta(ctx.cwd, quest);
-							syncQuestToTodo(quest, ctx.cwd);
+							persist(ctx, quest);
 							ctx.ui.notify(
 								`${failedTasks.length} task(s) reset for retry. Auto-pilot resuming.`,
 								"info",
@@ -1863,11 +1801,7 @@ export default function (pi: ExtensionAPI) {
 							quest.lastFiredTaskIndex = -1;
 							quest.sameTaskCount = 0;
 							quest.pauseReason = null;
-							saveQuest(quest, ctx.cwd);
-							questCache = quest;
-							renderStatus(ctx, quest);
-							writeQuestSessionMeta(ctx.cwd, quest);
-							syncQuestToTodo(quest, ctx.cwd);
+							persist(ctx, quest);
 							ctx.ui.notify(`${failedTasks.length} task(s) skipped. Auto-pilot resuming.`, "info");
 							return;
 						}
@@ -1877,11 +1811,7 @@ export default function (pi: ExtensionAPI) {
 					quest.pauseReason = "Some tasks failed. Review and decide: retry, skip, or redefine.";
 					quest.lastFiredTaskIndex = -1;
 					quest.sameTaskCount = 0;
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 
 					if (ctx.hasUI) {
 						ctx.ui.notify(
@@ -1909,11 +1839,7 @@ export default function (pi: ExtensionAPI) {
 				} else {
 					quest.status = "paused";
 					quest.pauseReason = "All remaining tasks are blocked by unfinished dependencies.";
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 				}
 				return;
 			}
@@ -1934,11 +1860,7 @@ export default function (pi: ExtensionAPI) {
 							next.task.completedAt = Date.now();
 							quest.lastFiredTaskIndex = -1;
 							quest.sameTaskCount = 0;
-							saveQuest(quest, ctx.cwd);
-							questCache = quest;
-							renderStatus(ctx, quest);
-							writeQuestSessionMeta(ctx.cwd, quest);
-							syncQuestToTodo(quest, ctx.cwd);
+							persist(ctx, quest);
 							ctx.ui.notify(`Task #${next.index + 1} skipped.`, "info");
 							return;
 						}
@@ -1949,11 +1871,7 @@ export default function (pi: ExtensionAPI) {
 							next.task.completedAt = Date.now();
 							quest.lastFiredTaskIndex = -1;
 							quest.sameTaskCount = 0;
-							saveQuest(quest, ctx.cwd);
-							questCache = quest;
-							renderStatus(ctx, quest);
-							writeQuestSessionMeta(ctx.cwd, quest);
-							syncQuestToTodo(quest, ctx.cwd);
+							persist(ctx, quest);
 							ctx.ui.notify(`Task #${next.index + 1} marked failed.`, "warning");
 							return;
 						}
@@ -1963,11 +1881,7 @@ export default function (pi: ExtensionAPI) {
 					quest.pauseReason = `Task #${next.index + 1} stalled (${quest.sameTaskCount} attempts without progress).`;
 					quest.lastFiredTaskIndex = -1;
 					quest.sameTaskCount = 0;
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 
 					if (ctx.hasUI) {
 						ctx.ui.notify(`Quest paused: stalled task. /quest resume to continue.`, "warning");
@@ -1993,11 +1907,7 @@ export default function (pi: ExtensionAPI) {
 				next.task.result = `Auto-failed after ${MAX_RETRIES + 1} attempts.`;
 				quest.lastFiredTaskIndex = -1;
 				quest.sameTaskCount = 0;
-				saveQuest(quest, ctx.cwd);
-				questCache = quest;
-				renderStatus(ctx, quest);
-				writeQuestSessionMeta(ctx.cwd, quest);
-				syncQuestToTodo(quest, ctx.cwd);
+				persist(ctx, quest);
 				return;
 			}
 
@@ -2022,21 +1932,13 @@ export default function (pi: ExtensionAPI) {
 						quest.tasksSincePause = 0;
 						quest.lastFiredTaskIndex = -1;
 						quest.sameTaskCount = 0;
-						saveQuest(quest, ctx.cwd);
-						questCache = quest;
-						renderStatus(ctx, quest);
-						writeQuestSessionMeta(ctx.cwd, quest);
-						syncQuestToTodo(quest, ctx.cwd);
+						persist(ctx, quest);
 					} else {
 						quest.status = "paused";
 						quest.pauseReason = `User paused at checkpoint after ${quest.tasksSincePause} tasks. /quest resume to continue.`;
 						quest.lastFiredTaskIndex = -1;
 						quest.sameTaskCount = 0;
-						saveQuest(quest, ctx.cwd);
-						questCache = quest;
-						renderStatus(ctx, quest);
-						writeQuestSessionMeta(ctx.cwd, quest);
-						syncQuestToTodo(quest, ctx.cwd);
+						persist(ctx, quest);
 						ctx.ui.notify(`Quest paused. /quest resume to continue.`, "info");
 						return;
 					}
@@ -2045,11 +1947,7 @@ export default function (pi: ExtensionAPI) {
 					quest.pauseReason = `Auto-paused after ${MAX_BURST} tasks. /quest resume to continue.`;
 					quest.lastFiredTaskIndex = -1;
 					quest.sameTaskCount = 0;
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 
 					autoPilotLocked = true;
 					try {
@@ -2070,11 +1968,7 @@ export default function (pi: ExtensionAPI) {
 			if (!next.task.startedAt) next.task.startedAt = Date.now();
 			quest.lastFiredTaskIndex = next.index;
 			quest.tasksSincePause++;
-			saveQuest(quest, ctx.cwd);
-			questCache = quest;
-			renderStatus(ctx, quest);
-			writeQuestSessionMeta(ctx.cwd, quest);
-			syncQuestToTodo(quest, ctx.cwd);
+			persist(ctx, quest);
 
 			autoPilotLocked = true;
 			try {
@@ -2210,11 +2104,7 @@ export default function (pi: ExtensionAPI) {
 					}
 
 					const quest = emptyQuest(name, goal || name);
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 
 					ctx.ui.notify(
 						`Quest created: "${name}"\n\nPlan it with quest_plan or let the agent explore and plan.\n/quest start when ready.`,
@@ -2362,11 +2252,7 @@ export default function (pi: ExtensionAPI) {
 					quest.lastFiredTaskIndex = -1;
 					quest.sameTaskCount = 0;
 					quest.pauseReason = null;
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 
 					ctx.ui.notify(
 						`Quest "${quest.name}" started — ${quest.tasks.length} tasks. Auto-pilot engaged.`,
@@ -2384,11 +2270,7 @@ export default function (pi: ExtensionAPI) {
 					quest.pauseReason = "Paused by user.";
 					quest.lastFiredTaskIndex = -1;
 					quest.sameTaskCount = 0;
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 					ctx.ui.notify(`Quest "${quest.name}" paused. /quest resume to continue.`, "info");
 					return;
 				}
@@ -2403,11 +2285,7 @@ export default function (pi: ExtensionAPI) {
 					quest.lastFiredTaskIndex = -1;
 					quest.sameTaskCount = 0;
 					quest.pauseReason = null;
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 
 					const done = quest.tasks.filter((t) => t.status === "done").length;
 					const next = nextPendingTask(quest);
@@ -2445,11 +2323,7 @@ export default function (pi: ExtensionAPI) {
 					quest.lastFiredTaskIndex = -1;
 					quest.sameTaskCount = 0;
 					quest.pauseReason = null;
-					saveQuest(quest, ctx.cwd);
-					questCache = quest;
-					renderStatus(ctx, quest);
-					writeQuestSessionMeta(ctx.cwd, quest);
-					syncQuestToTodo(quest, ctx.cwd);
+					persist(ctx, quest);
 
 					const next = nextPendingTask(quest);
 					ctx.ui.notify(
