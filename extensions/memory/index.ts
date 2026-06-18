@@ -983,10 +983,14 @@ function buildPromptBlock(project: ProjectProfile, user: UserProfile): string {
 
 export default function (pi: ExtensionAPI) {
 	let projectProfile: ProjectProfile | null = null;
+	// The cache is keyed by cwd: a session that changes directory (or a tool
+	// invoked with a different ctx.cwd) must not get another project's profile —
+	// otherwise a later saveProject would write project A's data into B's file.
+	let projectProfileCwd: string | null = null;
 
 	/** Get or load the project profile (reconcile if stale). */
 	function getProject(cwd: string): ProjectProfile {
-		if (projectProfile) return projectProfile;
+		if (projectProfile && projectProfileCwd === cwd) return projectProfile;
 		const stored = loadProject(cwd);
 		// Auto-detect on first load of the session if never scanned or older than 1h.
 		// If key project files have not changed, refresh the timestamp and skip the
@@ -1003,6 +1007,7 @@ export default function (pi: ExtensionAPI) {
 		} else {
 			projectProfile = stored;
 		}
+		projectProfileCwd = cwd;
 		return projectProfile;
 	}
 
@@ -1666,6 +1671,7 @@ export default function (pi: ExtensionAPI) {
 					const fresh = reconcile(ctx.cwd, project);
 					saveProject(ctx.cwd, fresh);
 					projectProfile = fresh;
+					projectProfileCwd = ctx.cwd;
 					renderMemoryStatus(ctx, fresh);
 					writeMemorySessionMeta(ctx.cwd, fresh);
 					ctx.ui.notify(
@@ -1681,6 +1687,7 @@ export default function (pi: ExtensionAPI) {
 					fresh.facts = [];
 					saveProject(ctx.cwd, fresh);
 					projectProfile = fresh;
+					projectProfileCwd = ctx.cwd;
 					renderMemoryStatus(ctx, fresh);
 					writeMemorySessionMeta(ctx.cwd, fresh);
 					ctx.ui.notify("Project memory cleared. Auto-detected tech stack preserved.", "info");
