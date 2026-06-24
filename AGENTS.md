@@ -54,11 +54,14 @@ core/
 extensions/
   quest/
     index.ts          Registers quest tools, commands, and events
-    storage.ts        Quest load/save/archive; sync quest conventions to memory
+    storage.ts        Quest load/save/archive; sync quest conventions + agent-model choices to memory
     todo-sync.ts      Sync quest tasks into pi-todo; build awareness block
     steering.ts       Auto-pilot task selection and status formatting
     graph.ts          Dependency validation
     teams.ts          Built-in/user team configs
+    models.ts         Pure model matching + user-approval dialog for sub-agent models
+    delegate.ts       Pure delegation logic: tool scope, model precedence, prompt building
+    subagent.ts       Live isolated sub-agent spawn (only SDK-value import; not test-loaded)
     kanban.ts         TUI kanban board
     status.ts         Status badge and session meta
     types.ts          Quest/team types
@@ -126,6 +129,15 @@ Tools registered by quest:
 - `quest_status`, `quest_task_detail`, `quest_history`, `quest_abort`
 - `quest_commit`, `quest_git_summary`
 - `quest_team`, `quest_decide`, `quest_memory_save`
+- `quest_assign_model`, `quest_delegate` — orchestrator-driven sub-agent model assignment and isolated sub-agent spawn
+
+Sub-agent delegation (Path B) lives in three modules:
+
+- `models.ts` — pure model matching + `promptModelAssignment` (the user-approval dialog).
+- `delegate.ts` — pure, SDK-free decisions: role → tool scope, model precedence (`resolveTaskModel`), prompt building, output extraction.
+- `subagent.ts` — the only quest module that imports the SDK as a value (`createAgentSession`); kept out of every test path.
+
+Role → model choices approved by the user are remembered in project memory under `agentModels` (see `core/contract.ts` `AgentModelChoice`); `storage.ts` `loadAgentModels`/`rememberAgentModel` own that read/write. Team `modelHints` are advisory proposals only — the user always approves via `quest_assign_model`.
 
 Command:
 

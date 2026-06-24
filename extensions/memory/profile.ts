@@ -8,8 +8,9 @@ import type { ProjectMemory } from "../../core";
  * PRESERVED from the stored profile:
  *
  *   - `conventions` / `facts` — set manually by the agent/user.
- *   - `research` / `lastModified` — written onto the shared memory file by
- *     pi-quest. pi-memory does not produce these, but it must not destroy them.
+ *   - `research` / `agentModels` / `lastModified` — written onto the shared
+ *     memory file by pi-quest. pi-memory does not produce these, but it must not
+ *     destroy them.
  *
  * The previous `reconcile` rebuilt the profile from `detectProject()` and copied
  * forward only `conventions` and `facts`, so a rescan (hourly, or via
@@ -52,6 +53,7 @@ export function withForeignFromDisk(
 	return {
 		...profile,
 		research: onDisk.research ?? profile.research,
+		agentModels: onDisk.agentModels ?? profile.agentModels,
 		lastModified: onDisk.lastModified ?? profile.lastModified,
 	};
 }

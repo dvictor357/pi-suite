@@ -5,6 +5,12 @@ export interface QuestTask {
 	content: string;
 	status: TaskStatus;
 	agent: string;
+	/**
+	 * Model the orchestrator assigned to this task's sub-agent, once the user has
+	 * approved it via `quest_assign_model`. Empty/undefined means "use the harness
+	 * default for this agent role". Stored as the registry/harness model id.
+	 */
+	model?: string;
 	context: string;
 	dependencies: number[];
 	result: string | null;
@@ -62,6 +68,13 @@ export interface TeamConfig {
 	defaultAgent: string;
 	verification: boolean;
 	agents?: { name: string; description: string; markdown: string }[];
+	/**
+	 * Optional per-agent-role model suggestions (agent role → model id) the team
+	 * recommends, e.g. a fast/cheap model for "scout" and a strong model for
+	 * "worker". Advisory only: the orchestrator may override, and the user always
+	 * gets the final say via `quest_assign_model`.
+	 */
+	modelHints?: Record<string, string>;
 }
 
 // The todo-sync shapes are the cross-extension pi-todo contract — re-exported

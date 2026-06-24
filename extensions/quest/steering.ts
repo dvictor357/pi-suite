@@ -1,6 +1,7 @@
 import type { Quest, QuestTask } from "./types";
 import { MAX_BURST, MAX_RETRIES, ICON, FORMAT_DIRECTIVE } from "./constants";
 import { compactAwarenessBlock } from "./todo-sync";
+import { loadAgentModels } from "./storage";
 
 export function nextPendingTask(quest: Quest): { task: QuestTask; index: number } | null {
 	for (let i = 0; i < quest.tasks.length; i++) {
@@ -150,6 +151,15 @@ export function buildSteeringMessage(
 
 	const deps = task.dependencies.map((d) => `#${d + 1} — ${quest.tasks[d].content}`).join(", ");
 
+	// Surface the model to run this sub-agent with: the task's own assignment
+	// wins, else the project's remembered choice for this role. When neither
+	// exists, nudge the orchestrator to propose one via quest_assign_model.
+	const remembered = loadAgentModels(cwd)[task.agent]?.model;
+	const assignedModel = task.model?.trim() || remembered?.trim();
+	const modelLine = assignedModel
+		? `**Model:** \`${assignedModel}\` — delegate with quest_delegate(index=${index}).`
+		: `**Model:** none assigned for role \`${task.agent}\`. Propose one via quest_assign_model(role="${task.agent}", proposed="…", taskIndex=${index}), then quest_delegate(index=${index}).`;
+
 	return [
 		`## Quest: ${quest.name} (${done}/${total} done)`,
 		``,
@@ -157,6 +167,7 @@ export function buildSteeringMessage(
 		`**Use subagent:** \`${task.agent}\``,
 		`**Context:** ${task.context}`,
 		deps ? `**Depends on:** ${deps}` : "",
+		modelLine,
 		compactAwarenessBlock(cwd),
 		``,
 		FORMAT_DIRECTIVE,

@@ -1,10 +1,12 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
+import type { AgentModelChoice } from "../../core";
 import type { GitIntegration, Quest } from "./types";
 import {
 	readJSON,
 	writeJSON,
 	updateJSON,
+	loadProjectMemory,
 	projectMemoryPath,
 	questActivePath,
 	questArchiveDir,
@@ -12,6 +14,35 @@ import {
 	CONTRACT_VERSION,
 	isFutureContract,
 } from "./utils";
+
+/**
+ * Read the project's remembered role → model assignments (written by
+ * `quest_assign_model`). Returns an empty map when memory is absent or written
+ * by a newer contract than this code understands.
+ */
+export function loadAgentModels(cwd: string): Record<string, AgentModelChoice> {
+	const memory = loadProjectMemory(cwd);
+	const models = memory?.agentModels;
+	return models && typeof models === "object" ? (models as Record<string, AgentModelChoice>) : {};
+}
+
+/**
+ * Persist a user-approved model assignment for a sub-agent role onto the shared
+ * project-memory file. Read-merge-write so a concurrent pi-memory save isn't
+ * clobbered, and skip if pi-memory wrote a newer contract.
+ */
+export function rememberAgentModel(cwd: string, role: string, choice: AgentModelChoice): void {
+	updateJSON<Record<string, any>>(
+		projectMemoryPath(cwd),
+		(memory) => {
+			if (isFutureContract(memory)) return memory;
+			const agentModels = { ...(memory.agentModels ?? {}) };
+			agentModels[role] = choice;
+			return { ...memory, agentModels, contractVersion: CONTRACT_VERSION };
+		},
+		{},
+	);
+}
 
 export function syncConventionsToMemory(quest: Quest, cwd: string): void {
 	try {
@@ -102,6 +133,7 @@ export function loadQuest(cwd: string): Quest | null {
 				commitHash: t.commitHash || null,
 				branchName: t.branchName || null,
 				startedAt: typeof t.startedAt === "number" ? t.startedAt : null,
+				model: typeof t.model === "string" && t.model.trim() ? t.model : undefined,
 			}));
 			if (raw.planningMode !== "auto" && raw.planningMode !== "approve") {
 				raw.planningMode = "auto";

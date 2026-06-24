@@ -10,6 +10,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 
 import type { Quest, TaskStatus } from "./types";
 import {
@@ -28,7 +29,12 @@ import {
 	archiveQuest,
 	syncConventionsToMemory,
 	listArchives,
+	loadAgentModels,
+	rememberAgentModel,
 } from "./storage";
+import { matchModel, promptModelAssignment, toModelLike } from "./models";
+import { resolveTaskModel, buildSubAgentPrompt } from "./delegate";
+import { runSubAgent } from "./subagent";
 import { loadTeams, ensureBuiltInTeams, teamInstallFromGit } from "./teams";
 import { syncQuestToTodo, clearQuestFromTodo, compactAwarenessBlock } from "./todo-sync";
 import { renderStatus, writeQuestSessionMeta } from "./status";
@@ -57,6 +63,46 @@ export default function (pi: ExtensionAPI) {
 		renderStatus(ctx, quest);
 		writeQuestSessionMeta(ctx.cwd, quest);
 		syncQuestToTodo(quest, ctx.cwd);
+	}
+
+	/** Shorthand for a plain-text tool result with empty details. */
+	const textResult = (s: string) => ({
+		content: [{ type: "text" as const, text: s }],
+		details: {},
+	});
+
+	/** Stamp an approved model onto a task and persist, when a valid index is given. */
+	function stampTaskModel(
+		quest: Quest | null,
+		taskIndex: number | undefined,
+		modelId: string,
+		ctx: ExtensionContext,
+	): void {
+		if (!quest || taskIndex === undefined) return;
+		if (taskIndex < 0 || taskIndex >= quest.tasks.length) return;
+		quest.tasks[taskIndex].model = modelId;
+		persist(ctx, quest);
+	}
+
+	/**
+	 * Resolve a sub-agent role's persona markdown so quest_delegate spawns it with
+	 * the same behavior the orchestrator's named subagent would have. The quest
+	 * team's in-memory agent definition wins (freshest); otherwise read the
+	 * installed agent file. Returns undefined when the role has no persona.
+	 */
+	function resolvePersona(team: string | undefined, role: string): string | undefined {
+		if (team) {
+			const fromTeam = loadTeams()[team]?.agents?.find((a) => a.name === role)?.markdown;
+			if (fromTeam?.trim()) return fromTeam;
+		}
+		// Guard against path traversal — role comes from task data, not a constant.
+		if (!/^[a-zA-Z0-9_-]+$/.test(role)) return undefined;
+		const file = join(homedir(), ".pi", "agent", "agents", `${role}.md`);
+		try {
+			return existsSync(file) ? readFileSync(file, "utf8") : undefined;
+		} catch {
+			return undefined;
+		}
 	}
 
 	function validateAndSetTeam(quest: Quest, teamName?: string): void {
@@ -310,6 +356,12 @@ export default function (pi: ExtensionAPI) {
 							description: "Indices of tasks that must complete first (0-based)",
 						}),
 					),
+					model: Type.Optional(
+						Type.String({
+							description:
+								"Model id to run this task's sub-agent with. Usually leave unset — quest assigns it via quest_assign_model (asking the user once per role).",
+						}),
+					),
 				}),
 				{ description: "Array of tasks in execution order" },
 			),
@@ -352,6 +404,7 @@ export default function (pi: ExtensionAPI) {
 				content: t.content,
 				status: "pending" as TaskStatus,
 				agent: t.agent,
+				model: t.model?.trim() || undefined,
 				context: t.context,
 				dependencies: Array.isArray(t.dependencies) ? t.dependencies : [],
 				result: null,
@@ -1453,6 +1506,214 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// ── Additional tools ────────────────────────────────────────────────────
+
+	pi.registerTool({
+		name: "quest_assign_model",
+		label: "Quest Assign Model",
+		description: [
+			"Assign a model to a sub-agent role for this project. As orchestrator you propose a model;",
+			"the user approves it or picks another from their configured models. The approved choice is",
+			"remembered in project memory (so the user is asked once per role) and, when taskIndex is given,",
+			"stamped onto that task. Call this before quest_delegate when a role has no model yet.",
+		].join(" "),
+		parameters: Type.Object({
+			role: Type.String({
+				description: "Sub-agent role (e.g. 'scout', 'worker', 'verifier')",
+			}),
+			proposed: Type.String({
+				description:
+					"Model id you propose for this role (e.g. 'claude-opus-4-5' or 'deepseek/deepseek-v4-flash')",
+			}),
+			reason: Type.Optional(
+				Type.String({ description: "Short rationale for proposing this model" }),
+			),
+			taskIndex: Type.Optional(
+				Type.Number({ description: "Also stamp the approved model onto this task (0-based)" }),
+			),
+		}),
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const quest = getQuest(ctx.cwd);
+			const role = params.role.trim();
+			if (!role) return textResult("Role is required.");
+
+			if (!ctx.hasUI) {
+				const available = ctx.modelRegistry.getAvailable().map(toModelLike);
+				const matched = matchModel(available, params.proposed);
+				if (!matched) {
+					return textResult(
+						`Running headlessly and "${params.proposed}" isn't an available model — cannot assign a model for "${role}".`,
+					);
+				}
+				rememberAgentModel(ctx.cwd, role, {
+					model: matched.id,
+					provider: matched.provider,
+					reason: params.reason,
+					timestamp: Date.now(),
+				});
+				stampTaskModel(quest, params.taskIndex, matched.id, ctx);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `(headless) Assigned "${role}" → ${matched.id} · ${matched.provider}.`,
+						},
+					],
+					details: { role, model: matched.id, provider: matched.provider, outcome: "assigned" },
+				};
+			}
+
+			const result = await promptModelAssignment(ctx, {
+				role,
+				proposed: params.proposed,
+				reason: params.reason,
+			});
+			if (result.outcome === "cancelled") {
+				return {
+					content: [{ type: "text", text: `Model assignment for "${role}" cancelled.` }],
+					details: { role, outcome: "cancelled" },
+				};
+			}
+			if (result.outcome === "default") {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Kept harness default for "${role}" (no override). quest_delegate will run it with the session's current model.`,
+						},
+					],
+					details: { role, outcome: "default" },
+				};
+			}
+			const m = result.model;
+			rememberAgentModel(ctx.cwd, role, {
+				model: m.id,
+				provider: m.provider,
+				reason: params.reason,
+				timestamp: Date.now(),
+			});
+			stampTaskModel(quest, params.taskIndex, m.id, ctx);
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Assigned sub-agent "${role}" → ${m.id} · ${m.provider}. Remembered for this project.`,
+					},
+				],
+				details: { role, model: m.id, provider: m.provider, outcome: "assigned" },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "quest_delegate",
+		label: "Quest Delegate",
+		description: [
+			"Run a quest task by spawning an isolated sub-agent with the model assigned to its role.",
+			"The model is resolved from the task, else the project's remembered choice for the role.",
+			"If none is assigned, pass `proposed` (or call quest_assign_model first). Read-only roles",
+			"(scout/verifier/reviewer/planner) get a read-only tool scope. Returns the sub-agent's",
+			"result; you then call quest_update to record completion.",
+		].join(" "),
+		parameters: Type.Object({
+			index: Type.Number({ description: "Task index to delegate (0-based)" }),
+			proposed: Type.Optional(
+				Type.String({ description: "Model to propose if the role has none assigned yet" }),
+			),
+		}),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const quest = getQuest(ctx.cwd);
+			if (!quest) return textResult("No active quest. Use quest_create first.");
+			if (params.index < 0 || params.index >= quest.tasks.length) {
+				return textResult(
+					`Invalid task index ${params.index}. Valid: 0-${quest.tasks.length - 1}.`,
+				);
+			}
+			const task = quest.tasks[params.index];
+			const role = task.agent;
+
+			const remembered = loadAgentModels(ctx.cwd)[role]?.model;
+			const resolved = resolveTaskModel({ taskModel: task.model, rememberedModel: remembered });
+			let modelId = resolved.model;
+
+			if (resolved.needsPrompt) {
+				const teamHints = quest.team ? (loadTeams()[quest.team]?.modelHints ?? {}) : {};
+				const proposal = params.proposed?.trim() || teamHints[role];
+				if (!proposal) {
+					return textResult(
+						`No model assigned for role "${role}". Call quest_assign_model(role="${role}", proposed="…", taskIndex=${params.index}) first, or pass proposed= to quest_delegate.`,
+					);
+				}
+				if (!ctx.hasUI) {
+					modelId = proposal;
+				} else {
+					const result = await promptModelAssignment(ctx, { role, proposed: proposal });
+					if (result.outcome === "cancelled") {
+						return textResult(`Delegation cancelled — no model approved for "${role}".`);
+					}
+					if (result.outcome === "assigned") {
+						modelId = result.model.id;
+						rememberAgentModel(ctx.cwd, role, {
+							model: result.model.id,
+							provider: result.model.provider,
+							timestamp: Date.now(),
+						});
+						stampTaskModel(quest, params.index, result.model.id, ctx);
+					}
+					// "default" → leave modelId unset and fall back to ctx.model below.
+				}
+			}
+
+			const available = ctx.modelRegistry.getAvailable();
+			const model = (modelId ? matchModel(available, modelId) : undefined) ?? ctx.model;
+			if (!model) {
+				return textResult(
+					`Could not resolve a model to run "${role}" (assigned "${modelId ?? "none"}"). Assign one with quest_assign_model.`,
+				);
+			}
+
+			const dependencyResults = task.dependencies.map((d) => ({
+				content: quest.tasks[d]?.content ?? "",
+				result: quest.tasks[d]?.result ?? null,
+			}));
+			const prompt = buildSubAgentPrompt({
+				role,
+				content: task.content,
+				context: task.context,
+				persona: resolvePersona(quest.team, role),
+				dependencyResults,
+				formatDirective: FORMAT_DIRECTIVE,
+			});
+
+			const res = await runSubAgent(ctx, { role, model, prompt }, signal);
+
+			if (!res.ok) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Sub-agent for task #${params.index + 1} failed: ${res.error ?? "unknown error"}`,
+						},
+					],
+					details: { index: params.index, role, model: model.id, ok: false, error: res.error },
+				};
+			}
+			return {
+				content: [
+					{
+						type: "text",
+						text: [
+							`Sub-agent (\`${role}\` · ${model.id}) finished task #${params.index + 1}: **${task.content}**`,
+							``,
+							res.output || "(no output)",
+							``,
+							`Record the outcome with quest_update(index=${params.index}, status="done", result="…").`,
+						].join("\n"),
+					},
+				],
+				details: { index: params.index, role, model: model.id, ok: true, output: res.output },
+			};
+		},
+	});
 
 	pi.registerTool({
 		name: "quest_abort",

@@ -15,6 +15,7 @@ export type {
 	TodoList,
 	MemoryFact,
 	ProjectMemory,
+	AgentModelChoice,
 	ProjectResearchFinding,
 	UserMemory,
 } from "./contract";
