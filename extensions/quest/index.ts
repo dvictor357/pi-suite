@@ -41,6 +41,14 @@ import { renderStatus, writeQuestSessionMeta } from "./status";
 import { nextPendingTask, formatQuestStatus, buildSteeringMessage } from "./steering";
 import { QuestKanban } from "./kanban";
 import { detectDependencyCycle, getMaxDependencyDepth } from "./graph";
+import {
+	buildVerificationImpactContext,
+	codebaseStatusSummary,
+	enrichPlanningContext,
+	hasCodebaseCache,
+	hasCodebaseTool,
+	loadCodebaseIndex,
+} from "./codebase";
 
 export default function (pi: ExtensionAPI) {
 	let questCache: Quest | null = null;
@@ -70,6 +78,14 @@ export default function (pi: ExtensionAPI) {
 		content: [{ type: "text" as const, text: s }],
 		details: {},
 	});
+
+	function codebaseToolAvailable(): boolean {
+		try {
+			return hasCodebaseTool(pi.getActiveTools()) || hasCodebaseTool(pi.getAllTools());
+		} catch {
+			return false;
+		}
+	}
 
 	/** Stamp an approved model onto a task and persist, when a valid index is given. */
 	function stampTaskModel(
@@ -212,6 +228,16 @@ export default function (pi: ExtensionAPI) {
 					? `\n⚠ **Approval mode** — after the plan is created, it must be approved with **quest_approve** before execution begins.`
 					: "";
 			const awareness = compactAwarenessBlock(ctx.cwd);
+			const codebaseAvailable = codebaseToolAvailable();
+			const codebaseCache = loadCodebaseIndex(ctx.cwd);
+			const codebaseGuidance = [
+				`Codebase intelligence: ${codebaseStatusSummary(codebaseCache)}`,
+				codebaseAvailable
+					? `Before planning large code tasks, call codebase(operation="scan"), then codebase(operation="query", pattern=...) and codebase(operation="map", file=...) to discover relevant files and dependency context.`
+					: hasCodebaseCache(ctx.cwd)
+						? `The codebase tool is unavailable; use direct fallback from .pi/codebase-index.json for planning context.`
+						: `The codebase tool is unavailable and no cache exists; proceed with normal scout/read exploration.`,
+			].join("\n");
 			return {
 				content: [
 					{
@@ -225,6 +251,7 @@ export default function (pi: ExtensionAPI) {
 							``,
 							`Research: Note the current date. Use web_search to find the latest relevant information about this goal (best practices, APIs, security considerations, etc.). Save key findings with quest_memory_save.`,
 							awareness,
+							codebaseGuidance,
 							modeNote,
 						]
 							.filter(Boolean)
@@ -462,6 +489,9 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
+			const codebaseEnrichment = enrichPlanningContext(quest.tasks, quest.goal, ctx.cwd);
+			quest.tasks = codebaseEnrichment.enrichedTasks;
+
 			const needsApproval = quest.planningMode === "approve" && !quest.planApproved;
 
 			const fullPlan = quest.tasks
@@ -479,6 +509,7 @@ export default function (pi: ExtensionAPI) {
 					`**Goal:** ${quest.goal}`,
 					``,
 					`**${quest.tasks.length} tasks planned:**`,
+					codebaseEnrichment.summary,
 					``,
 					fullPlan,
 					``,
@@ -648,6 +679,10 @@ export default function (pi: ExtensionAPI) {
 						type: "text",
 						text: [
 							`Plan saved: **${quest.tasks.length} tasks**`,
+							codebaseEnrichment.summary,
+							codebaseToolAvailable()
+								? `For additional planning precision, use codebase(operation="query", pattern=...) and codebase(operation="map", file=...) before delegating broad tasks.`
+								: `codebase tool unavailable; used direct cache fallback when compatible.`,
 							``,
 							`  ${quest.tasks
 								.slice(0, 5)
@@ -855,6 +890,10 @@ export default function (pi: ExtensionAPI) {
 
 					persist(ctx, quest);
 
+					const impactContext = buildVerificationImpactContext(
+						ctx.cwd,
+						`${task.content}\n${task.context}\n${params.result || task.result || ""}`,
+					);
 					const verifierAgent =
 						team?.members.find((m) => m.agent === "verifier" || m.role === "tester")?.agent ??
 						"verifier";
@@ -874,6 +913,9 @@ export default function (pi: ExtensionAPI) {
 									`2. Is the implementation correct and complete?`,
 									`3. Are there any issues or missing pieces?`,
 									`4. Is the code formatted and lint-clean per the project's own conventions? ${FORMAT_DIRECTIVE} If the project's formatter/linter was not run or leaves the tree dirty/inconsistent, this is a FAIL.`,
+									`5. Review dependency impact for changed files before PASS.`,
+									``,
+									impactContext,
 									``,
 									`**After verification, call quest_update with:**`,
 									`- **verifyOutcome="PASS"** and verifyEvidence if the result is correct`,

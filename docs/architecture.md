@@ -65,6 +65,30 @@ extensions/memory/ ────► imports ../../core
 The guiding rule: **`core` owns only what crosses an extension boundary.** Anything a
 single extension touches alone stays in that extension.
 
+## Codebase intelligence ownership split
+
+`pi-minions` owns the reusable codebase intelligence primitive. It scans repositories,
+writes the project-local cache at `.pi/codebase-index.json`, implements cache staleness
+rules, provides query/map/impact functions, and registers the `codebase` tool.
+
+`pi-suite` does **not** import `pi-minions` code and has no runtime dependency on it.
+`pi-quest` consumes the integration contract only:
+
+- During quest creation/planning it detects `.pi/codebase-index.json` and tells the
+  orchestrator to run `codebase(operation="scan")`, then `query`/`map`, when that tool is
+  available.
+- During `quest_plan`, it reads compatible cache contractVersion `1` directly as a
+  fallback and enriches task contexts with relevant files plus dependency/reverse
+  dependency context.
+- During verification handoff, it prompts the verifier to run
+  `codebase(operation="impact", file=...)` for changed files and includes direct cache
+  impact fallback when the cache is present and compatible.
+- Future cache contracts (`contractVersion > 1`) are ignored gracefully rather than
+  reinterpreted.
+
+This keeps scanner/cache/query/tool ownership in `pi-minions` while letting `pi-quest`
+use the stable cache/tool contract for orchestration decisions.
+
 ## Roadmap alignment
 
 This consolidation is the precondition for the loop-engineering roadmap (deterministic
