@@ -503,138 +503,10 @@ export default function (pi: ExtensionAPI) {
 				})
 				.join("\n\n");
 
-			if (needsApproval && ctx.hasUI) {
-				const confirmMsg = [
-					`**Quest:** ${quest.name}`,
-					`**Goal:** ${quest.goal}`,
-					``,
-					`**${quest.tasks.length} tasks planned:**`,
-					codebaseEnrichment.summary,
-					``,
-					fullPlan,
-					``,
-					`---`,
-					`Approve this plan to start executing tasks automatically?`,
-				].join("\n");
-
-				const approved = await ctx.ui.confirm("Review Quest Plan", confirmMsg);
-
-				if (approved) {
-					quest.planApproved = true;
-					quest.status = "active";
-					quest.tasksSincePause = 0;
-					quest.lastFiredTaskIndex = -1;
-					quest.sameTaskCount = 0;
-					quest.pauseReason = null;
-
-					persist(ctx, quest);
-
-					ctx.ui.notify(
-						`✅ Plan approved. Quest "${quest.name}" is now ACTIVE — ${quest.tasks.length} tasks.`,
-						"info",
-					);
-
-					const next = nextPendingTask(quest);
-					return {
-						content: [
-							{
-								type: "text",
-								text: [
-									`✅ Plan approved by user: **${quest.name}**`,
-									``,
-									`${quest.tasks.length} tasks queued. Quest is now **ACTIVE**.`,
-									next
-										? `First task: ${next.task.content} [${next.task.agent}]`
-										: "All tasks ready.",
-									``,
-									"Auto-pilot will fire the first task on the next turn.",
-								].join("\n"),
-							},
-						],
-						details: {
-							approved: true,
-							tasks: quest.tasks.length,
-							nextTask: next?.task.content ?? null,
-						},
-					};
-				}
-
-				const action = await ctx.ui.select("Plan not approved. What would you like to do?", [
-					"Edit tasks before approving",
-					"Re-plan from scratch",
-					"Cancel (keep plan for later)",
-				]);
-
-				if (action === "Edit tasks before approving") {
-					quest.status = "planning";
-					quest.pauseReason =
-						"Plan review: user wants edits. Use quest_approve(edits=[...]) to modify tasks and approve.";
-					persist(ctx, quest);
-
-					return {
-						content: [
-							{
-								type: "text",
-								text: [
-									`📝 Plan saved but needs edits before approval.`,
-									``,
-									`Use **quest_approve(edits=[...])** to modify specific tasks, then approve.`,
-									`Or re-plan with quest_plan(tasks=[...]).`,
-									``,
-									`Tasks that can be edited:`,
-									quest.tasks.map((t, i) => `  #${i + 1}: ${t.content}`).join("\n"),
-								].join("\n"),
-							},
-						],
-						details: {
-							status: "planning",
-							userAction: "edit",
-							tasks: quest.tasks.length,
-						},
-					};
-				}
-
-				if (action === "Re-plan from scratch") {
-					quest.tasks = [];
-					quest.status = "planning";
-					quest.pauseReason = "User requested re-plan.";
-					persist(ctx, quest);
-
-					return {
-						content: [
-							{
-								type: "text",
-								text: [
-									`🔄 Plan cleared. Call **quest_plan** with a new task breakdown.`,
-									``,
-									`Original goal: ${quest.goal}`,
-								].join("\n"),
-							},
-						],
-						details: { status: "planning", userAction: "replan" },
-					};
-				}
-
-				// Cancel — keep plan for later
-				quest.status = "planning";
-				quest.pauseReason =
-					"Plan saved, awaiting user approval. Use /quest approve or quest_approve to start.";
-				persist(ctx, quest);
-
-				return {
-					content: [
-						{
-							type: "text",
-							text: [
-								`💾 Plan saved (${quest.tasks.length} tasks) — kept for later.`,
-								``,
-								`Approve when ready: **quest_approve()** or **/quest approve**`,
-							].join("\n"),
-						},
-					],
-					details: { status: "planning", userAction: "defer" },
-				};
-			}
+			// In approval mode, do not show the full plan in ctx.ui.confirm here: extension
+			// confirm dialogs render their message in a non-scrollable selector title. Return
+			// the full plan as normal tool output instead so users can review it in scrollback,
+			// then explicitly approve with quest_approve or /quest approve.
 
 			if (params.autoStart !== false) {
 				if (needsApproval) {
@@ -1103,26 +975,24 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 
-			if (ctx.hasUI) {
-				const planSummary = quest.tasks
-					.map((t, i) => {
-						const deps = t.dependencies.length
-							? ` (requires: ${t.dependencies.map((d) => quest.tasks[d].content).join(", ")})`
-							: "";
-						return `${i + 1}. **${t.content}** [${t.agent}]${deps}`;
-					})
-					.join("\n");
+			const reviewPlan = quest.tasks
+				.map((t, i) => {
+					const deps = t.dependencies.length
+						? ` (requires: ${t.dependencies.map((d) => quest.tasks[d].content).join(", ")})`
+						: "";
+					return `${i + 1}. **${t.content}** [${t.agent}]${deps}\n   ${t.context}`;
+				})
+				.join("\n\n");
 
+			if (ctx.hasUI) {
 				const confirmMsg = [
 					`**Quest:** ${quest.name}`,
 					`**Goal:** ${quest.goal}`,
 					``,
-					`**${quest.tasks.length} tasks:**`,
-					planSummary,
+					editsApplied > 0 ? `${editsApplied} task edit(s) saved.` : "",
+					`Approve ${quest.tasks.length} planned task(s) and start executing now?`,
 					``,
-					`---`,
-					editsApplied > 0 ? `${editsApplied} task(s) edited. ` : "",
-					`Start executing tasks now?`,
+					`Use No to keep the plan in scrollable output for review.`,
 				].join("\n");
 
 				const approved = await ctx.ui.confirm("Approve Quest Plan", confirmMsg);
@@ -1137,6 +1007,10 @@ export default function (pi: ExtensionAPI) {
 									editsApplied > 0
 										? `📝 ${editsApplied} task edit(s) saved. Plan not approved — kept in planning.`
 										: `Plan not approved. Kept in planning.`,
+									``,
+									`## Plan Review`,
+									``,
+									reviewPlan,
 									``,
 									`Approve when ready with **quest_approve()** or **/quest approve**.`,
 								].join("\n"),
