@@ -1,6 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { matchModel, formatModelLabel, toModelLike, type ModelLike } from "./models";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { setImmediate } from "node:timers/promises";
+import {
+	matchModel,
+	formatModelLabel,
+	promptModelAssignment,
+	toModelLike,
+	type ModelAssignment,
+	type ModelLike,
+} from "./models";
 
 const MODELS: ModelLike[] = [
 	{ id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", provider: "deepseek" },
@@ -61,4 +70,55 @@ test("toModelLike projects only id/name/provider and stringifies provider", () =
 		contextWindow: 200000,
 	} as unknown as { id: string; name: string; provider: string });
 	assert.deepEqual(projected, { id: "x", name: "X", provider: "anthropic" });
+});
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((r) => {
+		resolve = r;
+	});
+	return { promise, resolve };
+}
+
+test("promptModelAssignment serializes concurrent prompts", async () => {
+	const firstChoice = deferred<string | undefined>();
+	const secondChoice = deferred<string | undefined>();
+	const choices = [firstChoice, secondChoice];
+	const titles: string[] = [];
+
+	const ctx = {
+		hasUI: false,
+		modelRegistry: { getAvailable: () => MODELS.slice(0, 2) },
+		ui: {
+			notify: () => {},
+			select: async (title: string) => {
+				titles.push(title);
+				const next = choices.shift();
+				return next ? next.promise : undefined;
+			},
+		},
+	} as unknown as ExtensionContext;
+
+	const first = promptModelAssignment(ctx, { role: "scout", proposed: "deepseek-v4-flash" });
+	const second = promptModelAssignment(ctx, { role: "worker", proposed: "claude-opus-4-5" });
+
+	await setImmediate();
+	assert.equal(titles.length, 1);
+	assert.match(titles[0], /scout/);
+
+	firstChoice.resolve(`${formatModelLabel(MODELS[0])}  ← orchestrator's pick`);
+	assert.deepEqual(await first, {
+		outcome: "assigned",
+		model: MODELS[0],
+	} satisfies ModelAssignment);
+
+	await setImmediate();
+	assert.equal(titles.length, 2);
+	assert.match(titles[1], /worker/);
+
+	secondChoice.resolve(`${formatModelLabel(MODELS[1])}  ← orchestrator's pick`);
+	assert.deepEqual(await second, {
+		outcome: "assigned",
+		model: MODELS[1],
+	} satisfies ModelAssignment);
 });

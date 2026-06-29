@@ -63,6 +63,29 @@ export function formatModelLabel(m: ModelLike): string {
 
 const KEEP_DEFAULT = "Keep harness default (no override)";
 
+let modelAssignmentPromptQueue: Promise<void> = Promise.resolve();
+
+/**
+ * Tool calls from a single model response may execute concurrently. Interactive
+ * prompts must still be shown one-at-a-time, otherwise multiple `ctx.ui.custom`
+ * overlays compete for focus and later `quest_assign_model` calls can appear to
+ * hang behind duplicate tool cards.
+ */
+async function enqueueModelAssignmentPrompt<T>(fn: () => Promise<T>): Promise<T> {
+	const previous = modelAssignmentPromptQueue;
+	let release!: () => void;
+	modelAssignmentPromptQueue = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+
+	await previous.catch(() => undefined);
+	try {
+		return await fn();
+	} finally {
+		release();
+	}
+}
+
 /**
  * Outcome of {@link promptModelAssignment}:
  * - `assigned`: the user approved a concrete model for the role.
@@ -89,104 +112,107 @@ export async function promptModelAssignment(
 	ctx: ExtensionContext,
 	opts: { role: string; proposed: string; reason?: string },
 ): Promise<ModelAssignment> {
-	const available = ctx.modelRegistry.getAvailable().map(toModelLike);
-	if (available.length === 0) {
-		ctx.ui.notify(
-			"No models with configured auth are available, so a sub-agent model can't be assigned.",
-			"warning",
-		);
-		return { outcome: "cancelled" };
-	}
+	return enqueueModelAssignmentPrompt(async () => {
+		const available = ctx.modelRegistry.getAvailable().map(toModelLike);
+		if (available.length === 0) {
+			ctx.ui.notify(
+				"No models with configured auth are available, so a sub-agent model can't be assigned.",
+				"warning",
+			);
+			return { outcome: "cancelled" };
+		}
 
-	const matched = matchModel(available, opts.proposed);
-	const ordered = matched ? [matched, ...available.filter((m) => m !== matched)] : [...available];
+		const matched = matchModel(available, opts.proposed);
+		const ordered = matched ? [matched, ...available.filter((m) => m !== matched)] : [...available];
 
-	const reasonLine = opts.reason ? `\nWhy: ${opts.reason}` : "";
+		const reasonLine = opts.reason ? `\nWhy: ${opts.reason}` : "";
 
-	// Non-TUI fallback: simple flat list
-	if (!ctx.hasUI) {
-		const labels = ordered.map((m) =>
-			m === matched ? `${formatModelLabel(m)}  ← orchestrator's pick` : formatModelLabel(m),
-		);
-		labels.push(KEEP_DEFAULT);
+		// Non-TUI fallback: simple flat list
+		if (!ctx.hasUI) {
+			const labels = ordered.map((m) =>
+				m === matched ? `${formatModelLabel(m)}  ← orchestrator's pick` : formatModelLabel(m),
+			);
+			labels.push(KEEP_DEFAULT);
 
-		const title = matched
+			const title = matched
+				? `Assign sub-agent "${opts.role}" → ${formatModelLabel(matched)}?${reasonLine}`
+				: `Pick a model for sub-agent "${opts.role}" (proposed "${opts.proposed}" isn't available).${reasonLine}`;
+
+			const choice = await ctx.ui.select(title, labels);
+			if (choice === undefined) return { outcome: "cancelled" };
+			if (choice === KEEP_DEFAULT) return { outcome: "default" };
+
+			const idx = labels.indexOf(choice);
+			const model = idx >= 0 ? ordered[idx] : undefined;
+			return model ? { outcome: "assigned", model } : { outcome: "cancelled" };
+		}
+
+		// TUI: SelectList with height cap and type-to-filter
+		const titleText = matched
 			? `Assign sub-agent "${opts.role}" → ${formatModelLabel(matched)}?${reasonLine}`
-			: `Pick a model for sub-agent "${opts.role}" (proposed "${opts.proposed}" isn't available).${reasonLine}`;
+			: `Pick a model for "${opts.role}" (proposed "${opts.proposed}" not found)${reasonLine}`;
 
-		const choice = await ctx.ui.select(title, labels);
-		if (choice === undefined) return { outcome: "cancelled" };
-		if (choice === KEEP_DEFAULT) return { outcome: "default" };
+		// Dynamic import so the test runner (which resolves via CJS) doesn't trip
+		const { DynamicBorder } = await import("@earendil-works/pi-coding-agent");
 
-		const idx = labels.indexOf(choice);
-		const model = idx >= 0 ? ordered[idx] : undefined;
-		return model ? { outcome: "assigned", model } : { outcome: "cancelled" };
-	}
+		const result = await ctx.ui.custom<ModelAssignment>((tui, theme, _kb, done) => {
+			const container = new Container();
+			container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+			container.addChild(new Text(theme.fg("accent", theme.bold(titleText)), 1, 0));
+			container.addChild(new Text("", 0, 0));
 
-	// TUI: SelectList with height cap and type-to-filter
-	const titleText = matched
-		? `Assign sub-agent "${opts.role}" → ${formatModelLabel(matched)}?${reasonLine}`
-		: `Pick a model for "${opts.role}" (proposed "${opts.proposed}" not found)${reasonLine}`;
+			// Map models to SelectItems; orchestrator's pick gets a highlighted label
+			const items: SelectItem[] = ordered.map((m) => ({
+				value: m.id,
+				label:
+					m === matched ? `${formatModelLabel(m)}  ← orchestrator's pick` : formatModelLabel(m),
+				description: m.provider,
+			}));
+			items.push({
+				value: KEEP_DEFAULT,
+				label: KEEP_DEFAULT,
+				description: "Use harness default",
+			});
 
-	// Dynamic import so the test runner (which resolves via CJS) doesn't trip
-	const { DynamicBorder } = await import("@earendil-works/pi-coding-agent");
+			const selectList = new SelectList(items, Math.min(items.length, 10), {
+				selectedPrefix: (text) => theme.fg("accent", text),
+				selectedText: (text) => theme.fg("accent", text),
+				description: (text) => theme.fg("muted", text),
+				scrollInfo: (text) => theme.fg("dim", text),
+				noMatch: (text) => theme.fg("warning", text),
+			});
 
-	const result = await ctx.ui.custom<ModelAssignment>((tui, theme, _kb, done) => {
-		const container = new Container();
-		container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-		container.addChild(new Text(theme.fg("accent", theme.bold(titleText)), 1, 0));
-		container.addChild(new Text("", 0, 0));
+			selectList.onSelect = (item) => {
+				if (item.value === KEEP_DEFAULT) {
+					done({ outcome: "default" });
+					return;
+				}
+				const model = ordered.find((m) => m.id === item.value);
+				done(model ? { outcome: "assigned", model } : { outcome: "cancelled" });
+			};
+			selectList.onCancel = () => done({ outcome: "cancelled" });
 
-		// Map models to SelectItems; orchestrator's pick gets a highlighted label
-		const items: SelectItem[] = ordered.map((m) => ({
-			value: m.id,
-			label: m === matched ? `${formatModelLabel(m)}  ← orchestrator's pick` : formatModelLabel(m),
-			description: m.provider,
-		}));
-		items.push({
-			value: KEEP_DEFAULT,
-			label: KEEP_DEFAULT,
-			description: "Use harness default",
+			container.addChild(selectList);
+			container.addChild(new Text("", 0, 0));
+			container.addChild(
+				new Text(theme.fg("dim", "type to filter · ↑↓ navigate · enter select · esc cancel"), 1, 0),
+			);
+			container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+			return {
+				render(width: number) {
+					return container.render(width);
+				},
+				invalidate() {
+					container.invalidate();
+				},
+				handleInput(data: string) {
+					selectList.handleInput(data);
+					tui.requestRender();
+				},
+			};
 		});
 
-		const selectList = new SelectList(items, Math.min(items.length, 10), {
-			selectedPrefix: (text) => theme.fg("accent", text),
-			selectedText: (text) => theme.fg("accent", text),
-			description: (text) => theme.fg("muted", text),
-			scrollInfo: (text) => theme.fg("dim", text),
-			noMatch: (text) => theme.fg("warning", text),
-		});
-
-		selectList.onSelect = (item) => {
-			if (item.value === KEEP_DEFAULT) {
-				done({ outcome: "default" });
-				return;
-			}
-			const model = ordered.find((m) => m.id === item.value);
-			done(model ? { outcome: "assigned", model } : { outcome: "cancelled" });
-		};
-		selectList.onCancel = () => done({ outcome: "cancelled" });
-
-		container.addChild(selectList);
-		container.addChild(new Text("", 0, 0));
-		container.addChild(
-			new Text(theme.fg("dim", "type to filter · ↑↓ navigate · enter select · esc cancel"), 1, 0),
-		);
-		container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-
-		return {
-			render(width: number) {
-				return container.render(width);
-			},
-			invalidate() {
-				container.invalidate();
-			},
-			handleInput(data: string) {
-				selectList.handleInput(data);
-				tui.requestRender();
-			},
-		};
+		return result ?? { outcome: "cancelled" };
 	});
-
-	return result ?? { outcome: "cancelled" };
 }
