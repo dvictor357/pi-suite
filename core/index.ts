@@ -36,6 +36,7 @@ export { RunLedger, runLedgerPath, runsDir } from "./run-ledger";
 export type { RunEvent, RunEventKind } from "./run-ledger";
 export { EvalLog, evalLogPath } from "./eval-logging";
 export type { EvalEntry } from "./eval-logging";
+export { asRecord, strArray, boolOr, numOr, strOr, optStr, optNum, oneOf } from "./coerce";
 
 import { join } from "node:path";
 import { appendLine, setErrorSink } from "./fs";

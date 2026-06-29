@@ -27,7 +27,19 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
-import { AGENT_DIR, cwdHash, readJSON, writeJSON, writeSessionMeta } from "../../core";
+import {
+	AGENT_DIR,
+	cwdHash,
+	readJSON,
+	writeJSON,
+	writeSessionMeta,
+	asRecord,
+	numOr,
+	optStr,
+	optNum,
+	strOr,
+	oneOf,
+} from "../../core";
 import type { TodoItem, TodoList, TodoStatus as Status } from "../../core";
 import { displayOrder } from "./display";
 
@@ -64,32 +76,34 @@ function storeStamp(cwd: string): string | null {
 	}
 }
 
+const TODO_STATUSES: Status[] = ["pending", "in_progress", "completed", "delegated"];
+
+/** Narrow one untrusted disk value into a TodoItem, or null if it isn't a valid item. */
+function coerceTodoItem(value: unknown): TodoItem | null {
+	const i = asRecord(value);
+	if (typeof i.content !== "string" || !oneOf(i.status, TODO_STATUSES)) return null;
+	return {
+		content: i.content,
+		status: i.status,
+		agent: optStr(i.agent),
+		context: optStr(i.context),
+		result: optStr(i.result),
+		source: optStr(i.source),
+		sourceId: optStr(i.sourceId),
+		sourceIndex: optNum(i.sourceIndex),
+		createdAt: numOr(i.createdAt, Date.now()),
+		completedAt: optNum(i.completedAt) ?? null,
+	};
+}
+
 function loadTodos(cwd: string): TodoList {
 	try {
 		const p = storePath(cwd);
 		if (!existsSync(p)) return { cwd, items: [], version: 1 };
-		const raw = JSON.parse(readFileSync(p, "utf8"));
-		if (raw && Array.isArray(raw.items)) {
-			const items = raw.items
-				.filter(
-					(i: any): i is TodoItem =>
-						i &&
-						typeof i.content === "string" &&
-						["pending", "in_progress", "completed", "delegated"].includes(i.status),
-				)
-				.map((i: any) => ({
-					content: i.content,
-					status: i.status as Status,
-					agent: typeof i.agent === "string" ? i.agent : undefined,
-					context: typeof i.context === "string" ? i.context : undefined,
-					result: typeof i.result === "string" ? i.result : undefined,
-					source: typeof i.source === "string" ? i.source : undefined,
-					sourceId: typeof i.sourceId === "string" ? i.sourceId : undefined,
-					sourceIndex: typeof i.sourceIndex === "number" ? i.sourceIndex : undefined,
-					createdAt: typeof i.createdAt === "number" ? i.createdAt : Date.now(),
-					completedAt: typeof i.completedAt === "number" ? i.completedAt : null,
-				}));
-			return { cwd: raw.cwd ?? cwd, title: raw.title, items, version: 1 };
+		const raw = asRecord(JSON.parse(readFileSync(p, "utf8")));
+		if (Array.isArray(raw.items)) {
+			const items = raw.items.map(coerceTodoItem).filter((i): i is TodoItem => i !== null);
+			return { cwd: optStr(raw.cwd) ?? cwd, title: optStr(raw.title), items, version: 1 };
 		}
 	} catch {
 		/* corrupt */
@@ -117,23 +131,47 @@ function writeTodoSessionMeta(cwd: string, list: TodoList): void {
 
 const TODO_ARCHIVE_INDEX_PATH = join(ARCHIVE_DIR, "archive-index.json");
 
-function updateTodoArchiveIndex(entry: {
+/** One row of the archive index: enough to list a past list without opening it. */
+interface ArchiveEntry {
 	path: string;
 	title: string | null;
 	items: number;
 	completed: number;
 	archivedAt: number;
 	cwdHash: string;
-}): void {
+}
+
+/** Narrow one untrusted index row into an ArchiveEntry, or null if it has no path. */
+function coerceArchiveEntry(value: unknown): ArchiveEntry | null {
+	const e = asRecord(value);
+	if (typeof e.path !== "string") return null;
+	const title = optStr(e.title);
+	return {
+		path: e.path,
+		title: title && title.length > 0 ? title : null,
+		items: numOr(e.items, 0),
+		completed: numOr(e.completed, 0),
+		archivedAt: numOr(e.archivedAt, 0),
+		cwdHash: strOr(e.cwdHash, ""),
+	};
+}
+
+/** Read the archive index off disk as typed entries (drops malformed rows). */
+function readArchiveIndex(): ArchiveEntry[] {
+	const raw = asRecord(readJSON<unknown>(TODO_ARCHIVE_INDEX_PATH, { version: 1, entries: [] }));
+	return Array.isArray(raw.entries)
+		? raw.entries.map(coerceArchiveEntry).filter((e): e is ArchiveEntry => e !== null)
+		: [];
+}
+
+const byArchivedAtDesc = (a: ArchiveEntry, b: ArchiveEntry): number => b.archivedAt - a.archivedAt;
+
+function updateTodoArchiveIndex(entry: ArchiveEntry): void {
 	try {
-		const index = readJSON<{ version: 1; entries: any[] }>(TODO_ARCHIVE_INDEX_PATH, {
-			version: 1,
-			entries: [],
-		});
-		index.entries = index.entries.filter((e: any) => e.path !== entry.path);
-		index.entries.push(entry);
-		index.entries.sort((a: any, b: any) => (b.archivedAt || 0) - (a.archivedAt || 0));
-		writeJSON(TODO_ARCHIVE_INDEX_PATH, index);
+		const entries = readArchiveIndex().filter((e) => e.path !== entry.path);
+		entries.push(entry);
+		entries.sort(byArchivedAtDesc);
+		writeJSON(TODO_ARCHIVE_INDEX_PATH, { version: 1, entries });
 	} catch {
 		/* best-effort */
 	}
@@ -142,29 +180,28 @@ function updateTodoArchiveIndex(entry: {
 function rebuildTodoArchiveIndex(): void {
 	try {
 		if (!existsSync(ARCHIVE_DIR)) return;
-		const entries: any[] = [];
+		const entries: ArchiveEntry[] = [];
 		const files = readdirSync(ARCHIVE_DIR).filter(
 			(f) => f.endsWith(".json") && f !== "archive-index.json",
 		);
 		for (const f of files) {
 			try {
-				const raw = JSON.parse(readFileSync(join(ARCHIVE_DIR, f), "utf8"));
-				const cwd = raw.cwd || "";
+				const raw = asRecord(JSON.parse(readFileSync(join(ARCHIVE_DIR, f), "utf8")));
+				const cwd = optStr(raw.cwd) ?? "";
+				const items = Array.isArray(raw.items) ? raw.items : [];
 				entries.push({
 					path: join(ARCHIVE_DIR, f),
-					title: raw.title || null,
-					items: Array.isArray(raw.items) ? raw.items.length : 0,
-					completed: Array.isArray(raw.items)
-						? raw.items.filter((i: any) => i.status === "completed").length
-						: 0,
-					archivedAt: raw.archivedAt || 0,
+					title: optStr(raw.title) ?? null,
+					items: items.length,
+					completed: items.filter((i) => asRecord(i).status === "completed").length,
+					archivedAt: numOr(raw.archivedAt, 0),
 					cwdHash: cwd ? cwdHash(cwd) : "",
 				});
 			} catch {
 				/* skip corrupt */
 			}
 		}
-		entries.sort((a: any, b: any) => (b.archivedAt || 0) - (a.archivedAt || 0));
+		entries.sort(byArchivedAtDesc);
 		writeJSON(TODO_ARCHIVE_INDEX_PATH, { version: 1, entries });
 	} catch {
 		/* best-effort */
@@ -193,25 +230,30 @@ function archiveList(list: TodoList): string | null {
 	}
 }
 
-function listArchives(
-	cwd: string,
-): { path: string; title?: string; items: number; completed: number; archivedAt: number }[] {
+interface ArchiveListing {
+	path: string;
+	title?: string;
+	items: number;
+	completed: number;
+	archivedAt: number;
+}
+
+const toListing = (e: ArchiveEntry): ArchiveListing => ({
+	path: e.path,
+	title: e.title ?? undefined,
+	items: e.items,
+	completed: e.completed,
+	archivedAt: e.archivedAt,
+});
+
+function listArchives(cwd: string): ArchiveListing[] {
 	try {
 		if (!existsSync(ARCHIVE_DIR)) return [];
 		const hash = cwdHash(cwd);
 		// Try index first
-		const index = readJSON<{ version: 1; entries: any[] } | null>(TODO_ARCHIVE_INDEX_PATH, null);
-		if (index && Array.isArray(index.entries)) {
-			const matches = index.entries.filter((e: any) => e.cwdHash === hash);
-			if (matches.length > 0) {
-				return matches.map((e: any) => ({
-					path: e.path,
-					title: e.title || undefined,
-					items: e.items || 0,
-					completed: e.completed || 0,
-					archivedAt: e.archivedAt || 0,
-				}));
-			}
+		if (existsSync(TODO_ARCHIVE_INDEX_PATH)) {
+			const matches = readArchiveIndex().filter((e) => e.cwdHash === hash);
+			if (matches.length > 0) return matches.map(toListing);
 			// No index matches — quick check if files exist for this cwd before rebuilding
 			const prefix = `${hash}-`;
 			if (!readdirSync(ARCHIVE_DIR).some((f) => f.startsWith(prefix) && f.endsWith(".json"))) {
@@ -220,19 +262,9 @@ function listArchives(
 		}
 		// Fallback: rebuild index from archive files
 		rebuildTodoArchiveIndex();
-		const rebuilt = readJSON<{ version: 1; entries: any[] }>(TODO_ARCHIVE_INDEX_PATH, {
-			version: 1,
-			entries: [],
-		});
-		return rebuilt.entries
-			.filter((e: any) => e.cwdHash === hash)
-			.map((e: any) => ({
-				path: e.path,
-				title: e.title || undefined,
-				items: e.items || 0,
-				completed: e.completed || 0,
-				archivedAt: e.archivedAt || 0,
-			}));
+		return readArchiveIndex()
+			.filter((e) => e.cwdHash === hash)
+			.map(toListing);
 	} catch {
 		return [];
 	}

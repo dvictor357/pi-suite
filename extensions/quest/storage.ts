@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { AgentModelChoice } from "../../core";
+import { asRecord, strArray, boolOr, strOr, oneOf, numOr, optStr, optNum } from "../../core";
 import type {
 	GitIntegration,
 	Quest,
@@ -53,67 +54,50 @@ export function rememberAgentModel(cwd: string, role: string, choice: AgentModel
 
 const VALID_SANDBOX_MODES: SandboxMode[] = ["none", "restricted", "isolated"];
 
-function normalizeSandboxPolicy(raw: any): SandboxPolicy {
-	const mode: SandboxMode = VALID_SANDBOX_MODES.includes(raw.mode) ? raw.mode : "none";
+function normalizeSandboxPolicy(input: unknown): SandboxPolicy {
+	const raw = asRecord(input);
+	const mode: SandboxMode = oneOf(raw.mode, VALID_SANDBOX_MODES) ? raw.mode : "none";
 	const defaultAllow = mode === "none";
 	return {
 		mode,
-		allowedPaths: Array.isArray(raw.allowedPaths)
-			? raw.allowedPaths.filter((p: any) => typeof p === "string")
-			: [],
-		deniedPaths: Array.isArray(raw.deniedPaths)
-			? raw.deniedPaths.filter((p: any) => typeof p === "string")
-			: [],
-		allowCommands: Array.isArray(raw.allowCommands)
-			? raw.allowCommands.filter((c: any) => typeof c === "string")
-			: [],
-		denyCommands: Array.isArray(raw.denyCommands)
-			? raw.denyCommands.filter((c: any) => typeof c === "string")
-			: [],
-		allowNetwork: typeof raw.allowNetwork === "boolean" ? raw.allowNetwork : defaultAllow,
-		allowPackageInstall:
-			typeof raw.allowPackageInstall === "boolean" ? raw.allowPackageInstall : defaultAllow,
+		allowedPaths: strArray(raw.allowedPaths),
+		deniedPaths: strArray(raw.deniedPaths),
+		allowCommands: strArray(raw.allowCommands),
+		denyCommands: strArray(raw.denyCommands),
+		allowNetwork: boolOr(raw.allowNetwork, defaultAllow),
+		allowPackageInstall: boolOr(raw.allowPackageInstall, defaultAllow),
 		worktree:
-			raw.worktree && typeof raw.worktree === "object"
+			raw.worktree != null && typeof raw.worktree === "object"
 				? normalizeWorktreeConfig(raw.worktree)
 				: null,
 	};
 }
 
-function normalizeSandboxOverrides(raw: any): SandboxOverrides {
+function normalizeSandboxOverrides(input: unknown): SandboxOverrides {
+	const raw = asRecord(input);
 	const overrides: SandboxOverrides = {};
-	if (raw.mode !== undefined) {
-		if (VALID_SANDBOX_MODES.includes(raw.mode)) overrides.mode = raw.mode;
-	}
-	if (Array.isArray(raw.allowedPaths)) {
-		const filtered = raw.allowedPaths.filter((p: any) => typeof p === "string");
-		if (filtered.length > 0) overrides.allowedPaths = filtered;
-	}
-	if (Array.isArray(raw.deniedPaths)) {
-		const filtered = raw.deniedPaths.filter((p: any) => typeof p === "string");
-		if (filtered.length > 0) overrides.deniedPaths = filtered;
-	}
-	if (Array.isArray(raw.allowCommands)) {
-		const filtered = raw.allowCommands.filter((c: any) => typeof c === "string");
-		if (filtered.length > 0) overrides.allowCommands = filtered;
-	}
-	if (Array.isArray(raw.denyCommands)) {
-		const filtered = raw.denyCommands.filter((c: any) => typeof c === "string");
-		if (filtered.length > 0) overrides.denyCommands = filtered;
-	}
+	if (oneOf(raw.mode, VALID_SANDBOX_MODES)) overrides.mode = raw.mode;
+	const allowedPaths = strArray(raw.allowedPaths);
+	if (allowedPaths.length > 0) overrides.allowedPaths = allowedPaths;
+	const deniedPaths = strArray(raw.deniedPaths);
+	if (deniedPaths.length > 0) overrides.deniedPaths = deniedPaths;
+	const allowCommands = strArray(raw.allowCommands);
+	if (allowCommands.length > 0) overrides.allowCommands = allowCommands;
+	const denyCommands = strArray(raw.denyCommands);
+	if (denyCommands.length > 0) overrides.denyCommands = denyCommands;
 	if (typeof raw.allowNetwork === "boolean") overrides.allowNetwork = raw.allowNetwork;
 	if (typeof raw.allowPackageInstall === "boolean")
 		overrides.allowPackageInstall = raw.allowPackageInstall;
 	return overrides;
 }
 
-function normalizeWorktreeConfig(raw: any): WorktreeConfig {
+function normalizeWorktreeConfig(input: unknown): WorktreeConfig {
+	const raw = asRecord(input);
 	return {
-		enabled: typeof raw.enabled === "boolean" ? raw.enabled : false,
-		baseBranch:
-			typeof raw.baseBranch === "string" && raw.baseBranch.trim() ? raw.baseBranch.trim() : "main",
-		path: typeof raw.path === "string" && raw.path.trim() ? raw.path.trim() : "",
-		autoCleanup: typeof raw.autoCleanup === "boolean" ? raw.autoCleanup : true,
+		enabled: boolOr(raw.enabled, false),
+		baseBranch: strOr(raw.baseBranch, "main"),
+		path: strOr(raw.path, ""),
+		autoCleanup: boolOr(raw.autoCleanup, true),
 	};
 }
 
@@ -299,27 +283,47 @@ export function archiveQuest(quest: Quest, cwd: string): string | null {
 	}
 }
 
-function updateArchiveIndex(
-	cwd: string,
-	entry: {
-		path: string;
-		name: string;
-		goal: string;
-		completedAt: number;
-		taskCount: number;
-		doneCount: number;
-	},
-): void {
+/** One row of the quest archive index: a finished quest summarised for history. */
+interface QuestArchiveEntry {
+	path: string;
+	name: string;
+	goal: string;
+	completedAt: number | null;
+	taskCount: number;
+	doneCount: number;
+}
+
+/** Narrow one untrusted index row into a QuestArchiveEntry, or null if it has no path. */
+function coerceQuestArchiveEntry(value: unknown): QuestArchiveEntry | null {
+	const e = asRecord(value);
+	if (typeof e.path !== "string") return null;
+	return {
+		path: e.path,
+		name: strOr(e.name, "?"),
+		goal: optStr(e.goal) ?? "",
+		completedAt: optNum(e.completedAt) ?? null,
+		taskCount: numOr(e.taskCount, 0),
+		doneCount: numOr(e.doneCount, 0),
+	};
+}
+
+function readQuestArchiveIndex(indexPath: string): QuestArchiveEntry[] {
+	const raw = asRecord(readJSON<unknown>(indexPath, { version: 1, entries: [] }));
+	return Array.isArray(raw.entries)
+		? raw.entries.map(coerceQuestArchiveEntry).filter((e): e is QuestArchiveEntry => e !== null)
+		: [];
+}
+
+const byCompletedAtDesc = (a: QuestArchiveEntry, b: QuestArchiveEntry): number =>
+	(b.completedAt ?? 0) - (a.completedAt ?? 0);
+
+function updateArchiveIndex(cwd: string, entry: QuestArchiveEntry): void {
 	try {
 		const indexPath = questArchiveIndexPath(cwd);
-		const index = readJSON<{ version: 1; entries: any[] }>(indexPath, {
-			version: 1,
-			entries: [],
-		});
-		index.entries = index.entries.filter((e: any) => e.path !== entry.path);
-		index.entries.push(entry);
-		index.entries.sort((a: any, b: any) => (b.completedAt || 0) - (a.completedAt || 0));
-		writeJSON(indexPath, index);
+		const entries = readQuestArchiveIndex(indexPath).filter((e) => e.path !== entry.path);
+		entries.push(entry);
+		entries.sort(byCompletedAtDesc);
+		writeJSON(indexPath, { version: 1, entries });
 	} catch (e) {
 		console.error("[pi-quest] updateArchiveIndex:", e); /* best-effort */
 	}
@@ -329,28 +333,27 @@ export function rebuildArchiveIndex(cwd: string): void {
 	try {
 		const archiveDir = questArchiveDir(cwd);
 		if (!existsSync(archiveDir)) return;
-		const entries: any[] = [];
+		const entries: QuestArchiveEntry[] = [];
 		const files = readdirSync(archiveDir).filter(
 			(f) => f.endsWith(".json") && f !== "archive-index.json",
 		);
 		for (const f of files) {
 			try {
-				const raw = JSON.parse(readFileSync(join(archiveDir, f), "utf8"));
+				const raw = asRecord(JSON.parse(readFileSync(join(archiveDir, f), "utf8")));
+				const tasks = Array.isArray(raw.tasks) ? raw.tasks : [];
 				entries.push({
 					path: join(archiveDir, f),
-					name: raw.name || f,
-					goal: raw.goal || "",
-					completedAt: raw.completedAt || null,
-					taskCount: Array.isArray(raw.tasks) ? raw.tasks.length : 0,
-					doneCount: Array.isArray(raw.tasks)
-						? raw.tasks.filter((t: any) => t.status === "done").length
-						: 0,
+					name: strOr(raw.name, f),
+					goal: optStr(raw.goal) ?? "",
+					completedAt: optNum(raw.completedAt) ?? null,
+					taskCount: tasks.length,
+					doneCount: tasks.filter((t) => asRecord(t).status === "done").length,
 				});
 			} catch (e) {
 				console.error("[pi-quest] rebuildArchiveIndex/read:", e); /* skip corrupt */
 			}
 		}
-		entries.sort((a: any, b: any) => (b.completedAt || 0) - (a.completedAt || 0));
+		entries.sort(byCompletedAtDesc);
 		writeJSON(questArchiveIndexPath(cwd), { version: 1, entries });
 	} catch (e) {
 		console.error("[pi-quest] rebuildArchiveIndex:", e); /* best-effort */
@@ -367,32 +370,29 @@ export function listArchives(
 	done: number;
 	completedAt: number | null;
 }[] {
+	const toSummary = (e: QuestArchiveEntry) => ({
+		name: e.name,
+		goal: e.goal,
+		tasks: e.taskCount,
+		done: e.doneCount,
+		completedAt: e.completedAt,
+	});
 	try {
 		const archiveDir = questArchiveDir(cwd);
 		if (!existsSync(archiveDir)) return [];
 		const indexPath = questArchiveIndexPath(cwd);
-		const index = readJSON<{ version: 1; entries: any[] } | null>(indexPath, null);
-		if (index && Array.isArray(index.entries)) {
-			return index.entries.slice(0, limit).map((e: any) => ({
-				name: e.name || "?",
-				goal: e.goal || "",
-				tasks: e.taskCount || 0,
-				done: e.doneCount || 0,
-				completedAt: e.completedAt || null,
-			}));
+		// When a valid index exists, return it as-is (even if empty) — matching the
+		// original: only a missing/malformed index triggers a rebuild from files.
+		const rawIndex = asRecord(readJSON<unknown>(indexPath, null));
+		if (Array.isArray(rawIndex.entries)) {
+			return rawIndex.entries
+				.map(coerceQuestArchiveEntry)
+				.filter((e): e is QuestArchiveEntry => e !== null)
+				.slice(0, limit)
+				.map(toSummary);
 		}
 		rebuildArchiveIndex(cwd);
-		const rebuilt = readJSON<{ version: 1; entries: any[] }>(indexPath, {
-			version: 1,
-			entries: [],
-		});
-		return rebuilt.entries.slice(0, limit).map((e: any) => ({
-			name: e.name || "?",
-			goal: e.goal || "",
-			tasks: e.taskCount || 0,
-			done: e.doneCount || 0,
-			completedAt: e.completedAt || null,
-		}));
+		return readQuestArchiveIndex(indexPath).slice(0, limit).map(toSummary);
 	} catch (e) {
 		console.error("[pi-quest] listArchives:", e);
 		return [];
