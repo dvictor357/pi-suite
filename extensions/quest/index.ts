@@ -41,7 +41,7 @@ import { loadTeams, ensureBuiltInTeams, teamInstallFromGit } from "./teams";
 import { syncQuestToTodo, clearQuestFromTodo, compactAwarenessBlock } from "./todo-sync";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { nextPendingTask, formatQuestStatus, buildSteeringMessage } from "./steering";
-import { QuestKanban } from "./kanban";
+import { QuestKanban, type KanbanActions } from "./kanban";
 import { detectDependencyCycle, getMaxDependencyDepth } from "./graph";
 import {
 	buildVerificationImpactContext,
@@ -197,6 +197,102 @@ export default function (pi: ExtensionAPI) {
 		if (config) {
 			quest.team = teamName;
 		}
+	}
+
+	/** Build kanban action callbacks that mirror /quest command handlers. */
+	function makeKanbanActions(ctx: ExtensionContext): KanbanActions {
+		return {
+			onPause: () => {
+				const q = getQuest(ctx.cwd);
+				if (!q || q.status !== "active") return;
+				q.status = "paused";
+				q.pauseReason = "Paused via board.";
+				q.lastFiredTaskIndex = -1;
+				q.sameTaskCount = 0;
+				persist(ctx, q);
+				ctx.ui.notify?.(`Quest "${q.name}" paused. r to resume.`, "info");
+			},
+			onResume: () => {
+				const q = getQuest(ctx.cwd);
+				if (!q || q.status !== "paused") return;
+				q.status = "active";
+				q.tasksSincePause = 0;
+				q.lastFiredTaskIndex = -1;
+				q.sameTaskCount = 0;
+				q.pauseReason = null;
+				persist(ctx, q);
+				ctx.ui.notify?.(`Quest "${q.name}" resumed.`, "info");
+			},
+			onStart: () => {
+				const q = getQuest(ctx.cwd);
+				if (!q) return;
+				if (q.status === "active") return;
+				if (q.tasks.length === 0) return;
+				if (q.planningMode === "approve" && !q.planApproved) {
+					ctx.ui.notify?.("Approval required. Use 'a' to approve the plan first.", "warning");
+					return;
+				}
+				q.status = "active";
+				q.tasksSincePause = 0;
+				q.lastFiredTaskIndex = -1;
+				q.sameTaskCount = 0;
+				q.pauseReason = null;
+				persist(ctx, q);
+				ctx.ui.notify?.(`Quest "${q.name}" started — ${q.tasks.length} tasks.`, "info");
+			},
+			onApprove: () => {
+				const q = getQuest(ctx.cwd);
+				if (!q || q.planApproved || q.tasks.length === 0) return;
+				if (q.planningMode !== "approve") return;
+				q.planApproved = true;
+				q.status = "active";
+				q.tasksSincePause = 0;
+				q.lastFiredTaskIndex = -1;
+				q.sameTaskCount = 0;
+				q.pauseReason = null;
+				persist(ctx, q);
+				ctx.ui.notify?.(
+					`Plan approved: "${q.name}" — ${q.tasks.length} tasks. Auto-pilot engaged.`,
+					"info",
+				);
+			},
+			onRetryTask: (taskIndex: number) => {
+				const q = getQuest(ctx.cwd);
+				if (!q) return;
+				const task = q.tasks[taskIndex];
+				if (!task || task.status !== "failed") return;
+				task.status = "pending";
+				task.attempts = 0;
+				task.startedAt = null;
+				task.completedAt = null;
+				task.result = null;
+				persist(ctx, q);
+				ctx.ui.notify?.(`Task #${taskIndex + 1} "${task.content}" reset for retry.`, "info");
+			},
+		};
+	}
+
+	/** Shared kanban overlay launcher — used by both /quest and /quest kanban commands. */
+	async function launchKanban(ctx: ExtensionContext, quest: Quest): Promise<void> {
+		await ctx.ui.custom(
+			(tui, theme, _kb, done) => {
+				const kanban = new QuestKanban(quest, theme, makeKanbanActions(ctx));
+				kanban.onClose = () => done(undefined);
+				return {
+					render: (w: number) => {
+						const fresh = loadQuest(ctx.cwd);
+						if (fresh) kanban.setQuest(fresh);
+						return kanban.render(w);
+					},
+					invalidate: () => kanban.invalidate(),
+					handleInput: (data: string) => {
+						kanban.handleInput(data);
+						tui.requestRender();
+					},
+				};
+			},
+			{ overlay: true },
+		);
 	}
 
 	// ── Tools ────────────────────────────────────────────────────────────────
@@ -2347,25 +2443,7 @@ export default function (pi: ExtensionAPI) {
 						return;
 					}
 					if (ctx.hasUI) {
-						await ctx.ui.custom(
-							(tui, theme, _kb, done) => {
-								const kanban = new QuestKanban(quest, theme);
-								kanban.onClose = () => done(undefined);
-								return {
-									render: (w: number) => {
-										const fresh = loadQuest(ctx.cwd);
-										if (fresh) kanban.setQuest(fresh);
-										return kanban.render(w);
-									},
-									invalidate: () => kanban.invalidate(),
-									handleInput: (data: string) => {
-										kanban.handleInput(data);
-										tui.requestRender();
-									},
-								};
-							},
-							{ overlay: true },
-						);
+						await launchKanban(ctx, quest);
 					} else {
 						ctx.ui.notify(formatQuestStatus(quest), "info");
 					}
@@ -2622,26 +2700,7 @@ export default function (pi: ExtensionAPI) {
 						return;
 					}
 					if (ctx.hasUI) {
-						await ctx.ui.custom(
-							(tui, theme, _kb, done) => {
-								const kanban = new QuestKanban(quest, theme);
-								kanban.onClose = () => done(undefined);
-								// Refresh quest data on re-render so status updates are visible
-								return {
-									render: (w: number) => {
-										const fresh = loadQuest(ctx.cwd);
-										if (fresh) kanban.setQuest(fresh);
-										return kanban.render(w);
-									},
-									invalidate: () => kanban.invalidate(),
-									handleInput: (data: string) => {
-										kanban.handleInput(data);
-										tui.requestRender();
-									},
-								};
-							},
-							{ overlay: true },
-						);
+						await launchKanban(ctx, quest);
 					} else {
 						ctx.ui.notify(formatQuestStatus(quest), "info");
 					}

@@ -150,6 +150,17 @@ Command:
 /quest create|start|pause|resume|approve|cancel|kanban|status|history|git|team ...
 ```
 
+The `/quest` and `/quest kanban` commands open a keyboard-driven kanban board
+(overlay). Keyboard shortcuts in board mode:
+
+- `← → ↑ ↓` Navigate columns and tasks; `Enter` open task detail
+- `p` pause active quest; `r` resume paused quest
+- `s` start quest; `a` approve plan (approval mode only)
+- `?` / `h` toggle keyboard help overlay; `Esc` close kanban
+
+In task detail mode: `↑ ↓` scroll, `PgUp`/`PgDn` page, `Home`/`End` jump,
+`r` retry failed task, `Esc`/`Backspace` back to board.
+
 When editing quest:
 
 - Use `persist(ctx, quest)` for normal quest state changes. It saves the quest, updates UI status, writes session meta, and syncs to todo.
