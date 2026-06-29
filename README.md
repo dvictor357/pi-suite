@@ -3,11 +3,11 @@
 A loop-engineering toolkit for [pi](https://pi.dev) — three extensions, previously
 maintained as separate repos, now consolidated here behind one cross-extension contract:
 
-| Extension     | Role                                                                                                      |
-| ------------- | --------------------------------------------------------------------------------------------------------- |
-| **pi-quest**  | Proactive AI project manager — plans, delegates to sub-agents, verifies, and pushes forward autonomously. |
-| **pi-todo**   | Persistent task ledger with sub-agent delegation.                                                         |
-| **pi-memory** | Persistent project & user memory — tech-stack detection, conventions, structured facts.                   |
+| Extension     | Role                                                                                                                                 |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **pi-quest**  | Proactive AI project manager — plans, delegates to sub-agents, verifies, tracks git, and applies sandbox/policy guidance for tasks.  |
+| **pi-todo**   | Persistent task ledger with sub-agent delegation.                                                                                    |
+| **pi-memory** | Persistent project & user memory — tech-stack detection, conventions, structured facts, quest research, and sub-agent model choices. |
 
 They were built to work together (quest syncs tasks into todo and conventions/research
 into memory). Consolidating them into one repo makes that relationship explicit: a single
@@ -30,7 +30,8 @@ pi-suite/
 ├── extensions/
 │   ├── quest/             # pi-quest   → extensions/quest/index.ts
 │   │   ├── context-broker.ts  #   composable sub-agent prompt builder
-│   │   └── verifier.ts       #   structured verification loop
+│   │   ├── sandbox.ts        #   sandbox policy resolution + worktree planning helpers
+│   │   └── verifier.ts       #   structured verification loop + sandbox compliance checks
 │   ├── todo/              # pi-todo    → extensions/todo/index.ts
 │   └── memory/            # pi-memory  → extensions/memory/index.ts
 ├── docs/                  # architecture & design notes
@@ -43,6 +44,26 @@ Each extension imports the shared contract from `core/` via a relative path
 (`@earendil-works/pi-*`, `typebox`) are declared as `peerDependencies` (provided
 by the pi runtime at load) and pinned as `devDependencies` so `tsc` checks real
 API usage rather than `any` stand-ins.
+
+## Quest sandbox MVP
+
+`pi-quest` includes a first-pass sandbox/policy layer for safer sub-agent loops.
+The current MVP is intentionally conservative: it is **prompt/tool-scope based**
+with verifier checks, not an OS-level sandbox.
+
+Sandbox support includes:
+
+- optional quest-level `sandbox` policy and per-task sandbox overrides
+- role-based tool scopes: planner/scout/reviewer/verifier stay read-only;
+  workers can be further constrained by sandbox policy
+- sensitive-file deny globs for secrets, keys, credentials, and env files
+- command classification helpers for package install, network, destructive,
+  build, and test commands
+- deterministic git branch/worktree planning helpers and display-only cleanup
+  intent — no destructive cleanup happens automatically
+- sandbox constraints injected into sub-agent prompts
+- sandbox compliance checks added to verification handoffs
+- sandbox status surfaced in quest status, kanban, and task detail views
 
 ## Why one repo
 
@@ -71,7 +92,7 @@ To run just one extension, install the suite and disable the others with `pi con
 ```bash
 npm install        # dev tooling: typescript, prettier, tsx, pi host types
 npm run typecheck  # tsc --noEmit over core + all extensions (against real pi types)
-npm test           # node:test via tsx — core contract + retry-policy + run-ledger + eval-logging
+npm test           # node:test via tsx — core + extension test suites
 npm run format     # prettier --write (tabs; see .editorconfig / .prettierrc.json)
 ```
 
