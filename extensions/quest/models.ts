@@ -9,6 +9,7 @@
  * without any UI; the dialog is a thin wrapper over `ctx.ui`.
  */
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Container, type SelectItem, SelectList, Text } from "@earendil-works/pi-tui";
 
 /** Minimal model shape this module needs — a structural subset of pi-ai's Model. */
 export interface ModelLike {
@@ -80,6 +81,9 @@ export type ModelAssignment =
  * The proposed model (when it resolves to something available) is listed first
  * and flagged as the orchestrator's pick, so approving is a single keystroke;
  * the rest of the list lets the user swap in any other available model.
+ *
+ * In TUI mode this opens a SelectList dialog with max-height capping and
+ * type-to-filter search. In non-TUI mode it falls back to ctx.ui.select.
  */
 export async function promptModelAssignment(
 	ctx: ExtensionContext,
@@ -97,21 +101,92 @@ export async function promptModelAssignment(
 	const matched = matchModel(available, opts.proposed);
 	const ordered = matched ? [matched, ...available.filter((m) => m !== matched)] : [...available];
 
-	const labels = ordered.map((m) =>
-		m === matched ? `${formatModelLabel(m)}  ← orchestrator's pick` : formatModelLabel(m),
-	);
-	labels.push(KEEP_DEFAULT);
-
 	const reasonLine = opts.reason ? `\nWhy: ${opts.reason}` : "";
-	const title = matched
+
+	// Non-TUI fallback: simple flat list
+	if (!ctx.hasUI) {
+		const labels = ordered.map((m) =>
+			m === matched ? `${formatModelLabel(m)}  ← orchestrator's pick` : formatModelLabel(m),
+		);
+		labels.push(KEEP_DEFAULT);
+
+		const title = matched
+			? `Assign sub-agent "${opts.role}" → ${formatModelLabel(matched)}?${reasonLine}`
+			: `Pick a model for sub-agent "${opts.role}" (proposed "${opts.proposed}" isn't available).${reasonLine}`;
+
+		const choice = await ctx.ui.select(title, labels);
+		if (choice === undefined) return { outcome: "cancelled" };
+		if (choice === KEEP_DEFAULT) return { outcome: "default" };
+
+		const idx = labels.indexOf(choice);
+		const model = idx >= 0 ? ordered[idx] : undefined;
+		return model ? { outcome: "assigned", model } : { outcome: "cancelled" };
+	}
+
+	// TUI: SelectList with height cap and type-to-filter
+	const titleText = matched
 		? `Assign sub-agent "${opts.role}" → ${formatModelLabel(matched)}?${reasonLine}`
-		: `Pick a model for sub-agent "${opts.role}" (proposed "${opts.proposed}" isn't available).${reasonLine}`;
+		: `Pick a model for "${opts.role}" (proposed "${opts.proposed}" not found)${reasonLine}`;
 
-	const choice = await ctx.ui.select(title, labels);
-	if (choice === undefined) return { outcome: "cancelled" };
-	if (choice === KEEP_DEFAULT) return { outcome: "default" };
+	// Dynamic import so the test runner (which resolves via CJS) doesn't trip
+	const { DynamicBorder } = await import("@earendil-works/pi-coding-agent");
 
-	const idx = labels.indexOf(choice);
-	const model = idx >= 0 ? ordered[idx] : undefined;
-	return model ? { outcome: "assigned", model } : { outcome: "cancelled" };
+	const result = await ctx.ui.custom<ModelAssignment>((tui, theme, _kb, done) => {
+		const container = new Container();
+		container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+		container.addChild(new Text(theme.fg("accent", theme.bold(titleText)), 1, 0));
+		container.addChild(new Text("", 0, 0));
+
+		// Map models to SelectItems; orchestrator's pick gets a highlighted label
+		const items: SelectItem[] = ordered.map((m) => ({
+			value: m.id,
+			label: m === matched ? `${formatModelLabel(m)}  ← orchestrator's pick` : formatModelLabel(m),
+			description: m.provider,
+		}));
+		items.push({
+			value: KEEP_DEFAULT,
+			label: KEEP_DEFAULT,
+			description: "Use harness default",
+		});
+
+		const selectList = new SelectList(items, Math.min(items.length, 10), {
+			selectedPrefix: (text) => theme.fg("accent", text),
+			selectedText: (text) => theme.fg("accent", text),
+			description: (text) => theme.fg("muted", text),
+			scrollInfo: (text) => theme.fg("dim", text),
+			noMatch: (text) => theme.fg("warning", text),
+		});
+
+		selectList.onSelect = (item) => {
+			if (item.value === KEEP_DEFAULT) {
+				done({ outcome: "default" });
+				return;
+			}
+			const model = ordered.find((m) => m.id === item.value);
+			done(model ? { outcome: "assigned", model } : { outcome: "cancelled" });
+		};
+		selectList.onCancel = () => done({ outcome: "cancelled" });
+
+		container.addChild(selectList);
+		container.addChild(new Text("", 0, 0));
+		container.addChild(
+			new Text(theme.fg("dim", "type to filter · ↑↓ navigate · enter select · esc cancel"), 1, 0),
+		);
+		container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+		return {
+			render(width: number) {
+				return container.render(width);
+			},
+			invalidate() {
+				container.invalidate();
+			},
+			handleInput(data: string) {
+				selectList.handleInput(data);
+				tui.requestRender();
+			},
+		};
+	});
+
+	return result ?? { outcome: "cancelled" };
 }
