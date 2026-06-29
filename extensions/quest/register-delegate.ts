@@ -195,7 +195,11 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				sandboxProfile,
 			});
 
-			const res = await runSubAgent(ctx, { role, model, prompt, tools: sandboxTools }, signal);
+			const res = await runSubAgent(
+				ctx,
+				{ role, model, prompt, tools: sandboxTools, sandboxProfile },
+				signal,
+			);
 
 			if (!res.ok) {
 				return {

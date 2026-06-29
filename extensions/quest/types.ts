@@ -96,11 +96,13 @@ export interface TeamConfig {
  * Sandbox mode controlling sub-agent isolation level.
  *
  * - `"none"` (default) — full tool access, no path/cmd restrictions.
- * - `"restricted"` — prompt/tool-scope sandbox: policy constraints are injected
- *   into sub-agent prompts and checked by verifiers; write/shell tools are
- *   reduced where possible.
+ * - `"restricted"` — policy is enforced at the tool-call boundary: the
+ *   orchestrator's tool calls are blocked via pi's `tool_call` hook and the
+ *   sub-agent runs with guarded tool definitions (see sandbox-guard.ts), plus
+ *   read-only role scoping. Prompt constraints and verifier checks are advisory
+ *   on top. Not OS-level isolation.
  * - `"isolated"` — restricted mode plus worktree metadata for task isolation;
- *   the current MVP plans/records worktrees but does not execute OS isolation.
+ *   worktrees are planned/recorded but not created or removed automatically.
  */
 export type SandboxMode = "none" | "restricted" | "isolated";
 

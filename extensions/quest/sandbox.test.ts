@@ -5,6 +5,7 @@ import {
 	isSandboxActive,
 	sandboxedTools,
 	sandboxToolsForRole,
+	sandboxToolPlan,
 	SENSITIVE_DENIED_GLOBS,
 	getSensitiveDeniedPaths,
 	classifyCommand,
@@ -28,6 +29,37 @@ const WORKTREE: WorktreeConfig = {
 	path: ".pi/worktrees/test-quest",
 	autoCleanup: true,
 };
+
+describe("sandboxToolPlan", () => {
+	const restricted = (allowCommands: string[] = []) =>
+		resolveSandboxProfile({
+			mode: "restricted",
+			allowedPaths: [],
+			deniedPaths: [],
+			allowCommands,
+			denyCommands: [],
+			allowNetwork: true,
+			allowPackageInstall: true,
+			worktree: null,
+		});
+
+	test("read-only roles get only read-only tools", () => {
+		for (const role of ["planner", "scout", "reviewer", "verifier"]) {
+			assert.deepEqual(sandboxToolPlan(role, restricted()), ["read", "grep", "find", "ls"]);
+		}
+	});
+
+	test("write-capable roles keep guarded edit + write (granular, not stripped)", () => {
+		const plan = sandboxToolPlan("worker", restricted());
+		assert.ok(plan.includes("edit"));
+		assert.ok(plan.includes("write"));
+	});
+
+	test("bash is included only when the policy lists allowed commands", () => {
+		assert.ok(!sandboxToolPlan("worker", restricted([])).includes("bash"));
+		assert.ok(sandboxToolPlan("worker", restricted(["npm test"])).includes("bash"));
+	});
+});
 
 // ── resolveSandboxProfile ────────────────────────────────────────────────────
 
