@@ -18,12 +18,19 @@ import type { Model } from "@earendil-works/pi-ai";
 import { toolsForRole, extractFinalText, type SubAgentResult } from "./delegate";
 
 export interface SubAgentRequest {
-	/** Sub-agent role (scout, worker, …) — drives the tool scope. */
+	/** Sub-agent role (scout, worker, …) — drives the tool scope when `tools` is not set. */
 	role: string;
 	/** The resolved model the sub-agent runs with. */
 	model: Model<any>;
 	/** Fully-formed instruction sent to the sub-agent (persona + task + context). */
 	prompt: string;
+	/**
+	 * Pre-computed tool allowlist. When provided, this overrides the role-based
+	 * default (`toolsForRole`). Callers with sandbox policy should pass
+	 * `sandboxToolsForRole(role, profile)` here so write tools are stripped when
+	 * sandbox is active.
+	 */
+	tools?: string[];
 }
 
 /**
@@ -46,7 +53,7 @@ export async function runSubAgent(
 			model: req.model,
 			modelRegistry: ctx.modelRegistry,
 			sessionManager: SessionManager.inMemory(),
-			tools: toolsForRole(req.role),
+			tools: req.tools ?? toolsForRole(req.role),
 		});
 		session = created.session;
 

@@ -200,6 +200,7 @@ export function buildStatusLine(quest: Quest, tasks: QuestTask[]): string {
 	if (p.failed > 0) parts.push(`${p.failed} failed`);
 	if (p.skipped > 0) parts.push(`${p.skipped} skipped`);
 
+	if (quest.sandbox?.mode) parts.push(`sandbox:${quest.sandbox.mode}`);
 	if (quest.team) parts.push(`team:${quest.team}`);
 	if (quest.planningMode === "approve" && !quest.planApproved && quest.tasks.length > 0) {
 		parts.push("[awaiting approval]");
@@ -240,6 +241,13 @@ export function buildTaskSuffix(task: QuestTask, colWidth: number): string {
 			// Ultra-compact: first char of agent name
 			parts.push(`[${task.agent[0]}]`);
 		}
+	}
+
+	// Sandbox indicator — compact badge when task has sandbox overrides.
+	// Differentiate: restricted → 🔒, isolated → 🔒i, any sandbox → 🔒
+	if (task.sandbox && colWidth >= 22) {
+		const sbIcon = task.sandbox.mode === "isolated" ? "🔒i" : "🔒";
+		parts.push(sbIcon);
 	}
 
 	// Verification checkmark
@@ -337,6 +345,30 @@ export function formatTimestamp(ms: number): string {
 }
 
 /**
+ * Build compact sandbox detail lines for display in the task detail pane.
+ * Shows quest-level policy and any per-task overrides.
+ */
+export function buildSandboxDetailLines(
+	quest: { sandbox?: { mode?: string; worktree?: { path?: string } | null } },
+	task: { sandbox?: { mode?: string } },
+	maxW: number,
+): string[] {
+	const lines: string[] = [];
+	const mode = task.sandbox?.mode || quest.sandbox?.mode;
+	const label = mode === "isolated" ? "Sandbox: isolated 🔒" : "Sandbox: restricted 🔒";
+	lines.push(label);
+
+	if (quest.sandbox?.worktree?.path) {
+		for (const line of wrapLines(`  Worktree: ${quest.sandbox.worktree.path}`, maxW))
+			lines.push(line);
+	}
+	if (task.sandbox?.mode) {
+		for (const line of wrapLines(`  Task override: +${task.sandbox.mode}`, maxW)) lines.push(line);
+	}
+	return lines;
+}
+
+/**
  * Build the complete detail view for a task as an array of lines.
  * The caller is responsible for scrolling (slicing from a scroll offset).
  */
@@ -406,6 +438,13 @@ export function buildTaskDetail(
 		for (const line of wrapLines(vLine, maxW)) lines.push(line);
 	} else if (task.status === "verifying") {
 		lines.push(`Verification: 🔍 in progress (retries: ${task.verifyRetries})`);
+	}
+
+	// ── Sandbox ──
+	if (quest.sandbox || task.sandbox) {
+		lines.push("");
+		const sbLines = buildSandboxDetailLines(quest, task, maxW);
+		for (const line of sbLines) lines.push(line);
 	}
 
 	lines.push("");

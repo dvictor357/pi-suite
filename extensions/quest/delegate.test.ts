@@ -1,6 +1,13 @@
-import { test } from "node:test";
+import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { toolsForRole, resolveTaskModel, extractFinalText, buildSubAgentPrompt } from "./delegate";
+import {
+	toolsForRole,
+	resolveTaskModel,
+	extractFinalText,
+	buildSubAgentPrompt,
+	buildSandboxConstraintBlock,
+} from "./delegate";
+import type { SandboxProfile } from "./sandbox";
 
 test("toolsForRole gives read-only scopes exploratory/judging roles", () => {
 	for (const role of ["scout", "verifier", "reviewer", "planner", "SCOUT", " Reviewer "]) {
@@ -107,6 +114,255 @@ test("buildSubAgentPrompt omits empty optional sections", () => {
 	const prompt = buildSubAgentPrompt({ role: "worker", content: "Do it" });
 	assert.doesNotMatch(prompt, /## Context/);
 	assert.doesNotMatch(prompt, /Prior results/);
+});
+
+// ── buildSandboxConstraintBlock ────────────────────────────────────────────
+
+describe("buildSandboxConstraintBlock", () => {
+	test("returns empty string when sandbox is off (mode none)", () => {
+		assert.equal(buildSandboxConstraintBlock({ mode: "none" } as SandboxProfile), "");
+		assert.equal(buildSandboxConstraintBlock(undefined), "");
+	});
+
+	test("returns empty string when profile is undefined", () => {
+		assert.equal(buildSandboxConstraintBlock(undefined), "");
+	});
+
+	test("includes allowed paths in restricted mode", () => {
+		const block = buildSandboxConstraintBlock({
+			mode: "restricted",
+			allowedPaths: ["src/**", "tests/**"],
+			deniedPaths: [],
+			allowCommands: [],
+			denyCommands: [],
+			allowNetwork: true,
+			allowPackageInstall: true,
+			worktree: null,
+		});
+		assert.match(block, /## Sandbox Constraints/);
+		assert.match(block, /\`src\/\*\*\`/);
+		assert.match(block, /\`tests\/\*\*\`/);
+	});
+
+	test("shows deny-all for empty allowed paths in restricted mode", () => {
+		const block = buildSandboxConstraintBlock({
+			mode: "restricted",
+			allowedPaths: [],
+			deniedPaths: [],
+			allowCommands: [],
+			denyCommands: [],
+			allowNetwork: true,
+			allowPackageInstall: true,
+			worktree: null,
+		});
+		assert.match(block, /no file access permitted/);
+	});
+
+	test("includes denied paths in restricted mode", () => {
+		const block = buildSandboxConstraintBlock({
+			mode: "restricted",
+			allowedPaths: ["src/**"],
+			deniedPaths: ["src/secrets/**", "*.key"],
+			allowCommands: [],
+			denyCommands: [],
+			allowNetwork: true,
+			allowPackageInstall: true,
+			worktree: null,
+		});
+		assert.match(block, /\`src\/secrets\/\*\*\`/);
+		assert.match(block, /\`\*\.key\`/);
+	});
+
+	test("truncates long denied path lists", () => {
+		const manyDenied = Array.from({ length: 10 }, (_, i) => `secret/file-${i}.key`);
+		const block = buildSandboxConstraintBlock({
+			mode: "restricted",
+			allowedPaths: ["src/**"],
+			deniedPaths: manyDenied,
+			allowCommands: [],
+			denyCommands: [],
+			allowNetwork: true,
+			allowPackageInstall: true,
+			worktree: null,
+		});
+		assert.match(block, /… and 2 more/);
+	});
+
+	test("shows allowed commands when present", () => {
+		const block = buildSandboxConstraintBlock({
+			mode: "restricted",
+			allowedPaths: ["src/**"],
+			deniedPaths: [],
+			allowCommands: ["npm test", "npm run build"],
+			denyCommands: [],
+			allowNetwork: true,
+			allowPackageInstall: true,
+			worktree: null,
+		});
+		assert.match(block, /\`npm test\`/);
+		assert.match(block, /\`npm run build\`/);
+	});
+
+	test("shows shell-deny message when allowCommands is empty in restricted mode", () => {
+		const block = buildSandboxConstraintBlock({
+			mode: "restricted",
+			allowedPaths: ["src/**"],
+			deniedPaths: [],
+			allowCommands: [],
+			denyCommands: [],
+			allowNetwork: true,
+			allowPackageInstall: true,
+			worktree: null,
+		});
+		assert.match(block, /shell access is denied/);
+	});
+
+	test("shows denied commands when present", () => {
+		const block = buildSandboxConstraintBlock({
+			mode: "restricted",
+			allowedPaths: ["src/**"],
+			deniedPaths: [],
+			allowCommands: ["npm test"],
+			denyCommands: ["rm -rf", "sudo"],
+			allowNetwork: true,
+			allowPackageInstall: true,
+			worktree: null,
+		});
+		assert.match(block, /\`rm -rf\`/);
+		assert.match(block, /\`sudo\`/);
+	});
+
+	test("marks network as denied when false", () => {
+		const block = buildSandboxConstraintBlock({
+			mode: "restricted",
+			allowedPaths: ["src/**"],
+			deniedPaths: [],
+			allowCommands: [],
+			denyCommands: [],
+			allowNetwork: false,
+			allowPackageInstall: true,
+			worktree: null,
+		});
+		assert.match(block, /Network access:.*denied/);
+	});
+
+	test("does not mention network when allowed", () => {
+		const block = buildSandboxConstraintBlock({
+			mode: "restricted",
+			allowedPaths: ["src/**"],
+			deniedPaths: [],
+			allowCommands: [],
+			denyCommands: [],
+			allowNetwork: true,
+			allowPackageInstall: true,
+			worktree: null,
+		});
+		assert.doesNotMatch(block, /Network access/);
+	});
+
+	test("marks package install as denied when false", () => {
+		const block = buildSandboxConstraintBlock({
+			mode: "restricted",
+			allowedPaths: ["src/**"],
+			deniedPaths: [],
+			allowCommands: [],
+			denyCommands: [],
+			allowNetwork: true,
+			allowPackageInstall: false,
+			worktree: null,
+		});
+		assert.match(block, /Package install:.*denied/);
+	});
+
+	test("includes worktree metadata in isolated mode", () => {
+		const block = buildSandboxConstraintBlock({
+			mode: "isolated",
+			allowedPaths: ["src/**"],
+			deniedPaths: [],
+			allowCommands: [],
+			denyCommands: [],
+			allowNetwork: true,
+			allowPackageInstall: true,
+			worktree: {
+				enabled: true,
+				baseBranch: "main",
+				path: ".pi/worktrees/my-quest",
+				autoCleanup: true,
+			},
+		});
+		assert.match(block, /Worktree isolation/);
+		assert.match(block, /main/);
+		assert.match(block, /\.pi\/worktrees\/my-quest/);
+	});
+
+	test("ends with policy violation warning", () => {
+		const block = buildSandboxConstraintBlock({
+			mode: "restricted",
+			allowedPaths: ["src/**"],
+			deniedPaths: [],
+			allowCommands: [],
+			denyCommands: [],
+			allowNetwork: true,
+			allowPackageInstall: true,
+			worktree: null,
+		});
+		assert.match(block, /policy violation/);
+	});
+});
+
+// ── buildSubAgentPrompt with sandbox ───────────────────────────────────────
+
+test("buildSubAgentPrompt injects sandbox block when profile is provided", () => {
+	const prompt = buildSubAgentPrompt({
+		role: "worker",
+		content: "Add user auth",
+		sandboxProfile: {
+			mode: "restricted",
+			allowedPaths: ["src/**"],
+			deniedPaths: [],
+			allowCommands: [],
+			denyCommands: [],
+			allowNetwork: false,
+			allowPackageInstall: true,
+			worktree: null,
+		},
+	});
+	assert.match(prompt, /## Sandbox Constraints/);
+	assert.match(prompt, /\`src\/\*\*\`/);
+	assert.match(prompt, /Network access:.*denied/);
+});
+
+test("buildSubAgentPrompt omits sandbox block when profile is none mode", () => {
+	const prompt = buildSubAgentPrompt({
+		role: "worker",
+		content: "Add user auth",
+		sandboxProfile: { mode: "none" } as SandboxProfile,
+	});
+	assert.doesNotMatch(prompt, /Sandbox Constraints/);
+});
+
+test("buildSubAgentPrompt sandbox block appears after deps, before format", () => {
+	const prompt = buildSubAgentPrompt({
+		role: "worker",
+		content: "Add user auth",
+		dependencyResults: [{ content: "scout report", result: "auth in src/auth.ts" }],
+		formatDirective: "Run the formatter.",
+		sandboxProfile: {
+			mode: "restricted",
+			allowedPaths: ["src/**"],
+			deniedPaths: [],
+			allowCommands: [],
+			denyCommands: [],
+			allowNetwork: true,
+			allowPackageInstall: true,
+			worktree: null,
+		},
+	});
+	const sandboxIdx = prompt.indexOf("Sandbox Constraints");
+	const priorIdx = prompt.indexOf("Prior results");
+	const formatIdx = prompt.indexOf("Run the formatter.");
+	assert.ok(priorIdx < sandboxIdx, "sandbox should appear after prior results");
+	assert.ok(sandboxIdx < formatIdx, "sandbox should appear before format directive");
 });
 
 test("buildSubAgentPrompt lists only dependencies that produced a result", () => {

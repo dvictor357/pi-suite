@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 
-import type { Quest, TaskStatus } from "./types";
+import type { Quest, TaskStatus, SandboxPolicy } from "./types";
 import {
 	MAX_BURST,
 	MAX_RETRIES,
@@ -37,10 +37,12 @@ import type { RunEvent, EvalEntry } from "../../core";
 import { matchModel, promptModelAssignment, toModelLike } from "./models";
 import { resolveTaskModel, buildSubAgentPrompt } from "./delegate";
 import { runSubAgent } from "./subagent";
+import { resolveSandboxProfile, sandboxToolsForRole } from "./sandbox";
 import { loadTeams, ensureBuiltInTeams, teamInstallFromGit } from "./teams";
 import { syncQuestToTodo, clearQuestFromTodo, compactAwarenessBlock } from "./todo-sync";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { nextPendingTask, formatQuestStatus, buildSteeringMessage } from "./steering";
+import { buildSandboxComplianceChecks } from "./verifier";
 import { QuestKanban, type KanbanActions } from "./kanban";
 import { detectDependencyCycle, getMaxDependencyDepth } from "./graph";
 import {
@@ -357,6 +359,48 @@ export default function (pi: ExtensionAPI) {
 					),
 				}),
 			),
+			sandbox: Type.Optional(
+				Type.Object({
+					mode: StringEnum(["restricted", "isolated"] as const, {
+						description:
+							"Sandbox mode — current MVP uses prompt/tool-scope constraints; 'isolated' also records worktree metadata.",
+					}),
+					allowedPaths: Type.Optional(
+						Type.Array(Type.String(), {
+							description:
+								"Allowed path globs (relative to cwd) for prompt/verifier policy. Empty = deny all in restricted/isolated mode.",
+						}),
+					),
+					deniedPaths: Type.Optional(
+						Type.Array(Type.String(), {
+							description: "Denied path globs. Overrides allowed.",
+						}),
+					),
+					allowCommands: Type.Optional(
+						Type.Array(Type.String(), {
+							description:
+								"Allowed command prefixes/patterns for prompt/tool-scope policy. Empty removes bash in restricted/isolated mode.",
+						}),
+					),
+					denyCommands: Type.Optional(
+						Type.Array(Type.String(), {
+							description: "Denied command patterns. Overrides allowed.",
+						}),
+					),
+					allowNetwork: Type.Optional(
+						Type.Boolean({
+							description: "Whether network access is permitted (default: false when sandboxed)",
+							default: false,
+						}),
+					),
+					allowPackageInstall: Type.Optional(
+						Type.Boolean({
+							description: "Whether package install is permitted (default: false when sandboxed)",
+							default: false,
+						}),
+					),
+				}),
+			),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			if (getQuest(ctx.cwd)?.status === "active") {
@@ -384,6 +428,7 @@ export default function (pi: ExtensionAPI) {
 				params.planningMode ?? "auto",
 				params.verifyOnComplete ?? true,
 				params.gitIntegration,
+				params.sandbox as SandboxPolicy | undefined,
 			);
 			validateAndSetTeam(quest, params.team);
 			ensureLedgers(ctx.cwd, quest.name);
@@ -555,6 +600,46 @@ export default function (pi: ExtensionAPI) {
 								"Model id to run this task's sub-agent with. Usually leave unset — quest assigns it via quest_assign_model (asking the user once per role).",
 						}),
 					),
+					sandbox: Type.Optional(
+						Type.Object({
+							mode: Type.Optional(
+								StringEnum(["restricted", "isolated"] as const, {
+									description:
+										"Escalate sandbox mode for this task (cannot de-escalate quest-level).",
+								}),
+							),
+							allowedPaths: Type.Optional(
+								Type.Array(Type.String(), {
+									description: "Additional allowed paths (intersect with quest-level).",
+								}),
+							),
+							deniedPaths: Type.Optional(
+								Type.Array(Type.String(), {
+									description: "Additional denied paths (union with quest-level).",
+								}),
+							),
+							allowCommands: Type.Optional(
+								Type.Array(Type.String(), {
+									description: "Additional allowed commands (intersect with quest-level).",
+								}),
+							),
+							denyCommands: Type.Optional(
+								Type.Array(Type.String(), {
+									description: "Additional denied commands (union with quest-level).",
+								}),
+							),
+							allowNetwork: Type.Optional(
+								Type.Boolean({
+									description: "Override network access (can only go true→false).",
+								}),
+							),
+							allowPackageInstall: Type.Optional(
+								Type.Boolean({
+									description: "Override package-install permission (can only go true→false).",
+								}),
+							),
+						}),
+					),
 				}),
 				{ description: "Array of tasks in execution order" },
 			),
@@ -609,6 +694,10 @@ export default function (pi: ExtensionAPI) {
 				verifyRetries: 0,
 				commitHash: null,
 				branchName: null,
+				sandbox:
+					t.sandbox && typeof t.sandbox === "object" && Object.keys(t.sandbox).length > 0
+						? (t.sandbox as import("./types").SandboxOverrides)
+						: undefined,
 			}));
 
 			for (let i = 0; i < quest.tasks.length; i++) {
@@ -968,6 +1057,8 @@ export default function (pi: ExtensionAPI) {
 						ctx.cwd,
 						`${task.content}\n${task.context}\n${params.result || task.result || ""}`,
 					);
+					const sandboxProfile = resolveSandboxProfile(quest.sandbox, task.sandbox);
+					const sandboxChecks = buildSandboxComplianceChecks(sandboxProfile);
 					const verifierAgent =
 						team?.members.find((m) => m.agent === "verifier" || m.role === "tester")?.agent ??
 						"verifier";
@@ -988,6 +1079,7 @@ export default function (pi: ExtensionAPI) {
 									`3. Are there any issues or missing pieces?`,
 									`4. Is the code formatted and lint-clean per the project's own conventions? ${FORMAT_DIRECTIVE} If the project's formatter/linter was not run or leaves the tree dirty/inconsistent, this is a FAIL.`,
 									`5. Review dependency impact for changed files before PASS.`,
+									...(sandboxChecks.length > 0 ? [``, ...sandboxChecks] : []),
 									``,
 									impactContext,
 									``,
@@ -1789,6 +1881,9 @@ export default function (pi: ExtensionAPI) {
 				);
 			}
 
+			const sandboxProfile = resolveSandboxProfile(quest.sandbox, task.sandbox);
+			const sandboxTools = sandboxToolsForRole(role, sandboxProfile);
+
 			const dependencyResults = task.dependencies.map((d) => ({
 				content: quest.tasks[d]?.content ?? "",
 				result: quest.tasks[d]?.result ?? null,
@@ -1800,9 +1895,10 @@ export default function (pi: ExtensionAPI) {
 				persona: resolvePersona(quest.team, role),
 				dependencyResults,
 				formatDirective: FORMAT_DIRECTIVE,
+				sandboxProfile,
 			});
 
-			const res = await runSubAgent(ctx, { role, model, prompt }, signal);
+			const res = await runSubAgent(ctx, { role, model, prompt, tools: sandboxTools }, signal);
 
 			if (!res.ok) {
 				return {
@@ -1939,6 +2035,25 @@ export default function (pi: ExtensionAPI) {
 					``,
 					`**Commit:** \`${t.commitHash.slice(0, 8)}\`${t.branchName ? ` on ${t.branchName}` : ""}`,
 				);
+			}
+			if (quest.sandbox || t.sandbox) {
+				const mode = t.sandbox?.mode || quest.sandbox?.mode;
+				const sandboxLines: string[] = [];
+				if (mode) {
+					sandboxLines.push(`**Sandbox:** ${mode} 🔒`);
+				}
+				if (t.sandbox?.mode) {
+					sandboxLines.push(`  Task override: +${t.sandbox.mode}`);
+				}
+				if (quest.sandbox?.worktree?.path) {
+					sandboxLines.push(`  Worktree: ${quest.sandbox.worktree.path}`);
+				}
+				if (quest.sandbox?.allowedPaths?.length) {
+					sandboxLines.push(`  Allowed paths: ${quest.sandbox.allowedPaths.join(", ")}`);
+				}
+				if (sandboxLines.length > 0) {
+					lines.push(``, ...sandboxLines);
+				}
 			}
 			return {
 				content: [{ type: "text", text: lines.join("\n") }],

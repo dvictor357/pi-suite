@@ -1,7 +1,14 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { AgentModelChoice } from "../../core";
-import type { GitIntegration, Quest } from "./types";
+import type {
+	GitIntegration,
+	Quest,
+	SandboxMode,
+	SandboxPolicy,
+	SandboxOverrides,
+	WorktreeConfig,
+} from "./types";
 import {
 	readJSON,
 	writeJSON,
@@ -44,6 +51,72 @@ export function rememberAgentModel(cwd: string, role: string, choice: AgentModel
 	);
 }
 
+const VALID_SANDBOX_MODES: SandboxMode[] = ["none", "restricted", "isolated"];
+
+function normalizeSandboxPolicy(raw: any): SandboxPolicy {
+	const mode: SandboxMode = VALID_SANDBOX_MODES.includes(raw.mode) ? raw.mode : "none";
+	const defaultAllow = mode === "none";
+	return {
+		mode,
+		allowedPaths: Array.isArray(raw.allowedPaths)
+			? raw.allowedPaths.filter((p: any) => typeof p === "string")
+			: [],
+		deniedPaths: Array.isArray(raw.deniedPaths)
+			? raw.deniedPaths.filter((p: any) => typeof p === "string")
+			: [],
+		allowCommands: Array.isArray(raw.allowCommands)
+			? raw.allowCommands.filter((c: any) => typeof c === "string")
+			: [],
+		denyCommands: Array.isArray(raw.denyCommands)
+			? raw.denyCommands.filter((c: any) => typeof c === "string")
+			: [],
+		allowNetwork: typeof raw.allowNetwork === "boolean" ? raw.allowNetwork : defaultAllow,
+		allowPackageInstall:
+			typeof raw.allowPackageInstall === "boolean" ? raw.allowPackageInstall : defaultAllow,
+		worktree:
+			raw.worktree && typeof raw.worktree === "object"
+				? normalizeWorktreeConfig(raw.worktree)
+				: null,
+	};
+}
+
+function normalizeSandboxOverrides(raw: any): SandboxOverrides {
+	const overrides: SandboxOverrides = {};
+	if (raw.mode !== undefined) {
+		if (VALID_SANDBOX_MODES.includes(raw.mode)) overrides.mode = raw.mode;
+	}
+	if (Array.isArray(raw.allowedPaths)) {
+		const filtered = raw.allowedPaths.filter((p: any) => typeof p === "string");
+		if (filtered.length > 0) overrides.allowedPaths = filtered;
+	}
+	if (Array.isArray(raw.deniedPaths)) {
+		const filtered = raw.deniedPaths.filter((p: any) => typeof p === "string");
+		if (filtered.length > 0) overrides.deniedPaths = filtered;
+	}
+	if (Array.isArray(raw.allowCommands)) {
+		const filtered = raw.allowCommands.filter((c: any) => typeof c === "string");
+		if (filtered.length > 0) overrides.allowCommands = filtered;
+	}
+	if (Array.isArray(raw.denyCommands)) {
+		const filtered = raw.denyCommands.filter((c: any) => typeof c === "string");
+		if (filtered.length > 0) overrides.denyCommands = filtered;
+	}
+	if (typeof raw.allowNetwork === "boolean") overrides.allowNetwork = raw.allowNetwork;
+	if (typeof raw.allowPackageInstall === "boolean")
+		overrides.allowPackageInstall = raw.allowPackageInstall;
+	return overrides;
+}
+
+function normalizeWorktreeConfig(raw: any): WorktreeConfig {
+	return {
+		enabled: typeof raw.enabled === "boolean" ? raw.enabled : false,
+		baseBranch:
+			typeof raw.baseBranch === "string" && raw.baseBranch.trim() ? raw.baseBranch.trim() : "main",
+		path: typeof raw.path === "string" && raw.path.trim() ? raw.path.trim() : "",
+		autoCleanup: typeof raw.autoCleanup === "boolean" ? raw.autoCleanup : true,
+	};
+}
+
 export function syncConventionsToMemory(quest: Quest, cwd: string): void {
 	try {
 		if (!quest.conventions.length) return;
@@ -83,6 +156,7 @@ export function emptyQuest(
 	planningMode: "auto" | "approve" = "auto",
 	verifyOnComplete = true,
 	gitIntegration?: Partial<GitIntegration>,
+	sandbox?: SandboxPolicy,
 ): Quest {
 	return {
 		version: 1,
@@ -105,6 +179,7 @@ export function emptyQuest(
 			autoPR: gitIntegration?.autoPR ?? false,
 			branchPrefix: gitIntegration?.branchPrefix ?? "quest/",
 		},
+		sandbox: sandbox && sandbox.mode !== "none" ? sandbox : undefined,
 		createdAt: Date.now(),
 		completedAt: null,
 		updatedAt: Date.now(),
@@ -134,6 +209,10 @@ export function loadQuest(cwd: string): Quest | null {
 				branchName: t.branchName || null,
 				startedAt: typeof t.startedAt === "number" ? t.startedAt : null,
 				model: typeof t.model === "string" && t.model.trim() ? t.model : undefined,
+				sandbox:
+					t.sandbox && typeof t.sandbox === "object"
+						? normalizeSandboxOverrides(t.sandbox)
+						: undefined,
 			}));
 			if (raw.planningMode !== "auto" && raw.planningMode !== "approve") {
 				raw.planningMode = "auto";
@@ -179,6 +258,12 @@ export function loadQuest(cwd: string): Quest | null {
 			if (typeof raw.tasksSincePause !== "number") raw.tasksSincePause = 0;
 			if (typeof raw.lastFiredTaskIndex !== "number") raw.lastFiredTaskIndex = -1;
 			if (typeof raw.sameTaskCount !== "number") raw.sameTaskCount = 0;
+			// ── Sandbox (backwards-compatible: absent = no sandbox) ──────
+			if (raw.sandbox && typeof raw.sandbox === "object") {
+				raw.sandbox = normalizeSandboxPolicy(raw.sandbox);
+			} else {
+				raw.sandbox = undefined;
+			}
 			return raw as Quest;
 		}
 	} catch (e) {

@@ -10,6 +10,8 @@
  * importing the SDK as a value fails under the test runner.
  */
 
+import type { SandboxProfile } from "./sandbox";
+
 /**
  * Roles that explore/judge but must not mutate the working tree. They get a
  * read-only tool scope so a misbehaving sub-agent can't edit files.
@@ -81,11 +83,81 @@ export interface SubAgentResult {
 }
 
 /**
+ * Build a sandbox constraint block for injection into sub-agent prompts.
+ *
+ * When a sandbox profile is active (restricted or isolated), this returns a
+ * human-readable block describing allowed/denied paths, command restrictions,
+ * network status, package-install permission, and worktree metadata. Returns
+ * an empty string when sandbox is off (mode "none").
+ */
+export function buildSandboxConstraintBlock(profile?: SandboxProfile): string {
+	if (!profile || profile.mode === "none") return "";
+
+	const lines: string[] = [`## Sandbox Constraints (${profile.mode} mode)`];
+
+	if (profile.allowedPaths.length > 0) {
+		lines.push(``, `**Allowed files:**`, ...profile.allowedPaths.map((g) => `- \`${g}\``));
+	} else {
+		lines.push(``, `**Allowed files:** (none — no file access permitted)`);
+	}
+
+	if (profile.deniedPaths.length > 0) {
+		lines.push(
+			``,
+			`**Denied files:**`,
+			...profile.deniedPaths.slice(0, 8).map((g) => `- \`${g}\``),
+		);
+		if (profile.deniedPaths.length > 8)
+			lines.push(`- … and ${profile.deniedPaths.length - 8} more`);
+	}
+
+	if (profile.allowCommands.length > 0) {
+		lines.push(``, `**Allowed commands:**`, ...profile.allowCommands.map((c) => `- \`${c}\``));
+	} else {
+		lines.push(``, `**Allowed commands:** (none — shell access is denied)`);
+	}
+
+	if (profile.denyCommands.length > 0) {
+		lines.push(
+			``,
+			`**Denied commands:**`,
+			...profile.denyCommands.slice(0, 5).map((c) => `- \`${c}\``),
+		);
+		if (profile.denyCommands.length > 5)
+			lines.push(`- … and ${profile.denyCommands.length - 5} more`);
+	}
+
+	if (!profile.allowNetwork) {
+		lines.push(``, `**Network access:** ❌ denied`);
+	}
+	if (!profile.allowPackageInstall) {
+		lines.push(``, `**Package install:** ❌ denied`);
+	}
+
+	if (profile.worktree) {
+		lines.push(
+			``,
+			`**Worktree isolation:** active`,
+			`- Branch: \`${profile.worktree.enabled ? "yes" : "no"}\``,
+			`- Base branch: \`${profile.worktree.baseBranch}\``,
+			`- Path: \`${profile.worktree.path}\``,
+		);
+	}
+
+	lines.push(
+		``,
+		`You MUST respect these constraints. Operating outside them is a policy violation.`,
+	);
+
+	return lines.join("\n");
+}
+
+/**
  * Build the focused instruction sent to a sub-agent. The orchestrator already
  * wrote the task's `context` and resolved the role's `persona` markdown; this
  * leads with that persona, then frames the role, the task, any upstream results
- * it can build on, and the project's format directive into one concise prompt.
- * Pure so it can be unit-tested.
+ * it can build on, sandbox constraints when active, and the project's format
+ * directive into one concise prompt. Pure so it can be unit-tested.
  */
 export function buildSubAgentPrompt(opts: {
 	role: string;
@@ -94,6 +166,7 @@ export function buildSubAgentPrompt(opts: {
 	persona?: string;
 	dependencyResults?: ReadonlyArray<{ content: string; result: string | null }>;
 	formatDirective?: string;
+	sandboxProfile?: SandboxProfile;
 }): string {
 	const lines: string[] = [];
 	if (opts.persona?.trim()) {
@@ -112,6 +185,11 @@ export function buildSubAgentPrompt(opts: {
 		lines.push(``, `## Prior results you can build on`);
 		for (const d of deps) lines.push(`- ${d.content}: ${d.result}`);
 	}
+
+	// Inject sandbox constraints when active
+	const sandboxBlock = buildSandboxConstraintBlock(opts.sandboxProfile);
+	if (sandboxBlock) lines.push(``, sandboxBlock);
+
 	if (opts.formatDirective?.trim()) lines.push(``, opts.formatDirective.trim());
 
 	lines.push(

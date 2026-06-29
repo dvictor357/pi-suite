@@ -13,6 +13,7 @@
 import type { QuestTask } from "./types";
 import { MAX_VERIFY_RETRIES, FORMAT_DIRECTIVE } from "./constants";
 import { buildVerificationImpactContext } from "./codebase";
+import type { SandboxProfile } from "./sandbox";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,6 +50,67 @@ export function shouldVerify(opts: {
 }
 
 /**
+ * Build a sandbox compliance checklist for the verifier prompt.
+ *
+ * When a sandbox profile is active, this returns additional checklist items
+ * the verifier must check. Returns an empty array when sandbox is off.
+ */
+export function buildSandboxComplianceChecks(profile?: SandboxProfile): string[] {
+	if (!profile || profile.mode === "none") return [];
+
+	const checks: string[] = [];
+
+	checks.push(`**Sandbox compliance** (mode: ${profile.mode}):`);
+
+	if (profile.allowedPaths.length > 0) {
+		checks.push(
+			`- All changed/created files MUST be within allowed paths: ${profile.allowedPaths.map((g) => `\`${g}\``).join(", ")}`,
+		);
+	} else {
+		checks.push(
+			`- **CRITICAL:** No files should be created or modified (allowed paths is empty — deny-all).`,
+		);
+	}
+
+	if (profile.deniedPaths.length > 0) {
+		checks.push(
+			`- No file matching a denied glob was touched: ${profile.deniedPaths
+				.slice(0, 5)
+				.map((g) => `\`${g}\``)
+				.join(", ")}${profile.deniedPaths.length > 5 ? " …" : ""}`,
+		);
+	}
+
+	if (!profile.allowNetwork) {
+		checks.push(`- No network access was used (curl, git push/fetch, npm publish, etc.).`);
+	}
+
+	if (!profile.allowPackageInstall) {
+		checks.push(`- No package install commands were run (npm install, pip install, etc.).`);
+	}
+
+	if (profile.denyCommands.length > 0) {
+		checks.push(
+			`- None of these denied commands were used: ${profile.denyCommands
+				.slice(0, 5)
+				.map((c) => `\`${c}\``)
+				.join(", ")}`,
+		);
+	}
+
+	if (profile.worktree) {
+		checks.push(
+			`- Worktree branch \`${profile.worktree.baseBranch}\` is consistent (no switching to other branches).`,
+			`- Changes are isolated to the worktree path \`${profile.worktree.path}\`.`,
+		);
+	}
+
+	checks.push(`- Any required project checks (format, lint, test) were actually run and passed.`);
+
+	return checks;
+}
+
+/**
  * Build the prompt the orchestrator should give to the verifier sub-agent.
  *
  * This is the pure text construction — the caller (index.ts) passes the
@@ -59,6 +121,7 @@ export function buildVerificationPrompt(opts: {
 	taskIndex: number;
 	config: VerificationConfig;
 	result: string;
+	sandboxProfile?: SandboxProfile;
 }): string {
 	const lines: string[] = [];
 	const { task, config, result, taskIndex } = opts;
@@ -80,8 +143,15 @@ export function buildVerificationPrompt(opts: {
 		`2. Is the implementation correct and complete?`,
 		`3. Are there any issues or missing pieces?`,
 		FORMAT_DIRECTIVE,
-		``,
 	);
+
+	// Add sandbox compliance checks when a profile is active
+	const sandboxChecks = buildSandboxComplianceChecks(opts.sandboxProfile);
+	if (sandboxChecks.length > 0) {
+		lines.push(``, ...sandboxChecks);
+	}
+
+	lines.push(``);
 
 	if (config.includeImpact) {
 		const impact = buildVerificationImpactContext(

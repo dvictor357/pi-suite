@@ -45,12 +45,13 @@ export function formatQuestStatus(quest: Quest): string {
 	const pbar = `${"█".repeat(doneW)}${"◎".repeat(vfyW)}${"░".repeat(Math.max(pendW, 0))}${"✗".repeat(failW)}`;
 
 	const modeTag = quest.planningMode === "approve" ? ` · mode: ${quest.planningMode}` : "";
+	const sandboxTag = quest.sandbox?.mode ? ` · sandbox: ${quest.sandbox.mode}` : "";
 	const approveTag = quest.planningMode === "approve" && !quest.planApproved ? ` · ⚠ AWAITING` : "";
 	const verifyTag = quest.verifyOnComplete ? ` · verify: on` : "";
 	const gitTag = quest.gitIntegration?.autoCommit ? ` · git: ${quest.commits.length}c` : "";
 
 	const lines: string[] = [
-		`**Quest: ${quest.name}**  [${quest.status.toUpperCase()}${modeTag}${approveTag}${verifyTag}${gitTag}]`,
+		`**Quest: ${quest.name}**  [${quest.status.toUpperCase()}${modeTag}${sandboxTag}${approveTag}${verifyTag}${gitTag}]`,
 		`Goal: ${quest.goal}`,
 		``,
 		`\`${pbar}\`  ${done}/${total} done${verified > 0 ? ` (${verified} verified)` : ""}`,
@@ -64,12 +65,16 @@ export function formatQuestStatus(quest: Quest): string {
 		const fmtDep = (t: QuestTask) =>
 			t.dependencies.length ? ` ← #${t.dependencies.map((d) => d + 1).join(",#")}` : "";
 
+		const sbMark = (t: QuestTask) => (t.sandbox ? " 🔒" : "");
+
 		// TODO
 		if (todo.length > 0) {
 			lines.push(``, `━━━ 📋 TODO (${todo.length}) ━━━━━━━━━━━━━━━━━━━━━━━`);
 			for (const t of todo) {
 				const i = quest.tasks.indexOf(t);
-				lines.push(`${ICON[t.status]} #${i + 1} ${t.content}  [${t.agent}]${fmtDep(t)}`);
+				lines.push(
+					`${ICON[t.status]} #${i + 1} ${t.content}  [${t.agent}]${sbMark(t)}${fmtDep(t)}`,
+				);
 			}
 		}
 
@@ -87,7 +92,7 @@ export function formatQuestStatus(quest: Quest): string {
 							: ` — verifying...`
 						: "";
 				lines.push(
-					`${ICON[t.status]} #${i + 1} ${t.content}  [${t.agent}]${timeStr}${vInfo}${fmtDep(t)}`,
+					`${ICON[t.status]} #${i + 1} ${t.content}  [${t.agent}]${sbMark(t)}${timeStr}${vInfo}${fmtDep(t)}`,
 				);
 			}
 		}
@@ -102,7 +107,7 @@ export function formatQuestStatus(quest: Quest): string {
 				const verifiedStr = t.verified ? ` ✅` : "";
 				const resultSnippet = t.result ? ` — ${t.result.slice(0, 50)}` : "";
 				lines.push(
-					`${ICON[t.status]} #${i + 1} ${t.content}  [${t.agent}]${verifiedStr}${timeStr}${resultSnippet}`,
+					`${ICON[t.status]} #${i + 1} ${t.content}  [${t.agent}]${sbMark(t)}${verifiedStr}${timeStr}${resultSnippet}`,
 				);
 			}
 		}
@@ -116,7 +121,7 @@ export function formatQuestStatus(quest: Quest): string {
 					t.status === "failed"
 						? ` — attempts ${t.attempts}/${MAX_RETRIES + 1}${t.verifyResult ? ` · ${t.verifyResult.slice(0, 30)}` : ""}`
 						: "";
-				lines.push(`${ICON[t.status]} #${i + 1} ${t.content}  [${t.agent}]${info}`);
+				lines.push(`${ICON[t.status]} #${i + 1} ${t.content}  [${t.agent}]${sbMark(t)}${info}`);
 			}
 		}
 	}
@@ -151,6 +156,14 @@ export function buildSteeringMessage(
 
 	const deps = task.dependencies.map((d) => `#${d + 1} — ${quest.tasks[d].content}`).join(", ");
 
+	// Surface sandbox context when the quest or task has an active sandbox.
+	const sandboxMode = task.sandbox?.mode || quest.sandbox?.mode;
+	const sandboxBlock = sandboxMode
+		? `**Sandbox:** ${
+				sandboxMode === "isolated" ? "isolated 🔒" : "restricted 🔒"
+			} — sub-agent is restricted per sandbox policy.`
+		: "";
+
 	// Surface the model to run this sub-agent with: the task's own assignment
 	// wins, else the project's remembered choice for this role. When neither
 	// exists, nudge the orchestrator to propose one via quest_assign_model.
@@ -167,6 +180,7 @@ export function buildSteeringMessage(
 		`**Use subagent:** \`${task.agent}\``,
 		`**Context:** ${task.context}`,
 		deps ? `**Depends on:** ${deps}` : "",
+		sandboxBlock,
 		modelLine,
 		compactAwarenessBlock(cwd),
 		``,

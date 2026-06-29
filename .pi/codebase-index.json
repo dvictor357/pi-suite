@@ -1,0 +1,6184 @@
+{
+  "contractVersion": 1,
+  "rootDir": "/Users/dvictor357/Projects/pi-suite",
+  "scannedAt": 1782701592996,
+  "fileCount": 45,
+  "files": {
+    "core/contract.test.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/core/contract.test.ts",
+      "name": "contract.test.ts",
+      "relativePath": "core/contract.test.ts",
+      "imports": [
+        {
+          "source": "node:test",
+          "names": ["test"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:assert/strict",
+          "names": ["assert"],
+          "isDefault": true,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./contract",
+          "names": ["CONTRACT_VERSION", "isFutureContract"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/contract.ts"
+        }
+      ],
+      "exports": [],
+      "symbols": [],
+      "mtime": 1781687050218.3252,
+      "hash": "478224c38df130198e37671fe8c83f469e76fd6bdc8fdae6c985c40caaf91444"
+    },
+    "core/contract.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/core/contract.ts",
+      "name": "contract.ts",
+      "relativePath": "core/contract.ts",
+      "imports": [],
+      "exports": [
+        {
+          "name": "CONTRACT_VERSION",
+          "kind": "named"
+        },
+        {
+          "name": "isFutureContract",
+          "kind": "named"
+        },
+        {
+          "name": "ExtensionKey",
+          "kind": "type"
+        },
+        {
+          "name": "SessionMeta",
+          "kind": "type"
+        },
+        {
+          "name": "TodoStatus",
+          "kind": "type"
+        },
+        {
+          "name": "TodoItem",
+          "kind": "type"
+        },
+        {
+          "name": "TodoList",
+          "kind": "type"
+        },
+        {
+          "name": "MemoryFact",
+          "kind": "type"
+        },
+        {
+          "name": "ProjectMemory",
+          "kind": "type"
+        },
+        {
+          "name": "AgentModelChoice",
+          "kind": "type"
+        },
+        {
+          "name": "ProjectResearchFinding",
+          "kind": "type"
+        },
+        {
+          "name": "UserMemory",
+          "kind": "type"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "CONTRACT_VERSION",
+          "kind": "variable"
+        },
+        {
+          "name": "isFutureContract",
+          "kind": "function"
+        },
+        {
+          "name": "ExtensionKey",
+          "kind": "type"
+        },
+        {
+          "name": "SessionMeta",
+          "kind": "interface"
+        },
+        {
+          "name": "TodoStatus",
+          "kind": "type"
+        },
+        {
+          "name": "TodoItem",
+          "kind": "interface"
+        },
+        {
+          "name": "TodoList",
+          "kind": "interface"
+        },
+        {
+          "name": "MemoryFact",
+          "kind": "interface"
+        },
+        {
+          "name": "ProjectMemory",
+          "kind": "interface"
+        },
+        {
+          "name": "AgentModelChoice",
+          "kind": "interface"
+        },
+        {
+          "name": "ProjectResearchFinding",
+          "kind": "interface"
+        },
+        {
+          "name": "UserMemory",
+          "kind": "interface"
+        }
+      ],
+      "mtime": 1782643959479.701,
+      "hash": "8c01c09048e39c81d9cc318003af0e89c5dbf35d141d3d322dadc07b2e28f2db"
+    },
+    "core/eval-logging.test.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/core/eval-logging.test.ts",
+      "name": "eval-logging.test.ts",
+      "relativePath": "core/eval-logging.test.ts",
+      "imports": [
+        {
+          "source": "node:test",
+          "names": ["describe", "it", "before", "after"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:assert/strict",
+          "names": ["assert"],
+          "isDefault": true,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:fs",
+          "names": ["existsSync", "readFileSync", "rmSync"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:path",
+          "names": ["join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:fs",
+          "names": ["mkdirSync"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:os",
+          "names": ["tmpdir"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./eval-logging",
+          "names": ["EvalLog", "evalLogPath", "type EvalEntry"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/eval-logging.ts"
+        },
+        {
+          "source": "./hash",
+          "names": ["cwdHash"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/hash.ts"
+        },
+        {
+          "source": "./fs",
+          "names": ["setErrorSink"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/fs.ts"
+        }
+      ],
+      "exports": [],
+      "symbols": [
+        {
+          "name": "tmp",
+          "kind": "variable"
+        },
+        {
+          "name": "p",
+          "kind": "variable"
+        },
+        {
+          "name": "cwdBase",
+          "kind": "variable"
+        },
+        {
+          "name": "log",
+          "kind": "variable"
+        },
+        {
+          "name": "entry",
+          "kind": "variable"
+        },
+        {
+          "name": "path",
+          "kind": "variable"
+        },
+        {
+          "name": "parsed",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1782643952284.1343,
+      "hash": "dbac05cfdb98422702d7fa12676685f7ec9c3f7ffda147f31efed2c492bd32a1"
+    },
+    "core/eval-logging.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/core/eval-logging.ts",
+      "name": "eval-logging.ts",
+      "relativePath": "core/eval-logging.ts",
+      "imports": [
+        {
+          "source": "node:path",
+          "names": ["join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./fs",
+          "names": ["appendLine"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/fs.ts"
+        },
+        {
+          "source": "./run-ledger",
+          "names": ["runsDir"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/run-ledger.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "EvalEntry",
+          "kind": "type"
+        },
+        {
+          "name": "evalLogPath",
+          "kind": "named"
+        },
+        {
+          "name": "EvalLog",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "EvalEntry",
+          "kind": "interface"
+        },
+        {
+          "name": "evalLogPath",
+          "kind": "function"
+        },
+        {
+          "name": "EvalLog",
+          "kind": "class"
+        }
+      ],
+      "mtime": 1782644033896.4966,
+      "hash": "b8a60914788dc72ad0441daa01ce2b0797adb14ca9d92cd2429eda26dc64f141"
+    },
+    "core/fs.test.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/core/fs.test.ts",
+      "name": "fs.test.ts",
+      "relativePath": "core/fs.test.ts",
+      "imports": [
+        {
+          "source": "node:test",
+          "names": ["test", "afterEach"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:assert/strict",
+          "names": ["assert"],
+          "isDefault": true,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:fs",
+          "names": ["mkdtempSync", "rmSync", "readdirSync", "writeFileSync", "readFileSync"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:os",
+          "names": ["tmpdir"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:path",
+          "names": ["join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./fs",
+          "names": ["readJSON", "writeJSON", "updateJSON", "appendLine", "setErrorSink"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/fs.ts"
+        }
+      ],
+      "exports": [],
+      "symbols": [
+        {
+          "name": "freshDir",
+          "kind": "function"
+        },
+        {
+          "name": "dir",
+          "kind": "variable"
+        },
+        {
+          "name": "p",
+          "kind": "variable"
+        },
+        {
+          "name": "value",
+          "kind": "variable"
+        },
+        {
+          "name": "leftovers",
+          "kind": "variable"
+        },
+        {
+          "name": "fallback",
+          "kind": "variable"
+        },
+        {
+          "name": "errors",
+          "kind": "variable"
+        },
+        {
+          "name": "result",
+          "kind": "variable"
+        },
+        {
+          "name": "staleSnapshot",
+          "kind": "variable"
+        },
+        {
+          "name": "readJSONRaw",
+          "kind": "function"
+        }
+      ],
+      "mtime": 1781685507114.0332,
+      "hash": "871bedceb341076c880b6d9f8e2ab33b630410431aca75c77a4da8ec83cddd18"
+    },
+    "core/fs.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/core/fs.ts",
+      "name": "fs.ts",
+      "relativePath": "core/fs.ts",
+      "imports": [
+        {
+          "source": "node:fs",
+          "names": [
+            "appendFileSync",
+            "existsSync",
+            "mkdirSync",
+            "readFileSync",
+            "renameSync",
+            "writeFileSync"
+          ],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:path",
+          "names": ["dirname"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        }
+      ],
+      "exports": [
+        {
+          "name": "setErrorSink",
+          "kind": "named"
+        },
+        {
+          "name": "readJSON",
+          "kind": "named"
+        },
+        {
+          "name": "writeJSON",
+          "kind": "named"
+        },
+        {
+          "name": "updateJSON",
+          "kind": "named"
+        },
+        {
+          "name": "appendLine",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "errorSink",
+          "kind": "variable"
+        },
+        {
+          "name": "setErrorSink",
+          "kind": "function"
+        },
+        {
+          "name": "readJSON",
+          "kind": "function"
+        },
+        {
+          "name": "writeJSON",
+          "kind": "function"
+        },
+        {
+          "name": "tmp",
+          "kind": "variable"
+        },
+        {
+          "name": "updateJSON",
+          "kind": "function"
+        },
+        {
+          "name": "current",
+          "kind": "variable"
+        },
+        {
+          "name": "next",
+          "kind": "variable"
+        },
+        {
+          "name": "appendLine",
+          "kind": "function"
+        }
+      ],
+      "mtime": 1781685507114.1865,
+      "hash": "152d3f08310f2f793ec7848b75f4d34ee120074932a181365ec49e89e9265f43"
+    },
+    "core/hash.test.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/core/hash.test.ts",
+      "name": "hash.test.ts",
+      "relativePath": "core/hash.test.ts",
+      "imports": [
+        {
+          "source": "node:test",
+          "names": ["test"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:assert/strict",
+          "names": ["assert"],
+          "isDefault": true,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./hash",
+          "names": ["cwdHash"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/hash.ts"
+        }
+      ],
+      "exports": [],
+      "symbols": [
+        {
+          "name": "a",
+          "kind": "variable"
+        },
+        {
+          "name": "b",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1781673708701.6208,
+      "hash": "7600b3cf6e113b67d123fa6f815c7caa2b45580e52622654eb5278378e93fac0"
+    },
+    "core/hash.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/core/hash.ts",
+      "name": "hash.ts",
+      "relativePath": "core/hash.ts",
+      "imports": [
+        {
+          "source": "node:crypto",
+          "names": ["createHash"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        }
+      ],
+      "exports": [
+        {
+          "name": "cwdHash",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "cwdHash",
+          "kind": "function"
+        }
+      ],
+      "mtime": 1781666009181.0125,
+      "hash": "b7ea12f17f8467cd6507df06ed93db8065986b1f1fa19655657c9047cad52863"
+    },
+    "core/index.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/core/index.ts",
+      "name": "index.ts",
+      "relativePath": "core/index.ts",
+      "imports": [
+        {
+          "source": "node:path",
+          "names": ["join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./fs",
+          "names": ["appendLine", "setErrorSink"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/fs.ts"
+        },
+        {
+          "source": "./paths",
+          "names": ["AGENT_DIR"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/paths.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "CONTRACT_VERSION",
+          "kind": "named"
+        },
+        {
+          "name": "isFutureContract",
+          "kind": "named"
+        },
+        {
+          "name": "cwdHash",
+          "kind": "named"
+        },
+        {
+          "name": "readJSON",
+          "kind": "named"
+        },
+        {
+          "name": "writeJSON",
+          "kind": "named"
+        },
+        {
+          "name": "updateJSON",
+          "kind": "named"
+        },
+        {
+          "name": "appendLine",
+          "kind": "named"
+        },
+        {
+          "name": "setErrorSink",
+          "kind": "named"
+        },
+        {
+          "name": "AGENT_DIR",
+          "kind": "named"
+        },
+        {
+          "name": "SESSION_META_PATH",
+          "kind": "named"
+        },
+        {
+          "name": "todoListPath",
+          "kind": "named"
+        },
+        {
+          "name": "projectMemoryPath",
+          "kind": "named"
+        },
+        {
+          "name": "readSessionMeta",
+          "kind": "named"
+        },
+        {
+          "name": "writeSessionMeta",
+          "kind": "named"
+        },
+        {
+          "name": "MAX_RETRIES",
+          "kind": "named"
+        },
+        {
+          "name": "MAX_BURST",
+          "kind": "named"
+        },
+        {
+          "name": "MAX_VERIFY_RETRIES",
+          "kind": "named"
+        },
+        {
+          "name": "MAX_DEPENDENCY_DEPTH",
+          "kind": "named"
+        },
+        {
+          "name": "DEFAULT_RETRY_POLICY",
+          "kind": "named"
+        },
+        {
+          "name": "RunLedger",
+          "kind": "named"
+        },
+        {
+          "name": "runLedgerPath",
+          "kind": "named"
+        },
+        {
+          "name": "runsDir",
+          "kind": "named"
+        },
+        {
+          "name": "EvalLog",
+          "kind": "named"
+        },
+        {
+          "name": "evalLogPath",
+          "kind": "named"
+        },
+        {
+          "name": "ERROR_LOG_PATH",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "ERROR_LOG_PATH",
+          "kind": "variable"
+        },
+        {
+          "name": "detail",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1782684948932.1672,
+      "hash": "dd21d912acebc9ac30fa74978c4fd72426ea32cf9c7d42c83553da5af975e6bc"
+    },
+    "core/paths.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/core/paths.ts",
+      "name": "paths.ts",
+      "relativePath": "core/paths.ts",
+      "imports": [
+        {
+          "source": "node:os",
+          "names": ["homedir"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:path",
+          "names": ["join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./hash",
+          "names": ["cwdHash"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/hash.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "AGENT_DIR",
+          "kind": "named"
+        },
+        {
+          "name": "SESSION_META_PATH",
+          "kind": "named"
+        },
+        {
+          "name": "todoListPath",
+          "kind": "named"
+        },
+        {
+          "name": "projectMemoryPath",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "AGENT_DIR",
+          "kind": "variable"
+        },
+        {
+          "name": "SESSION_META_PATH",
+          "kind": "variable"
+        },
+        {
+          "name": "todoListPath",
+          "kind": "function"
+        },
+        {
+          "name": "projectMemoryPath",
+          "kind": "function"
+        }
+      ],
+      "mtime": 1781666028910.6326,
+      "hash": "6eb34a56375da95742ed7622e09d3daa88a397d816a6ca76718fef7118eca2e5"
+    },
+    "core/retry-policy.test.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/core/retry-policy.test.ts",
+      "name": "retry-policy.test.ts",
+      "relativePath": "core/retry-policy.test.ts",
+      "imports": [
+        {
+          "source": "node:test",
+          "names": ["describe", "it"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:assert/strict",
+          "names": ["assert"],
+          "isDefault": true,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./retry-policy",
+          "names": [
+            "MAX_RETRIES",
+            "MAX_BURST",
+            "MAX_VERIFY_RETRIES",
+            "MAX_DEPENDENCY_DEPTH",
+            "DEFAULT_RETRY_POLICY"
+          ],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/retry-policy.ts"
+        }
+      ],
+      "exports": [],
+      "symbols": [],
+      "mtime": 1782643903223.8994,
+      "hash": "65da8a425f3f5971e6e29d96383b96314c2e69837f7107194dd605d048b1224c"
+    },
+    "core/retry-policy.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/core/retry-policy.ts",
+      "name": "retry-policy.ts",
+      "relativePath": "core/retry-policy.ts",
+      "imports": [],
+      "exports": [
+        {
+          "name": "RetryPolicy",
+          "kind": "type"
+        },
+        {
+          "name": "MAX_RETRIES",
+          "kind": "named"
+        },
+        {
+          "name": "MAX_BURST",
+          "kind": "named"
+        },
+        {
+          "name": "MAX_VERIFY_RETRIES",
+          "kind": "named"
+        },
+        {
+          "name": "MAX_DEPENDENCY_DEPTH",
+          "kind": "named"
+        },
+        {
+          "name": "DEFAULT_RETRY_POLICY",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "RetryPolicy",
+          "kind": "interface"
+        },
+        {
+          "name": "MAX_RETRIES",
+          "kind": "variable"
+        },
+        {
+          "name": "MAX_BURST",
+          "kind": "variable"
+        },
+        {
+          "name": "MAX_VERIFY_RETRIES",
+          "kind": "variable"
+        },
+        {
+          "name": "MAX_DEPENDENCY_DEPTH",
+          "kind": "variable"
+        },
+        {
+          "name": "DEFAULT_RETRY_POLICY",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1782643884237.2874,
+      "hash": "d0ab19deb2bcb79dd54b46c7421fa2ad2a5ac0745d467191f0b99b1b8c52056d"
+    },
+    "core/run-ledger.test.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/core/run-ledger.test.ts",
+      "name": "run-ledger.test.ts",
+      "relativePath": "core/run-ledger.test.ts",
+      "imports": [
+        {
+          "source": "node:test",
+          "names": ["describe", "it", "before", "after"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:assert/strict",
+          "names": ["assert"],
+          "isDefault": true,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:fs",
+          "names": ["existsSync", "mkdirSync", "readFileSync", "rmSync"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:path",
+          "names": ["join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:os",
+          "names": ["tmpdir"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./run-ledger",
+          "names": ["RunLedger", "runLedgerPath", "runsDir", "type RunEvent"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/run-ledger.ts"
+        },
+        {
+          "source": "./hash",
+          "names": ["cwdHash"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/hash.ts"
+        },
+        {
+          "source": "./fs",
+          "names": ["setErrorSink"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/fs.ts"
+        }
+      ],
+      "exports": [],
+      "symbols": [
+        {
+          "name": "CWD",
+          "kind": "variable"
+        },
+        {
+          "name": "SLUG",
+          "kind": "variable"
+        },
+        {
+          "name": "tmp",
+          "kind": "variable"
+        },
+        {
+          "name": "p",
+          "kind": "variable"
+        },
+        {
+          "name": "a",
+          "kind": "variable"
+        },
+        {
+          "name": "b",
+          "kind": "variable"
+        },
+        {
+          "name": "cwdBase",
+          "kind": "variable"
+        },
+        {
+          "name": "ledger",
+          "kind": "variable"
+        },
+        {
+          "name": "event",
+          "kind": "variable"
+        },
+        {
+          "name": "path",
+          "kind": "variable"
+        },
+        {
+          "name": "lines",
+          "kind": "variable"
+        },
+        {
+          "name": "parsed1",
+          "kind": "variable"
+        },
+        {
+          "name": "parsed2",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1782643935034.9456,
+      "hash": "754d179e3b2d7ea1e03f1b41e91687034d85cc9122885ba846e2df29d1cf4d27"
+    },
+    "core/run-ledger.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/core/run-ledger.ts",
+      "name": "run-ledger.ts",
+      "relativePath": "core/run-ledger.ts",
+      "imports": [
+        {
+          "source": "node:path",
+          "names": ["join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./paths",
+          "names": ["AGENT_DIR"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/paths.ts"
+        },
+        {
+          "source": "./hash",
+          "names": ["cwdHash"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/hash.ts"
+        },
+        {
+          "source": "./fs",
+          "names": ["appendLine"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/fs.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "RunEventKind",
+          "kind": "type"
+        },
+        {
+          "name": "RunEvent",
+          "kind": "type"
+        },
+        {
+          "name": "runsDir",
+          "kind": "named"
+        },
+        {
+          "name": "runLedgerPath",
+          "kind": "named"
+        },
+        {
+          "name": "RunLedger",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "RunEventKind",
+          "kind": "type"
+        },
+        {
+          "name": "RunEvent",
+          "kind": "interface"
+        },
+        {
+          "name": "runsDir",
+          "kind": "function"
+        },
+        {
+          "name": "runLedgerPath",
+          "kind": "function"
+        },
+        {
+          "name": "RunLedger",
+          "kind": "class"
+        }
+      ],
+      "mtime": 1782643923902.515,
+      "hash": "17c8ee0e6c8638291219129af72d5d571a72064e7dbea47956cccca6f914f818"
+    },
+    "core/session-meta.test.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/core/session-meta.test.ts",
+      "name": "session-meta.test.ts",
+      "relativePath": "core/session-meta.test.ts",
+      "imports": [
+        {
+          "source": "node:test",
+          "names": ["test", "before", "after"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:assert/strict",
+          "names": ["assert"],
+          "isDefault": true,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:fs",
+          "names": ["mkdtempSync", "rmSync", "writeFileSync", "existsSync", "readFileSync"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:os",
+          "names": ["tmpdir"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:path",
+          "names": ["join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./contract",
+          "names": ["CONTRACT_VERSION"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/contract.ts"
+        }
+      ],
+      "exports": [],
+      "symbols": [
+        {
+          "name": "home",
+          "kind": "variable"
+        },
+        {
+          "name": "metaPath",
+          "kind": "variable"
+        },
+        {
+          "name": "sm",
+          "kind": "variable"
+        },
+        {
+          "name": "reset",
+          "kind": "function"
+        },
+        {
+          "name": "meta",
+          "kind": "variable"
+        },
+        {
+          "name": "future",
+          "kind": "variable"
+        },
+        {
+          "name": "onDisk",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1781687050218.7058,
+      "hash": "ba14b9411c9fa97c652530dde9c1c070c9aca6673297a21d73c2ec6afa5dbead"
+    },
+    "core/session-meta.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/core/session-meta.ts",
+      "name": "session-meta.ts",
+      "relativePath": "core/session-meta.ts",
+      "imports": [
+        {
+          "source": "./paths",
+          "names": ["SESSION_META_PATH"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/paths.ts"
+        },
+        {
+          "source": "./hash",
+          "names": ["cwdHash"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/hash.ts"
+        },
+        {
+          "source": "./fs",
+          "names": ["readJSON", "updateJSON"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/fs.ts"
+        },
+        {
+          "source": "./contract",
+          "names": ["CONTRACT_VERSION", "isFutureContract"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/contract.ts"
+        },
+        {
+          "source": "./contract",
+          "names": ["ExtensionKey", "SessionMeta"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "core/contract.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "readSessionMeta",
+          "kind": "named"
+        },
+        {
+          "name": "writeSessionMeta",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "readSessionMeta",
+          "kind": "function"
+        },
+        {
+          "name": "meta",
+          "kind": "variable"
+        },
+        {
+          "name": "writeSessionMeta",
+          "kind": "function"
+        },
+        {
+          "name": "now",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1781687050218.8381,
+      "hash": "50a7c08b801d49ac5e35f9b977f924d61d32505ff46effaf1691c77e8ba15f1e"
+    },
+    "extensions/memory/detect.test.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/memory/detect.test.ts",
+      "name": "detect.test.ts",
+      "relativePath": "extensions/memory/detect.test.ts",
+      "imports": [
+        {
+          "source": "node:test",
+          "names": ["test"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:assert/strict",
+          "names": ["assert"],
+          "isDefault": true,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:fs",
+          "names": ["mkdtempSync", "rmSync", "writeFileSync"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:os",
+          "names": ["tmpdir"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:path",
+          "names": ["join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "../../core",
+          "names": ["ProjectMemory"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "core/index.ts"
+        },
+        {
+          "source": "./detect",
+          "names": ["detectProject", "reconcile", "sameFingerprint"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/memory/detect.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "a",
+          "kind": "named"
+        },
+        {
+          "name": "b",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "fixtureProject",
+          "kind": "function"
+        },
+        {
+          "name": "dir",
+          "kind": "variable"
+        },
+        {
+          "name": "p",
+          "kind": "variable"
+        },
+        {
+          "name": "stored",
+          "kind": "variable"
+        },
+        {
+          "name": "merged",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1781793059175.868,
+      "hash": "a75c9e1a2260df29c3fba311b1f874125cb8275b1da24b0418ec7cccdc345e6a"
+    },
+    "extensions/memory/detect.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/memory/detect.ts",
+      "name": "detect.ts",
+      "relativePath": "extensions/memory/detect.ts",
+      "imports": [
+        {
+          "source": "node:child_process",
+          "names": ["spawn"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:fs",
+          "names": ["existsSync", "readFileSync", "readdirSync", "statSync"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:path",
+          "names": ["join", "basename"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "../../core",
+          "names": ["ProjectMemory", "UserMemory"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "core/index.ts"
+        },
+        {
+          "source": "./profile",
+          "names": ["reconcileProfile"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/memory/profile.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "projectFingerprint",
+          "kind": "named"
+        },
+        {
+          "name": "sameFingerprint",
+          "kind": "named"
+        },
+        {
+          "name": "detectProject",
+          "kind": "named"
+        },
+        {
+          "name": "reconcile",
+          "kind": "named"
+        },
+        {
+          "name": "detectUser",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "ProjectSignals",
+          "kind": "interface"
+        },
+        {
+          "name": "FINGERPRINT_FILES",
+          "kind": "variable"
+        },
+        {
+          "name": "projectFingerprint",
+          "kind": "function"
+        },
+        {
+          "name": "fingerprint",
+          "kind": "variable"
+        },
+        {
+          "name": "p",
+          "kind": "variable"
+        },
+        {
+          "name": "sameFingerprint",
+          "kind": "function"
+        },
+        {
+          "name": "aKeys",
+          "kind": "variable"
+        },
+        {
+          "name": "has",
+          "kind": "function"
+        },
+        {
+          "name": "readPkg",
+          "kind": "function"
+        },
+        {
+          "name": "collectExtCounts",
+          "kind": "function"
+        },
+        {
+          "name": "counts",
+          "kind": "variable"
+        },
+        {
+          "name": "TARGET_EXTS",
+          "kind": "variable"
+        },
+        {
+          "name": "walk",
+          "kind": "function"
+        },
+        {
+          "name": "entries",
+          "kind": "variable"
+        },
+        {
+          "name": "full",
+          "kind": "variable"
+        },
+        {
+          "name": "st",
+          "kind": "variable"
+        },
+        {
+          "name": "CONFIG_EXTS",
+          "kind": "variable"
+        },
+        {
+          "name": "collectSignals",
+          "kind": "function"
+        },
+        {
+          "name": "pkg",
+          "kind": "variable"
+        },
+        {
+          "name": "deps",
+          "kind": "variable"
+        },
+        {
+          "name": "extCounts",
+          "kind": "variable"
+        },
+        {
+          "name": "pyprojectRaw",
+          "kind": "variable"
+        },
+        {
+          "name": "pp",
+          "kind": "variable"
+        },
+        {
+          "name": "cargoRaw",
+          "kind": "variable"
+        },
+        {
+          "name": "cp",
+          "kind": "variable"
+        },
+        {
+          "name": "detectPackageManager",
+          "kind": "function"
+        },
+        {
+          "name": "detectLanguage",
+          "kind": "function"
+        },
+        {
+          "name": "best",
+          "kind": "variable"
+        },
+        {
+          "name": "detectFramework",
+          "kind": "function"
+        },
+        {
+          "name": "detectDesignSystem",
+          "kind": "function"
+        },
+        {
+          "name": "detectBuildTool",
+          "kind": "function"
+        },
+        {
+          "name": "detectTestRunner",
+          "kind": "function"
+        },
+        {
+          "name": "detectLinter",
+          "kind": "function"
+        },
+        {
+          "name": "detectFormatter",
+          "kind": "function"
+        },
+        {
+          "name": "detectDirectoryPattern",
+          "kind": "function"
+        },
+        {
+          "name": "layers",
+          "kind": "variable"
+        },
+        {
+          "name": "layerCount",
+          "kind": "variable"
+        },
+        {
+          "name": "mvcCount",
+          "kind": "variable"
+        },
+        {
+          "name": "flatDirs",
+          "kind": "variable"
+        },
+        {
+          "name": "COMMIT_STYLE_CACHE_MAX",
+          "kind": "variable"
+        },
+        {
+          "name": "commitStyleCache",
+          "kind": "variable"
+        },
+        {
+          "name": "pruneCommitStyleCache",
+          "kind": "function"
+        },
+        {
+          "name": "now",
+          "kind": "variable"
+        },
+        {
+          "name": "oldest",
+          "kind": "variable"
+        },
+        {
+          "name": "detectCommitStyle",
+          "kind": "function"
+        },
+        {
+          "name": "cached",
+          "kind": "variable"
+        },
+        {
+          "name": "value",
+          "kind": "variable"
+        },
+        {
+          "name": "child",
+          "kind": "variable"
+        },
+        {
+          "name": "chunks",
+          "kind": "variable"
+        },
+        {
+          "name": "code",
+          "kind": "variable"
+        },
+        {
+          "name": "stdout",
+          "kind": "variable"
+        },
+        {
+          "name": "lines",
+          "kind": "variable"
+        },
+        {
+          "name": "matchCount",
+          "kind": "variable"
+        },
+        {
+          "name": "imperative",
+          "kind": "variable"
+        },
+        {
+          "name": "detectIndent",
+          "kind": "function"
+        },
+        {
+          "name": "ec",
+          "kind": "variable"
+        },
+        {
+          "name": "content",
+          "kind": "variable"
+        },
+        {
+          "name": "tabMatch",
+          "kind": "variable"
+        },
+        {
+          "name": "spaceMatch",
+          "kind": "variable"
+        },
+        {
+          "name": "sizeMatch",
+          "kind": "variable"
+        },
+        {
+          "name": "pr",
+          "kind": "variable"
+        },
+        {
+          "name": "tsFile",
+          "kind": "variable"
+        },
+        {
+          "name": "tabLines",
+          "kind": "variable"
+        },
+        {
+          "name": "match",
+          "kind": "variable"
+        },
+        {
+          "name": "size",
+          "kind": "variable"
+        },
+        {
+          "name": "detectProject",
+          "kind": "function"
+        },
+        {
+          "name": "s",
+          "kind": "variable"
+        },
+        {
+          "name": "name",
+          "kind": "variable"
+        },
+        {
+          "name": "reconcile",
+          "kind": "function"
+        },
+        {
+          "name": "detectUser",
+          "kind": "function"
+        }
+      ],
+      "mtime": 1781793059176.0002,
+      "hash": "6c34e0c7eaa712da08fa726a3b91173f24ccbaded7a403d39957b6b9314855ff"
+    },
+    "extensions/memory/index.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/memory/index.ts",
+      "name": "index.ts",
+      "relativePath": "extensions/memory/index.ts",
+      "imports": [
+        {
+          "source": "@earendil-works/pi-coding-agent",
+          "names": ["ExtensionAPI", "ExtensionContext"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": ""
+        },
+        {
+          "source": "@earendil-works/pi-ai",
+          "names": ["StringEnum"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "typebox",
+          "names": ["Type"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:path",
+          "names": ["basename", "join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "../../core",
+          "names": [
+            "AGENT_DIR",
+            "CONTRACT_VERSION",
+            "cwdHash",
+            "isFutureContract",
+            "readJSON",
+            "writeJSON",
+            "updateJSON",
+            "writeSessionMeta"
+          ],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/index.ts"
+        },
+        {
+          "source": "../../core",
+          "names": ["ProjectMemory", "MemoryFact", "UserMemory"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "core/index.ts"
+        },
+        {
+          "source": "./profile",
+          "names": ["withForeignFromDisk"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/memory/profile.ts"
+        },
+        {
+          "source": "./detect",
+          "names": [
+            "detectProject",
+            "reconcile",
+            "detectUser",
+            "projectFingerprint",
+            "sameFingerprint"
+          ],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/memory/detect.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "default",
+          "kind": "default"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "USER_PATH",
+          "kind": "variable"
+        },
+        {
+          "name": "PROJECTS_DIR",
+          "kind": "variable"
+        },
+        {
+          "name": "getAgentIdentity",
+          "kind": "function"
+        },
+        {
+          "name": "projectPath",
+          "kind": "function"
+        },
+        {
+          "name": "defaultProject",
+          "kind": "function"
+        },
+        {
+          "name": "loadProject",
+          "kind": "function"
+        },
+        {
+          "name": "profile",
+          "kind": "variable"
+        },
+        {
+          "name": "saveProject",
+          "kind": "function"
+        },
+        {
+          "name": "defaultUser",
+          "kind": "function"
+        },
+        {
+          "name": "loadUser",
+          "kind": "function"
+        },
+        {
+          "name": "saveUser",
+          "kind": "function"
+        },
+        {
+          "name": "MAX_CONVENTIONS_DISPLAY",
+          "kind": "variable"
+        },
+        {
+          "name": "MAX_CONVENTION_LENGTH",
+          "kind": "variable"
+        },
+        {
+          "name": "MAX_EXTRAS_DISPLAY",
+          "kind": "variable"
+        },
+        {
+          "name": "MAX_FACTS_DISPLAY",
+          "kind": "variable"
+        },
+        {
+          "name": "MAX_FACT_LENGTH",
+          "kind": "variable"
+        },
+        {
+          "name": "filterRelevantFacts",
+          "kind": "function"
+        },
+        {
+          "name": "budgetFacts",
+          "kind": "function"
+        },
+        {
+          "name": "sorted",
+          "kind": "variable"
+        },
+        {
+          "name": "trimmed",
+          "kind": "variable"
+        },
+        {
+          "name": "displayed",
+          "kind": "variable"
+        },
+        {
+          "name": "prefix",
+          "kind": "variable"
+        },
+        {
+          "name": "body",
+          "kind": "variable"
+        },
+        {
+          "name": "truncateConvention",
+          "kind": "function"
+        },
+        {
+          "name": "budgetConventions",
+          "kind": "function"
+        },
+        {
+          "name": "hidden",
+          "kind": "variable"
+        },
+        {
+          "name": "memoryLabel",
+          "kind": "function"
+        },
+        {
+          "name": "writeMemorySessionMeta",
+          "kind": "function"
+        },
+        {
+          "name": "renderMemoryStatus",
+          "kind": "function"
+        },
+        {
+          "name": "theme",
+          "kind": "variable"
+        },
+        {
+          "name": "label",
+          "kind": "variable"
+        },
+        {
+          "name": "buildPromptBlock",
+          "kind": "function"
+        },
+        {
+          "name": "agentName",
+          "kind": "variable"
+        },
+        {
+          "name": "lines",
+          "kind": "variable"
+        },
+        {
+          "name": "tech",
+          "kind": "variable"
+        },
+        {
+          "name": "extras",
+          "kind": "variable"
+        },
+        {
+          "name": "suffix",
+          "kind": "variable"
+        },
+        {
+          "name": "projectFacts",
+          "kind": "variable"
+        },
+        {
+          "name": "userBits",
+          "kind": "variable"
+        },
+        {
+          "name": "userFacts",
+          "kind": "variable"
+        },
+        {
+          "name": "projectProfile",
+          "kind": "variable"
+        },
+        {
+          "name": "projectProfileCwd",
+          "kind": "variable"
+        },
+        {
+          "name": "getProject",
+          "kind": "function"
+        },
+        {
+          "name": "stored",
+          "kind": "variable"
+        },
+        {
+          "name": "currentFingerprint",
+          "kind": "variable"
+        },
+        {
+          "name": "project",
+          "kind": "variable"
+        },
+        {
+          "name": "user",
+          "kind": "variable"
+        },
+        {
+          "name": "now",
+          "kind": "variable"
+        },
+        {
+          "name": "scope",
+          "kind": "variable"
+        },
+        {
+          "name": "compactStats",
+          "kind": "variable"
+        },
+        {
+          "name": "beforeC",
+          "kind": "variable"
+        },
+        {
+          "name": "beforeF",
+          "kind": "variable"
+        },
+        {
+          "name": "q",
+          "kind": "variable"
+        },
+        {
+          "name": "agent",
+          "kind": "variable"
+        },
+        {
+          "name": "SearchHit",
+          "kind": "interface"
+        },
+        {
+          "name": "hits",
+          "kind": "variable"
+        },
+        {
+          "name": "num",
+          "kind": "variable"
+        },
+        {
+          "name": "scopeTag",
+          "kind": "variable"
+        },
+        {
+          "name": "LINT_LONG_CONVENTION",
+          "kind": "variable"
+        },
+        {
+          "name": "LINT_LONG_FACT",
+          "kind": "variable"
+        },
+        {
+          "name": "LINT_OVERSIZED_CAPSULE_BYTES",
+          "kind": "variable"
+        },
+        {
+          "name": "LintIssue",
+          "kind": "interface"
+        },
+        {
+          "name": "issues",
+          "kind": "variable"
+        },
+        {
+          "name": "seenPC",
+          "kind": "variable"
+        },
+        {
+          "name": "lower",
+          "kind": "variable"
+        },
+        {
+          "name": "seenPF",
+          "kind": "variable"
+        },
+        {
+          "name": "key",
+          "kind": "variable"
+        },
+        {
+          "name": "seenUC",
+          "kind": "variable"
+        },
+        {
+          "name": "seenUF",
+          "kind": "variable"
+        },
+        {
+          "name": "projectJson",
+          "kind": "variable"
+        },
+        {
+          "name": "userJson",
+          "kind": "variable"
+        },
+        {
+          "name": "totalCounts",
+          "kind": "variable"
+        },
+        {
+          "name": "loc",
+          "kind": "variable"
+        },
+        {
+          "name": "detail",
+          "kind": "variable"
+        },
+        {
+          "name": "block",
+          "kind": "variable"
+        },
+        {
+          "name": "changed",
+          "kind": "variable"
+        },
+        {
+          "name": "restStr",
+          "kind": "variable"
+        },
+        {
+          "name": "fresh",
+          "kind": "variable"
+        },
+        {
+          "name": "eq",
+          "kind": "variable"
+        },
+        {
+          "name": "value",
+          "kind": "variable"
+        },
+        {
+          "name": "pBefore",
+          "kind": "variable"
+        },
+        {
+          "name": "uBefore",
+          "kind": "variable"
+        },
+        {
+          "name": "pRemoved",
+          "kind": "variable"
+        },
+        {
+          "name": "uRemoved",
+          "kind": "variable"
+        },
+        {
+          "name": "total",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1781793059176.2053,
+      "hash": "95d0ac44c4f5f34a56c3adaf1dc1013da46b411fd2e3c05d67ab8bc951f7c474"
+    },
+    "extensions/memory/profile.test.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/memory/profile.test.ts",
+      "name": "profile.test.ts",
+      "relativePath": "extensions/memory/profile.test.ts",
+      "imports": [
+        {
+          "source": "node:test",
+          "names": ["test"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:assert/strict",
+          "names": ["assert"],
+          "isDefault": true,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "../../core",
+          "names": ["ProjectMemory"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "core/index.ts"
+        },
+        {
+          "source": "./profile",
+          "names": ["reconcileProfile", "withForeignFromDisk"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/memory/profile.ts"
+        }
+      ],
+      "exports": [],
+      "symbols": [
+        {
+          "name": "stored",
+          "kind": "function"
+        },
+        {
+          "name": "fresh",
+          "kind": "function"
+        },
+        {
+          "name": "merged",
+          "kind": "variable"
+        },
+        {
+          "name": "s",
+          "kind": "variable"
+        },
+        {
+          "name": "f",
+          "kind": "variable"
+        },
+        {
+          "name": "profile",
+          "kind": "variable"
+        },
+        {
+          "name": "onDisk",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1781685507114.7295,
+      "hash": "8ec47d827b032b609b770d46cce52093d0fe139826b13bbba98b812b206e0bbd"
+    },
+    "extensions/memory/profile.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/memory/profile.ts",
+      "name": "profile.ts",
+      "relativePath": "extensions/memory/profile.ts",
+      "imports": [
+        {
+          "source": "../../core",
+          "names": ["ProjectMemory"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "core/index.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "reconcileProfile",
+          "kind": "named"
+        },
+        {
+          "name": "withForeignFromDisk",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "reconcileProfile",
+          "kind": "function"
+        },
+        {
+          "name": "withForeignFromDisk",
+          "kind": "function"
+        }
+      ],
+      "mtime": 1782136817857.4028,
+      "hash": "a8da89ba127eaccbf505ec4b0b51b051b2533eafd20b1d07cbcb9bbaebee8a8b"
+    },
+    "extensions/quest/codebase.test.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/codebase.test.ts",
+      "name": "codebase.test.ts",
+      "relativePath": "extensions/quest/codebase.test.ts",
+      "imports": [
+        {
+          "source": "node:fs",
+          "names": ["mkdtempSync", "mkdirSync", "writeFileSync"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:os",
+          "names": ["tmpdir"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:path",
+          "names": ["join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:test",
+          "names": ["test"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:assert/strict",
+          "names": ["assert"],
+          "isDefault": true,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./codebase",
+          "names": [
+            "buildVerificationImpactContext",
+            "CODEBASE_CACHE_PATH",
+            "enrichPlanningContext",
+            "hasCodebaseCache",
+            "hasCodebaseTool",
+            "impactCodebaseFile",
+            "loadCodebaseIndex",
+            "mapCodebaseFile",
+            "queryCodebaseIndex"
+          ],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/codebase.ts"
+        },
+        {
+          "source": "./types",
+          "names": ["QuestTask"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "extensions/quest/types.ts"
+        }
+      ],
+      "exports": [],
+      "symbols": [
+        {
+          "name": "tempRepo",
+          "kind": "function"
+        },
+        {
+          "name": "cwd",
+          "kind": "variable"
+        },
+        {
+          "name": "writeIndex",
+          "kind": "function"
+        },
+        {
+          "name": "task",
+          "kind": "function"
+        },
+        {
+          "name": "supported",
+          "kind": "variable"
+        },
+        {
+          "name": "future",
+          "kind": "variable"
+        },
+        {
+          "name": "loaded",
+          "kind": "variable"
+        },
+        {
+          "name": "result",
+          "kind": "variable"
+        },
+        {
+          "name": "context",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1782344726049.333,
+      "hash": "6fb93458870e3b9be411ee774eaf1d2b6468a80addc8152430c5bd916ebbf07c"
+    },
+    "extensions/quest/codebase.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/codebase.ts",
+      "name": "codebase.ts",
+      "relativePath": "extensions/quest/codebase.ts",
+      "imports": [
+        {
+          "source": "node:fs",
+          "names": ["existsSync", "readFileSync"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:path",
+          "names": ["join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./types",
+          "names": ["QuestTask"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "extensions/quest/types.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "CODEBASE_CACHE_PATH",
+          "kind": "named"
+        },
+        {
+          "name": "SUPPORTED_CODEBASE_CONTRACT_VERSION",
+          "kind": "named"
+        },
+        {
+          "name": "CodebaseImportEntry",
+          "kind": "type"
+        },
+        {
+          "name": "CodebaseExportEntry",
+          "kind": "type"
+        },
+        {
+          "name": "CodebaseSymbolEntry",
+          "kind": "type"
+        },
+        {
+          "name": "CodebaseFileEntry",
+          "kind": "type"
+        },
+        {
+          "name": "CodebaseIndexV1",
+          "kind": "type"
+        },
+        {
+          "name": "CodebaseLoadResult",
+          "kind": "type"
+        },
+        {
+          "name": "CodebaseQueryResult",
+          "kind": "type"
+        },
+        {
+          "name": "CodebaseMapResult",
+          "kind": "type"
+        },
+        {
+          "name": "PlanningEnrichmentResult",
+          "kind": "type"
+        },
+        {
+          "name": "codebaseCachePath",
+          "kind": "named"
+        },
+        {
+          "name": "hasCodebaseCache",
+          "kind": "named"
+        },
+        {
+          "name": "hasCodebaseTool",
+          "kind": "named"
+        },
+        {
+          "name": "loadCodebaseIndex",
+          "kind": "named"
+        },
+        {
+          "name": "queryCodebaseIndex",
+          "kind": "named"
+        },
+        {
+          "name": "mapCodebaseFile",
+          "kind": "named"
+        },
+        {
+          "name": "impactCodebaseFile",
+          "kind": "named"
+        },
+        {
+          "name": "deriveCodebasePatterns",
+          "kind": "named"
+        },
+        {
+          "name": "enrichPlanningContext",
+          "kind": "named"
+        },
+        {
+          "name": "extractFilePaths",
+          "kind": "named"
+        },
+        {
+          "name": "buildVerificationImpactContext",
+          "kind": "named"
+        },
+        {
+          "name": "codebaseStatusSummary",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "CODEBASE_CACHE_PATH",
+          "kind": "variable"
+        },
+        {
+          "name": "SUPPORTED_CODEBASE_CONTRACT_VERSION",
+          "kind": "variable"
+        },
+        {
+          "name": "CodebaseImportEntry",
+          "kind": "interface"
+        },
+        {
+          "name": "CodebaseExportEntry",
+          "kind": "interface"
+        },
+        {
+          "name": "CodebaseSymbolEntry",
+          "kind": "interface"
+        },
+        {
+          "name": "CodebaseFileEntry",
+          "kind": "interface"
+        },
+        {
+          "name": "CodebaseIndexV1",
+          "kind": "interface"
+        },
+        {
+          "name": "CodebaseLoadResult",
+          "kind": "type"
+        },
+        {
+          "name": "CodebaseQueryResult",
+          "kind": "interface"
+        },
+        {
+          "name": "CodebaseMapResult",
+          "kind": "interface"
+        },
+        {
+          "name": "PlanningEnrichmentResult",
+          "kind": "interface"
+        },
+        {
+          "name": "COMMON_WORDS",
+          "kind": "variable"
+        },
+        {
+          "name": "codebaseCachePath",
+          "kind": "function"
+        },
+        {
+          "name": "hasCodebaseCache",
+          "kind": "function"
+        },
+        {
+          "name": "hasCodebaseTool",
+          "kind": "function"
+        },
+        {
+          "name": "loadCodebaseIndex",
+          "kind": "function"
+        },
+        {
+          "name": "path",
+          "kind": "variable"
+        },
+        {
+          "name": "parsed",
+          "kind": "variable"
+        },
+        {
+          "name": "blob",
+          "kind": "variable"
+        },
+        {
+          "name": "contractVersion",
+          "kind": "variable"
+        },
+        {
+          "name": "fileToQueryResult",
+          "kind": "function"
+        },
+        {
+          "name": "queryCodebaseIndex",
+          "kind": "function"
+        },
+        {
+          "name": "needle",
+          "kind": "variable"
+        },
+        {
+          "name": "scored",
+          "kind": "variable"
+        },
+        {
+          "name": "rel",
+          "kind": "variable"
+        },
+        {
+          "name": "name",
+          "kind": "variable"
+        },
+        {
+          "name": "symbols",
+          "kind": "variable"
+        },
+        {
+          "name": "exports",
+          "kind": "variable"
+        },
+        {
+          "name": "score",
+          "kind": "variable"
+        },
+        {
+          "name": "mapCodebaseFile",
+          "kind": "function"
+        },
+        {
+          "name": "relativePath",
+          "kind": "variable"
+        },
+        {
+          "name": "entry",
+          "kind": "variable"
+        },
+        {
+          "name": "impactCodebaseFile",
+          "kind": "function"
+        },
+        {
+          "name": "start",
+          "kind": "variable"
+        },
+        {
+          "name": "seen",
+          "kind": "variable"
+        },
+        {
+          "name": "queue",
+          "kind": "variable"
+        },
+        {
+          "name": "next",
+          "kind": "variable"
+        },
+        {
+          "name": "deriveCodebasePatterns",
+          "kind": "function"
+        },
+        {
+          "name": "pathParts",
+          "kind": "variable"
+        },
+        {
+          "name": "words",
+          "kind": "variable"
+        },
+        {
+          "name": "enrichPlanningContext",
+          "kind": "function"
+        },
+        {
+          "name": "cache",
+          "kind": "variable"
+        },
+        {
+          "name": "enrichedTasks",
+          "kind": "variable"
+        },
+        {
+          "name": "patterns",
+          "kind": "variable"
+        },
+        {
+          "name": "relevant",
+          "kind": "variable"
+        },
+        {
+          "name": "maps",
+          "kind": "variable"
+        },
+        {
+          "name": "block",
+          "kind": "variable"
+        },
+        {
+          "name": "enrichedCount",
+          "kind": "variable"
+        },
+        {
+          "name": "extractFilePaths",
+          "kind": "function"
+        },
+        {
+          "name": "matches",
+          "kind": "variable"
+        },
+        {
+          "name": "buildVerificationImpactContext",
+          "kind": "function"
+        },
+        {
+          "name": "files",
+          "kind": "variable"
+        },
+        {
+          "name": "toolPrompt",
+          "kind": "variable"
+        },
+        {
+          "name": "impactLines",
+          "kind": "variable"
+        },
+        {
+          "name": "impact",
+          "kind": "variable"
+        },
+        {
+          "name": "codebaseStatusSummary",
+          "kind": "function"
+        },
+        {
+          "name": "formatPlanningBlock",
+          "kind": "function"
+        },
+        {
+          "name": "lines",
+          "kind": "variable"
+        },
+        {
+          "name": "deps",
+          "kind": "variable"
+        },
+        {
+          "name": "revDeps",
+          "kind": "variable"
+        },
+        {
+          "name": "normalizeRelativePath",
+          "kind": "function"
+        },
+        {
+          "name": "uniqueByPath",
+          "kind": "function"
+        }
+      ],
+      "mtime": 1782344737603.2727,
+      "hash": "59b35cbf6332ac696334e67ffe453f5654c1cf085060d9eda7fdb685b628b508"
+    },
+    "extensions/quest/constants.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/constants.ts",
+      "name": "constants.ts",
+      "relativePath": "extensions/quest/constants.ts",
+      "imports": [
+        {
+          "source": "node:path",
+          "names": ["join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "../../core",
+          "names": [
+            "AGENT_DIR",
+            "MAX_BURST",
+            "MAX_RETRIES",
+            "MAX_VERIFY_RETRIES",
+            "MAX_DEPENDENCY_DEPTH"
+          ],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/index.ts"
+        },
+        {
+          "source": "./types",
+          "names": ["TaskStatus", "TeamConfig"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "extensions/quest/types.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "MAX_BURST",
+          "kind": "named"
+        },
+        {
+          "name": "MAX_RETRIES",
+          "kind": "named"
+        },
+        {
+          "name": "MAX_VERIFY_RETRIES",
+          "kind": "named"
+        },
+        {
+          "name": "MAX_DEPENDENCY_DEPTH",
+          "kind": "named"
+        },
+        {
+          "name": "FORMAT_DIRECTIVE",
+          "kind": "named"
+        },
+        {
+          "name": "AGENT_DIR",
+          "kind": "named"
+        },
+        {
+          "name": "ACTIVE_PATH",
+          "kind": "named"
+        },
+        {
+          "name": "ARCHIVE_DIR",
+          "kind": "named"
+        },
+        {
+          "name": "ARCHIVE_INDEX_PATH",
+          "kind": "named"
+        },
+        {
+          "name": "TEAMS_DIR",
+          "kind": "named"
+        },
+        {
+          "name": "ERROR_LOG_PATH",
+          "kind": "named"
+        },
+        {
+          "name": "ICON",
+          "kind": "named"
+        },
+        {
+          "name": "BUILT_IN_TEAMS",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "FORMAT_DIRECTIVE",
+          "kind": "variable"
+        },
+        {
+          "name": "ACTIVE_PATH",
+          "kind": "variable"
+        },
+        {
+          "name": "ARCHIVE_DIR",
+          "kind": "variable"
+        },
+        {
+          "name": "ARCHIVE_INDEX_PATH",
+          "kind": "variable"
+        },
+        {
+          "name": "TEAMS_DIR",
+          "kind": "variable"
+        },
+        {
+          "name": "ERROR_LOG_PATH",
+          "kind": "variable"
+        },
+        {
+          "name": "ICON",
+          "kind": "variable"
+        },
+        {
+          "name": "BUILT_IN_TEAMS",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1782644071972.3657,
+      "hash": "007ba62535179343d58f77c2cec430cfff6f6cca9c0f76cbd68376e795b42c3b"
+    },
+    "extensions/quest/context-broker.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/context-broker.ts",
+      "name": "context-broker.ts",
+      "relativePath": "extensions/quest/context-broker.ts",
+      "imports": [
+        {
+          "source": "node:path",
+          "names": ["basename"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "../../core",
+          "names": ["ProjectMemory", "TodoList"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "core/index.ts"
+        },
+        {
+          "source": "./constants",
+          "names": ["FORMAT_DIRECTIVE"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/constants.ts"
+        },
+        {
+          "source": "./utils",
+          "names": ["loadProjectMemory"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/utils.ts"
+        },
+        {
+          "source": "./todo-sync",
+          "names": ["todoPath"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/todo-sync.ts"
+        },
+        {
+          "source": "../../core",
+          "names": ["readJSON"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/index.ts"
+        },
+        {
+          "source": "./codebase",
+          "names": ["loadCodebaseIndex", "codebaseStatusSummary", "type CodebaseLoadResult"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/codebase.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "ContextSource",
+          "kind": "type"
+        },
+        {
+          "name": "memorySlot",
+          "kind": "named"
+        },
+        {
+          "name": "todoSlot",
+          "kind": "named"
+        },
+        {
+          "name": "codebaseSlot",
+          "kind": "named"
+        },
+        {
+          "name": "formatSlot",
+          "kind": "named"
+        },
+        {
+          "name": "ContextMode",
+          "kind": "type"
+        },
+        {
+          "name": "ContextBuildOptions",
+          "kind": "type"
+        },
+        {
+          "name": "buildContext",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "ContextSource",
+          "kind": "interface"
+        },
+        {
+          "name": "memorySlot",
+          "kind": "function"
+        },
+        {
+          "name": "mem",
+          "kind": "variable"
+        },
+        {
+          "name": "lines",
+          "kind": "variable"
+        },
+        {
+          "name": "name",
+          "kind": "variable"
+        },
+        {
+          "name": "tech",
+          "kind": "variable"
+        },
+        {
+          "name": "conventions",
+          "kind": "variable"
+        },
+        {
+          "name": "research",
+          "kind": "variable"
+        },
+        {
+          "name": "entries",
+          "kind": "variable"
+        },
+        {
+          "name": "cat",
+          "kind": "variable"
+        },
+        {
+          "name": "val",
+          "kind": "variable"
+        },
+        {
+          "name": "todoSlot",
+          "kind": "function"
+        },
+        {
+          "name": "list",
+          "kind": "variable"
+        },
+        {
+          "name": "items",
+          "kind": "variable"
+        },
+        {
+          "name": "completed",
+          "kind": "variable"
+        },
+        {
+          "name": "active",
+          "kind": "variable"
+        },
+        {
+          "name": "delegated",
+          "kind": "variable"
+        },
+        {
+          "name": "codebaseSlot",
+          "kind": "function"
+        },
+        {
+          "name": "result",
+          "kind": "variable"
+        },
+        {
+          "name": "formatSlot",
+          "kind": "function"
+        },
+        {
+          "name": "ContextMode",
+          "kind": "type"
+        },
+        {
+          "name": "ContextBuildOptions",
+          "kind": "interface"
+        },
+        {
+          "name": "buildContext",
+          "kind": "function"
+        },
+        {
+          "name": "budget",
+          "kind": "variable"
+        },
+        {
+          "name": "sources",
+          "kind": "variable"
+        },
+        {
+          "name": "rendered",
+          "kind": "variable"
+        },
+        {
+          "name": "block",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1782644071977.4941,
+      "hash": "cea99d049289dc482981987464918680c6651e55c8c7a767afd05c9318d239a4"
+    },
+    "extensions/quest/delegate.test.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/delegate.test.ts",
+      "name": "delegate.test.ts",
+      "relativePath": "extensions/quest/delegate.test.ts",
+      "imports": [
+        {
+          "source": "node:test",
+          "names": ["test"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:assert/strict",
+          "names": ["assert"],
+          "isDefault": true,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./delegate",
+          "names": ["toolsForRole", "resolveTaskModel", "extractFinalText", "buildSubAgentPrompt"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/delegate.ts"
+        }
+      ],
+      "exports": [],
+      "symbols": [
+        {
+          "name": "tools",
+          "kind": "variable"
+        },
+        {
+          "name": "a",
+          "kind": "variable"
+        },
+        {
+          "name": "messages",
+          "kind": "variable"
+        },
+        {
+          "name": "prompt",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1782294119305.4912,
+      "hash": "bb6116f93e0936d7e64b13360d2c4832de34334c4d9a4fca2a259ceb470ad49e"
+    },
+    "extensions/quest/delegate.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/delegate.ts",
+      "name": "delegate.ts",
+      "relativePath": "extensions/quest/delegate.ts",
+      "imports": [],
+      "exports": [
+        {
+          "name": "toolsForRole",
+          "kind": "named"
+        },
+        {
+          "name": "resolveTaskModel",
+          "kind": "named"
+        },
+        {
+          "name": "extractFinalText",
+          "kind": "named"
+        },
+        {
+          "name": "SubAgentResult",
+          "kind": "type"
+        },
+        {
+          "name": "buildSubAgentPrompt",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "READ_ONLY_ROLES",
+          "kind": "variable"
+        },
+        {
+          "name": "READ_ONLY_TOOLS",
+          "kind": "variable"
+        },
+        {
+          "name": "FULL_TOOLS",
+          "kind": "variable"
+        },
+        {
+          "name": "toolsForRole",
+          "kind": "function"
+        },
+        {
+          "name": "resolveTaskModel",
+          "kind": "function"
+        },
+        {
+          "name": "fromTask",
+          "kind": "variable"
+        },
+        {
+          "name": "fromMemory",
+          "kind": "variable"
+        },
+        {
+          "name": "extractFinalText",
+          "kind": "function"
+        },
+        {
+          "name": "m",
+          "kind": "variable"
+        },
+        {
+          "name": "content",
+          "kind": "variable"
+        },
+        {
+          "name": "SubAgentResult",
+          "kind": "interface"
+        },
+        {
+          "name": "buildSubAgentPrompt",
+          "kind": "function"
+        },
+        {
+          "name": "lines",
+          "kind": "variable"
+        },
+        {
+          "name": "deps",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1782294086293.875,
+      "hash": "0e7e69af425e95fd88017348cb68c0d4ef81b8d6c09726bfe26f140f33d413b3"
+    },
+    "extensions/quest/graph.test.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/graph.test.ts",
+      "name": "graph.test.ts",
+      "relativePath": "extensions/quest/graph.test.ts",
+      "imports": [
+        {
+          "source": "node:test",
+          "names": ["test"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:assert/strict",
+          "names": ["assert"],
+          "isDefault": true,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./graph",
+          "names": ["detectDependencyCycle", "getMaxDependencyDepth"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/graph.ts"
+        }
+      ],
+      "exports": [],
+      "symbols": [
+        {
+          "name": "deps",
+          "kind": "variable"
+        },
+        {
+          "name": "cycle",
+          "kind": "variable"
+        },
+        {
+          "name": "d",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1781707077913.4126,
+      "hash": "468c4855cc225055007798711085c599d8372ddcf5f655901681f4ff5f0219fa"
+    },
+    "extensions/quest/graph.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/graph.ts",
+      "name": "graph.ts",
+      "relativePath": "extensions/quest/graph.ts",
+      "imports": [],
+      "exports": [
+        {
+          "name": "detectDependencyCycle",
+          "kind": "named"
+        },
+        {
+          "name": "getMaxDependencyDepth",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "DepNode",
+          "kind": "type"
+        },
+        {
+          "name": "detectDependencyCycle",
+          "kind": "function"
+        },
+        {
+          "name": "n",
+          "kind": "variable"
+        },
+        {
+          "name": "state",
+          "kind": "variable"
+        },
+        {
+          "name": "path",
+          "kind": "variable"
+        },
+        {
+          "name": "dfs",
+          "kind": "function"
+        },
+        {
+          "name": "cycleStart",
+          "kind": "variable"
+        },
+        {
+          "name": "result",
+          "kind": "variable"
+        },
+        {
+          "name": "getMaxDependencyDepth",
+          "kind": "function"
+        },
+        {
+          "name": "memo",
+          "kind": "variable"
+        },
+        {
+          "name": "onStack",
+          "kind": "variable"
+        },
+        {
+          "name": "depth",
+          "kind": "function"
+        },
+        {
+          "name": "max",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1781707077913.6235,
+      "hash": "1d666a4a1cc045ffa3363abbff1297d964f4f1d5effa4be5ca48e5c1087249ea"
+    },
+    "extensions/quest/index.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/index.ts",
+      "name": "index.ts",
+      "relativePath": "extensions/quest/index.ts",
+      "imports": [
+        {
+          "source": "@earendil-works/pi-coding-agent",
+          "names": ["ExtensionAPI", "ExtensionContext"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": ""
+        },
+        {
+          "source": "@earendil-works/pi-ai",
+          "names": ["StringEnum"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "typebox",
+          "names": ["Type"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:path",
+          "names": ["join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:os",
+          "names": ["homedir"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:fs",
+          "names": ["existsSync", "readFileSync"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./types",
+          "names": ["Quest", "TaskStatus"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "extensions/quest/types.ts"
+        },
+        {
+          "source": "./constants",
+          "names": [
+            "MAX_BURST",
+            "MAX_RETRIES",
+            "MAX_VERIFY_RETRIES",
+            "MAX_DEPENDENCY_DEPTH",
+            "TEAMS_DIR",
+            "FORMAT_DIRECTIVE"
+          ],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/constants.ts"
+        },
+        {
+          "source": "./utils",
+          "names": ["updateJSON", "projectMemoryPath", "CONTRACT_VERSION", "isFutureContract"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/utils.ts"
+        },
+        {
+          "source": "./storage",
+          "names": [
+            "emptyQuest",
+            "loadQuest",
+            "saveQuest",
+            "archiveQuest",
+            "syncConventionsToMemory",
+            "listArchives",
+            "loadAgentModels",
+            "rememberAgentModel"
+          ],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/storage.ts"
+        },
+        {
+          "source": "../../core",
+          "names": ["RunLedger", "EvalLog"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/index.ts"
+        },
+        {
+          "source": "../../core",
+          "names": ["RunEvent", "EvalEntry"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "core/index.ts"
+        },
+        {
+          "source": "./models",
+          "names": ["matchModel", "promptModelAssignment", "toModelLike"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/models.ts"
+        },
+        {
+          "source": "./delegate",
+          "names": ["resolveTaskModel", "buildSubAgentPrompt"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/delegate.ts"
+        },
+        {
+          "source": "./subagent",
+          "names": ["runSubAgent"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/subagent.ts"
+        },
+        {
+          "source": "./teams",
+          "names": ["loadTeams", "ensureBuiltInTeams", "teamInstallFromGit"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/teams.ts"
+        },
+        {
+          "source": "./todo-sync",
+          "names": ["syncQuestToTodo", "clearQuestFromTodo", "compactAwarenessBlock"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/todo-sync.ts"
+        },
+        {
+          "source": "./status",
+          "names": ["renderStatus", "writeQuestSessionMeta"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/status.ts"
+        },
+        {
+          "source": "./steering",
+          "names": ["nextPendingTask", "formatQuestStatus", "buildSteeringMessage"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/steering.ts"
+        },
+        {
+          "source": "./kanban",
+          "names": ["QuestKanban"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/kanban.ts"
+        },
+        {
+          "source": "./graph",
+          "names": ["detectDependencyCycle", "getMaxDependencyDepth"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/graph.ts"
+        },
+        {
+          "source": "./codebase",
+          "names": [
+            "buildVerificationImpactContext",
+            "codebaseStatusSummary",
+            "enrichPlanningContext",
+            "hasCodebaseCache",
+            "hasCodebaseTool",
+            "loadCodebaseIndex"
+          ],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/codebase.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "default",
+          "kind": "default"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "questSlug",
+          "kind": "function"
+        },
+        {
+          "name": "questCache",
+          "kind": "variable"
+        },
+        {
+          "name": "autoPilotLocked",
+          "kind": "variable"
+        },
+        {
+          "name": "ledgerCache",
+          "kind": "variable"
+        },
+        {
+          "name": "getLedgers",
+          "kind": "function"
+        },
+        {
+          "name": "entry",
+          "kind": "variable"
+        },
+        {
+          "name": "q",
+          "kind": "variable"
+        },
+        {
+          "name": "ensureLedgers",
+          "kind": "function"
+        },
+        {
+          "name": "recordRun",
+          "kind": "function"
+        },
+        {
+          "name": "recordEval",
+          "kind": "function"
+        },
+        {
+          "name": "makeEval",
+          "kind": "function"
+        },
+        {
+          "name": "getQuest",
+          "kind": "function"
+        },
+        {
+          "name": "persist",
+          "kind": "function"
+        },
+        {
+          "name": "textResult",
+          "kind": "variable"
+        },
+        {
+          "name": "codebaseToolAvailable",
+          "kind": "function"
+        },
+        {
+          "name": "stampTaskModel",
+          "kind": "function"
+        },
+        {
+          "name": "resolvePersona",
+          "kind": "function"
+        },
+        {
+          "name": "fromTeam",
+          "kind": "variable"
+        },
+        {
+          "name": "file",
+          "kind": "variable"
+        },
+        {
+          "name": "validateAndSetTeam",
+          "kind": "function"
+        },
+        {
+          "name": "config",
+          "kind": "variable"
+        },
+        {
+          "name": "existing",
+          "kind": "variable"
+        },
+        {
+          "name": "overwriteWarning",
+          "kind": "variable"
+        },
+        {
+          "name": "quest",
+          "kind": "variable"
+        },
+        {
+          "name": "modeNote",
+          "kind": "variable"
+        },
+        {
+          "name": "awareness",
+          "kind": "variable"
+        },
+        {
+          "name": "codebaseAvailable",
+          "kind": "variable"
+        },
+        {
+          "name": "codebaseCache",
+          "kind": "variable"
+        },
+        {
+          "name": "codebaseGuidance",
+          "kind": "variable"
+        },
+        {
+          "name": "message",
+          "kind": "variable"
+        },
+        {
+          "name": "choice",
+          "kind": "variable"
+        },
+        {
+          "name": "idx",
+          "kind": "variable"
+        },
+        {
+          "name": "cyclePath",
+          "kind": "variable"
+        },
+        {
+          "name": "depth",
+          "kind": "variable"
+        },
+        {
+          "name": "codebaseEnrichment",
+          "kind": "variable"
+        },
+        {
+          "name": "needsApproval",
+          "kind": "variable"
+        },
+        {
+          "name": "fullPlan",
+          "kind": "variable"
+        },
+        {
+          "name": "deps",
+          "kind": "variable"
+        },
+        {
+          "name": "approvalMsg",
+          "kind": "variable"
+        },
+        {
+          "name": "task",
+          "kind": "variable"
+        },
+        {
+          "name": "done",
+          "kind": "variable"
+        },
+        {
+          "name": "next",
+          "kind": "variable"
+        },
+        {
+          "name": "git",
+          "kind": "variable"
+        },
+        {
+          "name": "gitPrompt",
+          "kind": "variable"
+        },
+        {
+          "name": "retriesLeft",
+          "kind": "variable"
+        },
+        {
+          "name": "team",
+          "kind": "variable"
+        },
+        {
+          "name": "hasVerifier",
+          "kind": "variable"
+        },
+        {
+          "name": "impactContext",
+          "kind": "variable"
+        },
+        {
+          "name": "verifierAgent",
+          "kind": "variable"
+        },
+        {
+          "name": "total",
+          "kind": "variable"
+        },
+        {
+          "name": "editsApplied",
+          "kind": "variable"
+        },
+        {
+          "name": "reviewPlan",
+          "kind": "variable"
+        },
+        {
+          "name": "confirmMsg",
+          "kind": "variable"
+        },
+        {
+          "name": "approved",
+          "kind": "variable"
+        },
+        {
+          "name": "commitsByTask",
+          "kind": "variable"
+        },
+        {
+          "name": "key",
+          "kind": "variable"
+        },
+        {
+          "name": "lines",
+          "kind": "variable"
+        },
+        {
+          "name": "branches",
+          "kind": "variable"
+        },
+        {
+          "name": "teams",
+          "kind": "variable"
+        },
+        {
+          "name": "names",
+          "kind": "variable"
+        },
+        {
+          "name": "t",
+          "kind": "variable"
+        },
+        {
+          "name": "members",
+          "kind": "variable"
+        },
+        {
+          "name": "agentsInfo",
+          "kind": "variable"
+        },
+        {
+          "name": "archives",
+          "kind": "variable"
+        },
+        {
+          "name": "date",
+          "kind": "variable"
+        },
+        {
+          "name": "timestamp",
+          "kind": "variable"
+        },
+        {
+          "name": "research",
+          "kind": "variable"
+        },
+        {
+          "name": "action",
+          "kind": "variable"
+        },
+        {
+          "name": "role",
+          "kind": "variable"
+        },
+        {
+          "name": "available",
+          "kind": "variable"
+        },
+        {
+          "name": "matched",
+          "kind": "variable"
+        },
+        {
+          "name": "result",
+          "kind": "variable"
+        },
+        {
+          "name": "m",
+          "kind": "variable"
+        },
+        {
+          "name": "remembered",
+          "kind": "variable"
+        },
+        {
+          "name": "resolved",
+          "kind": "variable"
+        },
+        {
+          "name": "modelId",
+          "kind": "variable"
+        },
+        {
+          "name": "teamHints",
+          "kind": "variable"
+        },
+        {
+          "name": "proposal",
+          "kind": "variable"
+        },
+        {
+          "name": "model",
+          "kind": "variable"
+        },
+        {
+          "name": "dependencyResults",
+          "kind": "variable"
+        },
+        {
+          "name": "prompt",
+          "kind": "variable"
+        },
+        {
+          "name": "res",
+          "kind": "variable"
+        },
+        {
+          "name": "name",
+          "kind": "variable"
+        },
+        {
+          "name": "time",
+          "kind": "variable"
+        },
+        {
+          "name": "verifyingTasks",
+          "kind": "variable"
+        },
+        {
+          "name": "allResolved",
+          "kind": "variable"
+        },
+        {
+          "name": "vfyList",
+          "kind": "variable"
+        },
+        {
+          "name": "allDone",
+          "kind": "variable"
+        },
+        {
+          "name": "anyFailed",
+          "kind": "variable"
+        },
+        {
+          "name": "gitSection",
+          "kind": "variable"
+        },
+        {
+          "name": "failedTasks",
+          "kind": "variable"
+        },
+        {
+          "name": "failedList",
+          "kind": "variable"
+        },
+        {
+          "name": "i",
+          "kind": "variable"
+        },
+        {
+          "name": "cont",
+          "kind": "variable"
+        },
+        {
+          "name": "trimmed",
+          "kind": "variable"
+        },
+        {
+          "name": "spaceIdx",
+          "kind": "variable"
+        },
+        {
+          "name": "sub",
+          "kind": "variable"
+        },
+        {
+          "name": "rest",
+          "kind": "variable"
+        },
+        {
+          "name": "kanban",
+          "kind": "variable"
+        },
+        {
+          "name": "fresh",
+          "kind": "variable"
+        },
+        {
+          "name": "colonIdx",
+          "kind": "variable"
+        },
+        {
+          "name": "goal",
+          "kind": "variable"
+        },
+        {
+          "name": "args",
+          "kind": "variable"
+        },
+        {
+          "name": "subCmd",
+          "kind": "variable"
+        },
+        {
+          "name": "subRest",
+          "kind": "variable"
+        },
+        {
+          "name": "agentInfo",
+          "kind": "variable"
+        },
+        {
+          "name": "gitUrl",
+          "kind": "variable"
+        },
+        {
+          "name": "planSummary",
+          "kind": "variable"
+        },
+        {
+          "name": "moreTasks",
+          "kind": "variable"
+        },
+        {
+          "name": "commitList",
+          "kind": "variable"
+        },
+        {
+          "name": "limit",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1782644326026.245,
+      "hash": "c83eb8fdba0ea8aeff2ba13e6ac536351ea54e06bdb9d37dce0e60d011f9f037"
+    },
+    "extensions/quest/kanban.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/kanban.ts",
+      "name": "kanban.ts",
+      "relativePath": "extensions/quest/kanban.ts",
+      "imports": [
+        {
+          "source": "@earendil-works/pi-tui",
+          "names": ["matchesKey", "Key"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./types",
+          "names": ["Quest", "QuestTask"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "extensions/quest/types.ts"
+        },
+        {
+          "source": "./constants",
+          "names": ["ICON"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/constants.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "QuestKanban",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "QuestKanban",
+          "kind": "class"
+        },
+        {
+          "name": "tasks",
+          "kind": "variable"
+        },
+        {
+          "name": "cols",
+          "kind": "variable"
+        },
+        {
+          "name": "maxContent",
+          "kind": "variable"
+        },
+        {
+          "name": "content",
+          "kind": "variable"
+        },
+        {
+          "name": "theme",
+          "kind": "variable"
+        },
+        {
+          "name": "numCols",
+          "kind": "variable"
+        },
+        {
+          "name": "gap",
+          "kind": "variable"
+        },
+        {
+          "name": "colWidth",
+          "kind": "variable"
+        },
+        {
+          "name": "maxRows",
+          "kind": "variable"
+        },
+        {
+          "name": "totalTasks",
+          "kind": "variable"
+        },
+        {
+          "name": "lines",
+          "kind": "variable"
+        },
+        {
+          "name": "statusTag",
+          "kind": "variable"
+        },
+        {
+          "name": "title",
+          "kind": "variable"
+        },
+        {
+          "name": "headerLine",
+          "kind": "variable"
+        },
+        {
+          "name": "hdr",
+          "kind": "variable"
+        },
+        {
+          "name": "padded",
+          "kind": "variable"
+        },
+        {
+          "name": "colored",
+          "kind": "variable"
+        },
+        {
+          "name": "sep",
+          "kind": "variable"
+        },
+        {
+          "name": "rowParts",
+          "kind": "variable"
+        },
+        {
+          "name": "task",
+          "kind": "variable"
+        },
+        {
+          "name": "isSelected",
+          "kind": "variable"
+        },
+        {
+          "name": "cell",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1781670723528.6772,
+      "hash": "54cb96d37e34ba3a92741eb54b9daa1c6bf72c3d0d12f623bd736b6f5be68882"
+    },
+    "extensions/quest/models.test.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/models.test.ts",
+      "name": "models.test.ts",
+      "relativePath": "extensions/quest/models.test.ts",
+      "imports": [
+        {
+          "source": "node:test",
+          "names": ["test"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:assert/strict",
+          "names": ["assert"],
+          "isDefault": true,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./models",
+          "names": ["matchModel", "formatModelLabel", "toModelLike", "type ModelLike"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/models.ts"
+        }
+      ],
+      "exports": [],
+      "symbols": [
+        {
+          "name": "MODELS",
+          "kind": "variable"
+        },
+        {
+          "name": "projected",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1782136805955.4348,
+      "hash": "14762dbe24ec9da094572190b0b4a230c7feb3fe9deb7cfe5def1d3767b9a95f"
+    },
+    "extensions/quest/models.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/models.ts",
+      "name": "models.ts",
+      "relativePath": "extensions/quest/models.ts",
+      "imports": [
+        {
+          "source": "@earendil-works/pi-coding-agent",
+          "names": ["ExtensionContext"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": ""
+        }
+      ],
+      "exports": [
+        {
+          "name": "ModelLike",
+          "kind": "type"
+        },
+        {
+          "name": "toModelLike",
+          "kind": "named"
+        },
+        {
+          "name": "matchModel",
+          "kind": "named"
+        },
+        {
+          "name": "formatModelLabel",
+          "kind": "named"
+        },
+        {
+          "name": "ModelAssignment",
+          "kind": "type"
+        },
+        {
+          "name": "promptModelAssignment",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "ModelLike",
+          "kind": "interface"
+        },
+        {
+          "name": "toModelLike",
+          "kind": "function"
+        },
+        {
+          "name": "norm",
+          "kind": "variable"
+        },
+        {
+          "name": "matchModel",
+          "kind": "function"
+        },
+        {
+          "name": "raw",
+          "kind": "variable"
+        },
+        {
+          "name": "wantProvider",
+          "kind": "variable"
+        },
+        {
+          "name": "wantId",
+          "kind": "variable"
+        },
+        {
+          "name": "qualified",
+          "kind": "variable"
+        },
+        {
+          "name": "wantIdN",
+          "kind": "variable"
+        },
+        {
+          "name": "providerOk",
+          "kind": "variable"
+        },
+        {
+          "name": "hits",
+          "kind": "variable"
+        },
+        {
+          "name": "formatModelLabel",
+          "kind": "function"
+        },
+        {
+          "name": "KEEP_DEFAULT",
+          "kind": "variable"
+        },
+        {
+          "name": "ModelAssignment",
+          "kind": "type"
+        },
+        {
+          "name": "promptModelAssignment",
+          "kind": "function"
+        },
+        {
+          "name": "available",
+          "kind": "variable"
+        },
+        {
+          "name": "matched",
+          "kind": "variable"
+        },
+        {
+          "name": "ordered",
+          "kind": "variable"
+        },
+        {
+          "name": "labels",
+          "kind": "variable"
+        },
+        {
+          "name": "reasonLine",
+          "kind": "variable"
+        },
+        {
+          "name": "title",
+          "kind": "variable"
+        },
+        {
+          "name": "choice",
+          "kind": "variable"
+        },
+        {
+          "name": "idx",
+          "kind": "variable"
+        },
+        {
+          "name": "model",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1782138558456.0981,
+      "hash": "0f4810c98e282c44f75a69a938e78c47b3b0b3f44075d6b2d2939cd404667ea3"
+    },
+    "extensions/quest/status.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/status.ts",
+      "name": "status.ts",
+      "relativePath": "extensions/quest/status.ts",
+      "imports": [
+        {
+          "source": "@earendil-works/pi-coding-agent",
+          "names": ["ExtensionContext"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": ""
+        },
+        {
+          "source": "./types",
+          "names": ["Quest"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "extensions/quest/types.ts"
+        },
+        {
+          "source": "./utils",
+          "names": ["writeSessionMeta"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/utils.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "writeQuestSessionMeta",
+          "kind": "named"
+        },
+        {
+          "name": "renderStatus",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "writeQuestSessionMeta",
+          "kind": "function"
+        },
+        {
+          "name": "renderStatus",
+          "kind": "function"
+        },
+        {
+          "name": "theme",
+          "kind": "variable"
+        },
+        {
+          "name": "done",
+          "kind": "variable"
+        },
+        {
+          "name": "total",
+          "kind": "variable"
+        },
+        {
+          "name": "icon",
+          "kind": "variable"
+        },
+        {
+          "name": "label",
+          "kind": "variable"
+        },
+        {
+          "name": "color",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1781670723528.771,
+      "hash": "19c59ad5cfc82c186f92a221f8d348fb61924f7f50f032bc1986fcbe624924e6"
+    },
+    "extensions/quest/steering.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/steering.ts",
+      "name": "steering.ts",
+      "relativePath": "extensions/quest/steering.ts",
+      "imports": [
+        {
+          "source": "./types",
+          "names": ["Quest", "QuestTask"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "extensions/quest/types.ts"
+        },
+        {
+          "source": "./constants",
+          "names": ["MAX_BURST", "MAX_RETRIES", "ICON", "FORMAT_DIRECTIVE"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/constants.ts"
+        },
+        {
+          "source": "./todo-sync",
+          "names": ["compactAwarenessBlock"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/todo-sync.ts"
+        },
+        {
+          "source": "./storage",
+          "names": ["loadAgentModels"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/storage.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "nextPendingTask",
+          "kind": "named"
+        },
+        {
+          "name": "formatTaskTime",
+          "kind": "named"
+        },
+        {
+          "name": "formatQuestStatus",
+          "kind": "named"
+        },
+        {
+          "name": "buildSteeringMessage",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "nextPendingTask",
+          "kind": "function"
+        },
+        {
+          "name": "t",
+          "kind": "variable"
+        },
+        {
+          "name": "allDepsMet",
+          "kind": "variable"
+        },
+        {
+          "name": "s",
+          "kind": "variable"
+        },
+        {
+          "name": "formatTaskTime",
+          "kind": "function"
+        },
+        {
+          "name": "end",
+          "kind": "variable"
+        },
+        {
+          "name": "ms",
+          "kind": "variable"
+        },
+        {
+          "name": "formatQuestStatus",
+          "kind": "function"
+        },
+        {
+          "name": "total",
+          "kind": "variable"
+        },
+        {
+          "name": "todo",
+          "kind": "variable"
+        },
+        {
+          "name": "doing",
+          "kind": "variable"
+        },
+        {
+          "name": "completed",
+          "kind": "variable"
+        },
+        {
+          "name": "done",
+          "kind": "variable"
+        },
+        {
+          "name": "verified",
+          "kind": "variable"
+        },
+        {
+          "name": "failed",
+          "kind": "variable"
+        },
+        {
+          "name": "skipped",
+          "kind": "variable"
+        },
+        {
+          "name": "verifying",
+          "kind": "variable"
+        },
+        {
+          "name": "barWidth",
+          "kind": "variable"
+        },
+        {
+          "name": "doneW",
+          "kind": "variable"
+        },
+        {
+          "name": "vfyW",
+          "kind": "variable"
+        },
+        {
+          "name": "failW",
+          "kind": "variable"
+        },
+        {
+          "name": "pendW",
+          "kind": "variable"
+        },
+        {
+          "name": "pbar",
+          "kind": "variable"
+        },
+        {
+          "name": "modeTag",
+          "kind": "variable"
+        },
+        {
+          "name": "approveTag",
+          "kind": "variable"
+        },
+        {
+          "name": "verifyTag",
+          "kind": "variable"
+        },
+        {
+          "name": "gitTag",
+          "kind": "variable"
+        },
+        {
+          "name": "lines",
+          "kind": "variable"
+        },
+        {
+          "name": "fmtDep",
+          "kind": "variable"
+        },
+        {
+          "name": "i",
+          "kind": "variable"
+        },
+        {
+          "name": "time",
+          "kind": "variable"
+        },
+        {
+          "name": "timeStr",
+          "kind": "variable"
+        },
+        {
+          "name": "vInfo",
+          "kind": "variable"
+        },
+        {
+          "name": "verifiedStr",
+          "kind": "variable"
+        },
+        {
+          "name": "resultSnippet",
+          "kind": "variable"
+        },
+        {
+          "name": "info",
+          "kind": "variable"
+        },
+        {
+          "name": "buildSteeringMessage",
+          "kind": "function"
+        },
+        {
+          "name": "deps",
+          "kind": "variable"
+        },
+        {
+          "name": "remembered",
+          "kind": "variable"
+        },
+        {
+          "name": "assignedModel",
+          "kind": "variable"
+        },
+        {
+          "name": "modelLine",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1782138575475.6145,
+      "hash": "02074b85ea9fb2fae8e89d331976185874081b1cc018c163f7ac0519c92d183a"
+    },
+    "extensions/quest/storage.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/storage.ts",
+      "name": "storage.ts",
+      "relativePath": "extensions/quest/storage.ts",
+      "imports": [
+        {
+          "source": "node:fs",
+          "names": ["existsSync", "readFileSync", "readdirSync"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:path",
+          "names": ["basename", "join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "../../core",
+          "names": ["AgentModelChoice"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "core/index.ts"
+        },
+        {
+          "source": "./types",
+          "names": ["GitIntegration", "Quest"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "extensions/quest/types.ts"
+        },
+        {
+          "source": "./utils",
+          "names": [
+            "readJSON",
+            "writeJSON",
+            "updateJSON",
+            "loadProjectMemory",
+            "projectMemoryPath",
+            "questActivePath",
+            "questArchiveDir",
+            "questArchiveIndexPath",
+            "CONTRACT_VERSION",
+            "isFutureContract"
+          ],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/utils.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "loadAgentModels",
+          "kind": "named"
+        },
+        {
+          "name": "rememberAgentModel",
+          "kind": "named"
+        },
+        {
+          "name": "syncConventionsToMemory",
+          "kind": "named"
+        },
+        {
+          "name": "emptyQuest",
+          "kind": "named"
+        },
+        {
+          "name": "loadQuest",
+          "kind": "named"
+        },
+        {
+          "name": "saveQuest",
+          "kind": "named"
+        },
+        {
+          "name": "archiveQuest",
+          "kind": "named"
+        },
+        {
+          "name": "rebuildArchiveIndex",
+          "kind": "named"
+        },
+        {
+          "name": "listArchives",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "loadAgentModels",
+          "kind": "function"
+        },
+        {
+          "name": "memory",
+          "kind": "variable"
+        },
+        {
+          "name": "models",
+          "kind": "variable"
+        },
+        {
+          "name": "rememberAgentModel",
+          "kind": "function"
+        },
+        {
+          "name": "agentModels",
+          "kind": "variable"
+        },
+        {
+          "name": "syncConventionsToMemory",
+          "kind": "function"
+        },
+        {
+          "name": "base",
+          "kind": "variable"
+        },
+        {
+          "name": "conventions",
+          "kind": "variable"
+        },
+        {
+          "name": "merged",
+          "kind": "variable"
+        },
+        {
+          "name": "emptyQuest",
+          "kind": "function"
+        },
+        {
+          "name": "loadQuest",
+          "kind": "function"
+        },
+        {
+          "name": "activePath",
+          "kind": "variable"
+        },
+        {
+          "name": "raw",
+          "kind": "variable"
+        },
+        {
+          "name": "gi",
+          "kind": "variable"
+        },
+        {
+          "name": "validStatuses",
+          "kind": "variable"
+        },
+        {
+          "name": "saveQuest",
+          "kind": "function"
+        },
+        {
+          "name": "archiveQuest",
+          "kind": "function"
+        },
+        {
+          "name": "archiveDir",
+          "kind": "variable"
+        },
+        {
+          "name": "slug",
+          "kind": "variable"
+        },
+        {
+          "name": "ts",
+          "kind": "variable"
+        },
+        {
+          "name": "path",
+          "kind": "variable"
+        },
+        {
+          "name": "updateArchiveIndex",
+          "kind": "function"
+        },
+        {
+          "name": "indexPath",
+          "kind": "variable"
+        },
+        {
+          "name": "index",
+          "kind": "variable"
+        },
+        {
+          "name": "rebuildArchiveIndex",
+          "kind": "function"
+        },
+        {
+          "name": "entries",
+          "kind": "variable"
+        },
+        {
+          "name": "files",
+          "kind": "variable"
+        },
+        {
+          "name": "listArchives",
+          "kind": "function"
+        },
+        {
+          "name": "rebuilt",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1782140150881.5425,
+      "hash": "94017ed28e82dcfcbf514887286874a3f7bf0c6064c74c9c21fb97e6a3a8fde8"
+    },
+    "extensions/quest/subagent.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/subagent.ts",
+      "name": "subagent.ts",
+      "relativePath": "extensions/quest/subagent.ts",
+      "imports": [
+        {
+          "source": "@earendil-works/pi-coding-agent",
+          "names": ["createAgentSession", "SessionManager"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "@earendil-works/pi-coding-agent",
+          "names": ["ExtensionContext"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": ""
+        },
+        {
+          "source": "@earendil-works/pi-ai",
+          "names": ["Model"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": ""
+        },
+        {
+          "source": "./delegate",
+          "names": ["toolsForRole", "extractFinalText", "type SubAgentResult"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/delegate.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "SubAgentRequest",
+          "kind": "type"
+        },
+        {
+          "name": "runSubAgent",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "SubAgentRequest",
+          "kind": "interface"
+        },
+        {
+          "name": "runSubAgent",
+          "kind": "function"
+        },
+        {
+          "name": "session",
+          "kind": "variable"
+        },
+        {
+          "name": "onAbort",
+          "kind": "variable"
+        },
+        {
+          "name": "created",
+          "kind": "variable"
+        },
+        {
+          "name": "finished",
+          "kind": "variable"
+        },
+        {
+          "name": "unsubscribe",
+          "kind": "variable"
+        },
+        {
+          "name": "messages",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1782294075896.6772,
+      "hash": "b446ded1cbcfa486d2e6040556d174b07d21332fdb7f4c34972fd2e0618dce48"
+    },
+    "extensions/quest/teams.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/teams.ts",
+      "name": "teams.ts",
+      "relativePath": "extensions/quest/teams.ts",
+      "imports": [
+        {
+          "source": "node:fs",
+          "names": [
+            "existsSync",
+            "mkdirSync",
+            "readFileSync",
+            "readdirSync",
+            "writeFileSync",
+            "rmSync"
+          ],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:os",
+          "names": ["homedir"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:path",
+          "names": ["basename", "join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:child_process",
+          "names": ["execFileSync"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./types",
+          "names": ["TeamConfig"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "extensions/quest/types.ts"
+        },
+        {
+          "source": "./constants",
+          "names": ["TEAMS_DIR", "BUILT_IN_TEAMS"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/constants.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "loadTeams",
+          "kind": "named"
+        },
+        {
+          "name": "saveTeam",
+          "kind": "named"
+        },
+        {
+          "name": "ensureBuiltInTeams",
+          "kind": "named"
+        },
+        {
+          "name": "teamInstallFromGit",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "loadTeams",
+          "kind": "function"
+        },
+        {
+          "name": "teams",
+          "kind": "variable"
+        },
+        {
+          "name": "raw",
+          "kind": "variable"
+        },
+        {
+          "name": "SAFE_TEAM_NAME",
+          "kind": "variable"
+        },
+        {
+          "name": "saveTeam",
+          "kind": "function"
+        },
+        {
+          "name": "ensureBuiltInTeams",
+          "kind": "function"
+        },
+        {
+          "name": "existing",
+          "kind": "variable"
+        },
+        {
+          "name": "teamInstallFromGit",
+          "kind": "function"
+        },
+        {
+          "name": "tmpDir",
+          "kind": "variable"
+        },
+        {
+          "name": "candidates",
+          "kind": "variable"
+        },
+        {
+          "name": "p",
+          "kind": "variable"
+        },
+        {
+          "name": "team",
+          "kind": "variable"
+        },
+        {
+          "name": "safeFile",
+          "kind": "variable"
+        },
+        {
+          "name": "mdPath",
+          "kind": "variable"
+        },
+        {
+          "name": "agentsDir",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1781670723529.121,
+      "hash": "6c9f4ec8b09f085f08b0f47a6fac5b5452e202af4250bfcb42267ca4c88162da"
+    },
+    "extensions/quest/todo-sync.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/todo-sync.ts",
+      "name": "todo-sync.ts",
+      "relativePath": "extensions/quest/todo-sync.ts",
+      "imports": [
+        {
+          "source": "node:path",
+          "names": ["basename"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "./utils",
+          "names": ["readJSON", "writeJSON", "updateJSON", "loadProjectMemory"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/utils.ts"
+        },
+        {
+          "source": "../../core",
+          "names": ["SESSION_META_PATH", "todoListPath"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/index.ts"
+        },
+        {
+          "source": "./types",
+          "names": ["Quest", "QuestTask", "SyncedTodoItem", "SyncedTodoList"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "extensions/quest/types.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "todoPath",
+          "kind": "named"
+        },
+        {
+          "name": "questTaskToTodo",
+          "kind": "named"
+        },
+        {
+          "name": "syncQuestToTodo",
+          "kind": "named"
+        },
+        {
+          "name": "clearQuestFromTodo",
+          "kind": "named"
+        },
+        {
+          "name": "compactAwarenessBlock",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "questTaskToTodo",
+          "kind": "function"
+        },
+        {
+          "name": "now",
+          "kind": "variable"
+        },
+        {
+          "name": "failed",
+          "kind": "variable"
+        },
+        {
+          "name": "completed",
+          "kind": "variable"
+        },
+        {
+          "name": "status",
+          "kind": "variable"
+        },
+        {
+          "name": "result",
+          "kind": "variable"
+        },
+        {
+          "name": "syncQuestToTodo",
+          "kind": "function"
+        },
+        {
+          "name": "path",
+          "kind": "variable"
+        },
+        {
+          "name": "existing",
+          "kind": "variable"
+        },
+        {
+          "name": "existingItems",
+          "kind": "variable"
+        },
+        {
+          "name": "previousQuestItems",
+          "kind": "variable"
+        },
+        {
+          "name": "nonQuestItems",
+          "kind": "variable"
+        },
+        {
+          "name": "questItems",
+          "kind": "variable"
+        },
+        {
+          "name": "next",
+          "kind": "variable"
+        },
+        {
+          "name": "clearQuestFromTodo",
+          "kind": "function"
+        },
+        {
+          "name": "items",
+          "kind": "variable"
+        },
+        {
+          "name": "kept",
+          "kind": "variable"
+        },
+        {
+          "name": "compactAwarenessBlock",
+          "kind": "function"
+        },
+        {
+          "name": "memory",
+          "kind": "variable"
+        },
+        {
+          "name": "todo",
+          "kind": "variable"
+        },
+        {
+          "name": "meta",
+          "kind": "variable"
+        },
+        {
+          "name": "memoryMeta",
+          "kind": "variable"
+        },
+        {
+          "name": "todoMeta",
+          "kind": "variable"
+        },
+        {
+          "name": "lines",
+          "kind": "variable"
+        },
+        {
+          "name": "language",
+          "kind": "variable"
+        },
+        {
+          "name": "framework",
+          "kind": "variable"
+        },
+        {
+          "name": "packageManager",
+          "kind": "variable"
+        },
+        {
+          "name": "conventions",
+          "kind": "variable"
+        },
+        {
+          "name": "tech",
+          "kind": "variable"
+        },
+        {
+          "name": "research",
+          "kind": "variable"
+        },
+        {
+          "name": "entries",
+          "kind": "variable"
+        },
+        {
+          "name": "lines2",
+          "kind": "variable"
+        },
+        {
+          "name": "cat",
+          "kind": "variable"
+        },
+        {
+          "name": "val",
+          "kind": "variable"
+        },
+        {
+          "name": "total",
+          "kind": "variable"
+        },
+        {
+          "name": "inProgress",
+          "kind": "variable"
+        },
+        {
+          "name": "delegated",
+          "kind": "variable"
+        },
+        {
+          "name": "block",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1781707077914.4204,
+      "hash": "aae800abfa29130b78dc1ccfac0570225d8e028cd653022ec0cb5553bc3cf14b"
+    },
+    "extensions/quest/types.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/types.ts",
+      "name": "types.ts",
+      "relativePath": "extensions/quest/types.ts",
+      "imports": [],
+      "exports": [
+        {
+          "name": "QuestStatus",
+          "kind": "type"
+        },
+        {
+          "name": "TaskStatus",
+          "kind": "type"
+        },
+        {
+          "name": "QuestTask",
+          "kind": "type"
+        },
+        {
+          "name": "GitIntegration",
+          "kind": "type"
+        },
+        {
+          "name": "Quest",
+          "kind": "type"
+        },
+        {
+          "name": "TeamConfig",
+          "kind": "type"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "QuestStatus",
+          "kind": "type"
+        },
+        {
+          "name": "TaskStatus",
+          "kind": "type"
+        },
+        {
+          "name": "QuestTask",
+          "kind": "interface"
+        },
+        {
+          "name": "GitIntegration",
+          "kind": "interface"
+        },
+        {
+          "name": "Quest",
+          "kind": "interface"
+        },
+        {
+          "name": "TeamConfig",
+          "kind": "interface"
+        }
+      ],
+      "mtime": 1782136739171.2598,
+      "hash": "6a1f1dea5aad7b93c4c0d37a3fa378c7dc8d22e7484f9179e7ef45d5cc6ee317"
+    },
+    "extensions/quest/utils.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/utils.ts",
+      "name": "utils.ts",
+      "relativePath": "extensions/quest/utils.ts",
+      "imports": [
+        {
+          "source": "node:fs",
+          "names": ["appendFileSync"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:path",
+          "names": ["join"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:os",
+          "names": ["homedir"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "../../core",
+          "names": [
+            "cwdHash",
+            "readJSON",
+            "writeJSON",
+            "updateJSON",
+            "writeSessionMeta",
+            "projectMemoryPath",
+            "CONTRACT_VERSION",
+            "isFutureContract"
+          ],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/index.ts"
+        },
+        {
+          "source": "./constants",
+          "names": ["ERROR_LOG_PATH"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/constants.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "cwdHash",
+          "kind": "named"
+        },
+        {
+          "name": "readJSON",
+          "kind": "named"
+        },
+        {
+          "name": "writeJSON",
+          "kind": "named"
+        },
+        {
+          "name": "updateJSON",
+          "kind": "named"
+        },
+        {
+          "name": "writeSessionMeta",
+          "kind": "named"
+        },
+        {
+          "name": "projectMemoryPath",
+          "kind": "named"
+        },
+        {
+          "name": "CONTRACT_VERSION",
+          "kind": "named"
+        },
+        {
+          "name": "isFutureContract",
+          "kind": "named"
+        },
+        {
+          "name": "loadProjectMemory",
+          "kind": "named"
+        },
+        {
+          "name": "logError",
+          "kind": "named"
+        },
+        {
+          "name": "questActivePath",
+          "kind": "named"
+        },
+        {
+          "name": "questArchiveDir",
+          "kind": "named"
+        },
+        {
+          "name": "questArchiveIndexPath",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "loadProjectMemory",
+          "kind": "function"
+        },
+        {
+          "name": "memory",
+          "kind": "variable"
+        },
+        {
+          "name": "logError",
+          "kind": "function"
+        },
+        {
+          "name": "line",
+          "kind": "variable"
+        },
+        {
+          "name": "questActivePath",
+          "kind": "function"
+        },
+        {
+          "name": "questArchiveDir",
+          "kind": "function"
+        },
+        {
+          "name": "questArchiveIndexPath",
+          "kind": "function"
+        }
+      ],
+      "mtime": 1781687050219.6611,
+      "hash": "9cc03c54db6264dafb7892e45d56ab771d3e56352aa26d64b08a788256f6ca7f"
+    },
+    "extensions/quest/verifier.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/quest/verifier.ts",
+      "name": "verifier.ts",
+      "relativePath": "extensions/quest/verifier.ts",
+      "imports": [
+        {
+          "source": "./types",
+          "names": ["QuestTask"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "extensions/quest/types.ts"
+        },
+        {
+          "source": "./constants",
+          "names": ["MAX_VERIFY_RETRIES", "FORMAT_DIRECTIVE"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/constants.ts"
+        },
+        {
+          "source": "./codebase",
+          "names": ["buildVerificationImpactContext"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/quest/codebase.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "VerifyOutcome",
+          "kind": "type"
+        },
+        {
+          "name": "VerifyResult",
+          "kind": "type"
+        },
+        {
+          "name": "VerificationConfig",
+          "kind": "type"
+        },
+        {
+          "name": "shouldVerify",
+          "kind": "named"
+        },
+        {
+          "name": "buildVerificationPrompt",
+          "kind": "named"
+        },
+        {
+          "name": "nextVerifyAttempt",
+          "kind": "named"
+        },
+        {
+          "name": "parseVerifyOutcome",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "VerifyOutcome",
+          "kind": "type"
+        },
+        {
+          "name": "VerifyResult",
+          "kind": "interface"
+        },
+        {
+          "name": "VerificationConfig",
+          "kind": "interface"
+        },
+        {
+          "name": "shouldVerify",
+          "kind": "function"
+        },
+        {
+          "name": "buildVerificationPrompt",
+          "kind": "function"
+        },
+        {
+          "name": "lines",
+          "kind": "variable"
+        },
+        {
+          "name": "impact",
+          "kind": "variable"
+        },
+        {
+          "name": "nextVerifyAttempt",
+          "kind": "function"
+        },
+        {
+          "name": "next",
+          "kind": "variable"
+        },
+        {
+          "name": "left",
+          "kind": "variable"
+        },
+        {
+          "name": "parseVerifyOutcome",
+          "kind": "function"
+        },
+        {
+          "name": "upper",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1782644006994.224,
+      "hash": "608be3559dd995902989b719f8ba938be98fb9767b7fe42c72eb1e4233afb282"
+    },
+    "extensions/todo/display.test.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/todo/display.test.ts",
+      "name": "display.test.ts",
+      "relativePath": "extensions/todo/display.test.ts",
+      "imports": [
+        {
+          "source": "node:test",
+          "names": ["test"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:assert/strict",
+          "names": ["assert"],
+          "isDefault": true,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "../../core",
+          "names": ["TodoItem"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "core/index.ts"
+        },
+        {
+          "source": "./display",
+          "names": ["displayOrder"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/todo/display.ts"
+        }
+      ],
+      "exports": [],
+      "symbols": [
+        {
+          "name": "item",
+          "kind": "function"
+        },
+        {
+          "name": "stored",
+          "kind": "variable"
+        },
+        {
+          "name": "shown",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1781750422726.2747,
+      "hash": "19aa87310e98cc13aab3461d6f845663de499ab5d3b4db062c8f60a6a870cb5c"
+    },
+    "extensions/todo/display.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/todo/display.ts",
+      "name": "display.ts",
+      "relativePath": "extensions/todo/display.ts",
+      "imports": [
+        {
+          "source": "../../core",
+          "names": ["TodoItem", "TodoStatus"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "core/index.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "STATUS_ORDER",
+          "kind": "named"
+        },
+        {
+          "name": "displayOrder",
+          "kind": "named"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "STATUS_ORDER",
+          "kind": "variable"
+        },
+        {
+          "name": "displayOrder",
+          "kind": "function"
+        }
+      ],
+      "mtime": 1781750422726.5059,
+      "hash": "f175dccd9ba429e08e4b848caa5401a314ee0f8019fc0a9427c4dfe801f5f300"
+    },
+    "extensions/todo/index.ts": {
+      "path": "/Users/dvictor357/Projects/pi-suite/extensions/todo/index.ts",
+      "name": "index.ts",
+      "relativePath": "extensions/todo/index.ts",
+      "imports": [
+        {
+          "source": "@earendil-works/pi-coding-agent",
+          "names": ["ExtensionAPI", "ExtensionContext"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": ""
+        },
+        {
+          "source": "@earendil-works/pi-ai",
+          "names": ["StringEnum"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "@earendil-works/pi-tui",
+          "names": ["Text"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "typebox",
+          "names": ["Type"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:fs",
+          "names": ["existsSync", "readFileSync", "readdirSync", "statSync"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "node:path",
+          "names": ["join", "basename"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": ""
+        },
+        {
+          "source": "../../core",
+          "names": ["AGENT_DIR", "cwdHash", "readJSON", "writeJSON", "writeSessionMeta"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "core/index.ts"
+        },
+        {
+          "source": "../../core",
+          "names": ["TodoItem", "TodoList", "TodoStatus"],
+          "isDefault": false,
+          "isType": true,
+          "resolved": "core/index.ts"
+        },
+        {
+          "source": "./display",
+          "names": ["displayOrder"],
+          "isDefault": false,
+          "isType": false,
+          "resolved": "extensions/todo/display.ts"
+        }
+      ],
+      "exports": [
+        {
+          "name": "default",
+          "kind": "default"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "MAX_ITEMS",
+          "kind": "variable"
+        },
+        {
+          "name": "TRUNCATE_AT",
+          "kind": "variable"
+        },
+        {
+          "name": "TODO_DIR",
+          "kind": "variable"
+        },
+        {
+          "name": "ARCHIVE_DIR",
+          "kind": "variable"
+        },
+        {
+          "name": "storePath",
+          "kind": "function"
+        },
+        {
+          "name": "archivePath",
+          "kind": "function"
+        },
+        {
+          "name": "storeStamp",
+          "kind": "function"
+        },
+        {
+          "name": "p",
+          "kind": "variable"
+        },
+        {
+          "name": "s",
+          "kind": "variable"
+        },
+        {
+          "name": "loadTodos",
+          "kind": "function"
+        },
+        {
+          "name": "raw",
+          "kind": "variable"
+        },
+        {
+          "name": "items",
+          "kind": "variable"
+        },
+        {
+          "name": "saveTodos",
+          "kind": "function"
+        },
+        {
+          "name": "writeTodoSessionMeta",
+          "kind": "function"
+        },
+        {
+          "name": "counts",
+          "kind": "variable"
+        },
+        {
+          "name": "TODO_ARCHIVE_INDEX_PATH",
+          "kind": "variable"
+        },
+        {
+          "name": "updateTodoArchiveIndex",
+          "kind": "function"
+        },
+        {
+          "name": "index",
+          "kind": "variable"
+        },
+        {
+          "name": "rebuildTodoArchiveIndex",
+          "kind": "function"
+        },
+        {
+          "name": "entries",
+          "kind": "variable"
+        },
+        {
+          "name": "files",
+          "kind": "variable"
+        },
+        {
+          "name": "cwd",
+          "kind": "variable"
+        },
+        {
+          "name": "archiveList",
+          "kind": "function"
+        },
+        {
+          "name": "ts",
+          "kind": "variable"
+        },
+        {
+          "name": "path",
+          "kind": "variable"
+        },
+        {
+          "name": "archived",
+          "kind": "variable"
+        },
+        {
+          "name": "listArchives",
+          "kind": "function"
+        },
+        {
+          "name": "hash",
+          "kind": "variable"
+        },
+        {
+          "name": "matches",
+          "kind": "variable"
+        },
+        {
+          "name": "prefix",
+          "kind": "variable"
+        },
+        {
+          "name": "rebuilt",
+          "kind": "variable"
+        },
+        {
+          "name": "ICON",
+          "kind": "variable"
+        },
+        {
+          "name": "formatItems",
+          "kind": "function"
+        },
+        {
+          "name": "sorted",
+          "kind": "variable"
+        },
+        {
+          "name": "lines",
+          "kind": "variable"
+        },
+        {
+          "name": "extras",
+          "kind": "variable"
+        },
+        {
+          "name": "extra",
+          "kind": "variable"
+        },
+        {
+          "name": "shown",
+          "kind": "variable"
+        },
+        {
+          "name": "buildOutput",
+          "kind": "function"
+        },
+        {
+          "name": "done",
+          "kind": "variable"
+        },
+        {
+          "name": "total",
+          "kind": "variable"
+        },
+        {
+          "name": "active",
+          "kind": "variable"
+        },
+        {
+          "name": "delegated",
+          "kind": "variable"
+        },
+        {
+          "name": "header",
+          "kind": "variable"
+        },
+        {
+          "name": "stats",
+          "kind": "variable"
+        },
+        {
+          "name": "warningText",
+          "kind": "variable"
+        },
+        {
+          "name": "renderStatus",
+          "kind": "function"
+        },
+        {
+          "name": "theme",
+          "kind": "variable"
+        },
+        {
+          "name": "icon",
+          "kind": "variable"
+        },
+        {
+          "name": "label",
+          "kind": "variable"
+        },
+        {
+          "name": "color",
+          "kind": "variable"
+        },
+        {
+          "name": "TodoItemSchema",
+          "kind": "variable"
+        },
+        {
+          "name": "TodoWriteParams",
+          "kind": "variable"
+        },
+        {
+          "name": "cachedList",
+          "kind": "variable"
+        },
+        {
+          "name": "cachedCwd",
+          "kind": "variable"
+        },
+        {
+          "name": "cachedStamp",
+          "kind": "variable"
+        },
+        {
+          "name": "refreshCacheMetadata",
+          "kind": "function"
+        },
+        {
+          "name": "getCached",
+          "kind": "function"
+        },
+        {
+          "name": "currentStamp",
+          "kind": "variable"
+        },
+        {
+          "name": "rawItems",
+          "kind": "variable"
+        },
+        {
+          "name": "warnings",
+          "kind": "variable"
+        },
+        {
+          "name": "seen",
+          "kind": "variable"
+        },
+        {
+          "name": "dupes",
+          "kind": "variable"
+        },
+        {
+          "name": "key",
+          "kind": "variable"
+        },
+        {
+          "name": "inProgress",
+          "kind": "variable"
+        },
+        {
+          "name": "existing",
+          "kind": "variable"
+        },
+        {
+          "name": "existingMap",
+          "kind": "variable"
+        },
+        {
+          "name": "now",
+          "kind": "variable"
+        },
+        {
+          "name": "prev",
+          "kind": "variable"
+        },
+        {
+          "name": "list",
+          "kind": "variable"
+        },
+        {
+          "name": "output",
+          "kind": "variable"
+        },
+        {
+          "name": "n",
+          "kind": "variable"
+        },
+        {
+          "name": "d",
+          "kind": "variable"
+        },
+        {
+          "name": "bits",
+          "kind": "variable"
+        },
+        {
+          "name": "colorFor",
+          "kind": "variable"
+        },
+        {
+          "name": "agent",
+          "kind": "variable"
+        },
+        {
+          "name": "archives",
+          "kind": "variable"
+        },
+        {
+          "name": "limit",
+          "kind": "variable"
+        },
+        {
+          "name": "recent",
+          "kind": "variable"
+        },
+        {
+          "name": "date",
+          "kind": "variable"
+        },
+        {
+          "name": "trimmed",
+          "kind": "variable"
+        },
+        {
+          "name": "restStr",
+          "kind": "variable"
+        },
+        {
+          "name": "empty",
+          "kind": "variable"
+        },
+        {
+          "name": "idx",
+          "kind": "variable"
+        },
+        {
+          "name": "item",
+          "kind": "variable"
+        },
+        {
+          "name": "agentMatch",
+          "kind": "variable"
+        },
+        {
+          "name": "ctxMatch",
+          "kind": "variable"
+        }
+      ],
+      "mtime": 1781750422726.8313,
+      "hash": "38081366e9c59c687347dc92dfe37f673c8d6c0a022d055782a400ec844f0c57"
+    }
+  },
+  "dependencies": {
+    "core/contract.test.ts": ["core/contract.ts"],
+    "core/contract.ts": [],
+    "core/eval-logging.test.ts": ["core/eval-logging.ts", "core/hash.ts", "core/fs.ts"],
+    "core/eval-logging.ts": ["core/fs.ts", "core/run-ledger.ts"],
+    "core/fs.test.ts": ["core/fs.ts"],
+    "core/fs.ts": [],
+    "core/hash.test.ts": ["core/hash.ts"],
+    "core/hash.ts": [],
+    "core/index.ts": ["core/fs.ts", "core/paths.ts"],
+    "core/paths.ts": ["core/hash.ts"],
+    "core/retry-policy.test.ts": ["core/retry-policy.ts"],
+    "core/retry-policy.ts": [],
+    "core/run-ledger.test.ts": ["core/run-ledger.ts", "core/hash.ts", "core/fs.ts"],
+    "core/run-ledger.ts": ["core/paths.ts", "core/hash.ts", "core/fs.ts"],
+    "core/session-meta.test.ts": ["core/contract.ts"],
+    "core/session-meta.ts": ["core/paths.ts", "core/hash.ts", "core/fs.ts", "core/contract.ts"],
+    "extensions/memory/detect.test.ts": ["core/index.ts", "extensions/memory/detect.ts"],
+    "extensions/memory/detect.ts": ["core/index.ts", "extensions/memory/profile.ts"],
+    "extensions/memory/index.ts": [
+      "core/index.ts",
+      "extensions/memory/profile.ts",
+      "extensions/memory/detect.ts"
+    ],
+    "extensions/memory/profile.test.ts": ["core/index.ts", "extensions/memory/profile.ts"],
+    "extensions/memory/profile.ts": ["core/index.ts"],
+    "extensions/quest/codebase.test.ts": [
+      "extensions/quest/codebase.ts",
+      "extensions/quest/types.ts"
+    ],
+    "extensions/quest/codebase.ts": ["extensions/quest/types.ts"],
+    "extensions/quest/constants.ts": ["core/index.ts", "extensions/quest/types.ts"],
+    "extensions/quest/context-broker.ts": [
+      "core/index.ts",
+      "extensions/quest/constants.ts",
+      "extensions/quest/utils.ts",
+      "extensions/quest/todo-sync.ts",
+      "extensions/quest/codebase.ts"
+    ],
+    "extensions/quest/delegate.test.ts": ["extensions/quest/delegate.ts"],
+    "extensions/quest/delegate.ts": [],
+    "extensions/quest/graph.test.ts": ["extensions/quest/graph.ts"],
+    "extensions/quest/graph.ts": [],
+    "extensions/quest/index.ts": [
+      "extensions/quest/types.ts",
+      "extensions/quest/constants.ts",
+      "extensions/quest/utils.ts",
+      "extensions/quest/storage.ts",
+      "core/index.ts",
+      "extensions/quest/models.ts",
+      "extensions/quest/delegate.ts",
+      "extensions/quest/subagent.ts",
+      "extensions/quest/teams.ts",
+      "extensions/quest/todo-sync.ts",
+      "extensions/quest/status.ts",
+      "extensions/quest/steering.ts",
+      "extensions/quest/kanban.ts",
+      "extensions/quest/graph.ts",
+      "extensions/quest/codebase.ts"
+    ],
+    "extensions/quest/kanban.ts": ["extensions/quest/types.ts", "extensions/quest/constants.ts"],
+    "extensions/quest/models.test.ts": ["extensions/quest/models.ts"],
+    "extensions/quest/models.ts": [],
+    "extensions/quest/status.ts": ["extensions/quest/types.ts", "extensions/quest/utils.ts"],
+    "extensions/quest/steering.ts": [
+      "extensions/quest/types.ts",
+      "extensions/quest/constants.ts",
+      "extensions/quest/todo-sync.ts",
+      "extensions/quest/storage.ts"
+    ],
+    "extensions/quest/storage.ts": [
+      "core/index.ts",
+      "extensions/quest/types.ts",
+      "extensions/quest/utils.ts"
+    ],
+    "extensions/quest/subagent.ts": ["extensions/quest/delegate.ts"],
+    "extensions/quest/teams.ts": ["extensions/quest/types.ts", "extensions/quest/constants.ts"],
+    "extensions/quest/todo-sync.ts": [
+      "extensions/quest/utils.ts",
+      "core/index.ts",
+      "extensions/quest/types.ts"
+    ],
+    "extensions/quest/types.ts": [],
+    "extensions/quest/utils.ts": ["core/index.ts", "extensions/quest/constants.ts"],
+    "extensions/quest/verifier.ts": [
+      "extensions/quest/types.ts",
+      "extensions/quest/constants.ts",
+      "extensions/quest/codebase.ts"
+    ],
+    "extensions/todo/display.test.ts": ["core/index.ts", "extensions/todo/display.ts"],
+    "extensions/todo/display.ts": ["core/index.ts"],
+    "extensions/todo/index.ts": ["core/index.ts", "extensions/todo/display.ts"]
+  },
+  "reverseDependencies": {
+    "core/contract.ts": [
+      "core/contract.test.ts",
+      "core/session-meta.test.ts",
+      "core/session-meta.ts"
+    ],
+    "core/eval-logging.ts": ["core/eval-logging.test.ts"],
+    "core/hash.ts": [
+      "core/eval-logging.test.ts",
+      "core/hash.test.ts",
+      "core/paths.ts",
+      "core/run-ledger.test.ts",
+      "core/run-ledger.ts",
+      "core/session-meta.ts"
+    ],
+    "core/fs.ts": [
+      "core/eval-logging.test.ts",
+      "core/eval-logging.ts",
+      "core/fs.test.ts",
+      "core/index.ts",
+      "core/run-ledger.test.ts",
+      "core/run-ledger.ts",
+      "core/session-meta.ts"
+    ],
+    "core/run-ledger.ts": ["core/eval-logging.ts", "core/run-ledger.test.ts"],
+    "core/paths.ts": ["core/index.ts", "core/run-ledger.ts", "core/session-meta.ts"],
+    "core/retry-policy.ts": ["core/retry-policy.test.ts"],
+    "core/index.ts": [
+      "extensions/memory/detect.test.ts",
+      "extensions/memory/detect.ts",
+      "extensions/memory/index.ts",
+      "extensions/memory/profile.test.ts",
+      "extensions/memory/profile.ts",
+      "extensions/quest/constants.ts",
+      "extensions/quest/context-broker.ts",
+      "extensions/quest/index.ts",
+      "extensions/quest/storage.ts",
+      "extensions/quest/todo-sync.ts",
+      "extensions/quest/utils.ts",
+      "extensions/todo/display.test.ts",
+      "extensions/todo/display.ts",
+      "extensions/todo/index.ts"
+    ],
+    "extensions/memory/detect.ts": [
+      "extensions/memory/detect.test.ts",
+      "extensions/memory/index.ts"
+    ],
+    "extensions/memory/profile.ts": [
+      "extensions/memory/detect.ts",
+      "extensions/memory/index.ts",
+      "extensions/memory/profile.test.ts"
+    ],
+    "extensions/quest/codebase.ts": [
+      "extensions/quest/codebase.test.ts",
+      "extensions/quest/context-broker.ts",
+      "extensions/quest/index.ts",
+      "extensions/quest/verifier.ts"
+    ],
+    "extensions/quest/types.ts": [
+      "extensions/quest/codebase.test.ts",
+      "extensions/quest/codebase.ts",
+      "extensions/quest/constants.ts",
+      "extensions/quest/index.ts",
+      "extensions/quest/kanban.ts",
+      "extensions/quest/status.ts",
+      "extensions/quest/steering.ts",
+      "extensions/quest/storage.ts",
+      "extensions/quest/teams.ts",
+      "extensions/quest/todo-sync.ts",
+      "extensions/quest/verifier.ts"
+    ],
+    "extensions/quest/constants.ts": [
+      "extensions/quest/context-broker.ts",
+      "extensions/quest/index.ts",
+      "extensions/quest/kanban.ts",
+      "extensions/quest/steering.ts",
+      "extensions/quest/teams.ts",
+      "extensions/quest/utils.ts",
+      "extensions/quest/verifier.ts"
+    ],
+    "extensions/quest/utils.ts": [
+      "extensions/quest/context-broker.ts",
+      "extensions/quest/index.ts",
+      "extensions/quest/status.ts",
+      "extensions/quest/storage.ts",
+      "extensions/quest/todo-sync.ts"
+    ],
+    "extensions/quest/todo-sync.ts": [
+      "extensions/quest/context-broker.ts",
+      "extensions/quest/index.ts",
+      "extensions/quest/steering.ts"
+    ],
+    "extensions/quest/delegate.ts": [
+      "extensions/quest/delegate.test.ts",
+      "extensions/quest/index.ts",
+      "extensions/quest/subagent.ts"
+    ],
+    "extensions/quest/graph.ts": ["extensions/quest/graph.test.ts", "extensions/quest/index.ts"],
+    "extensions/quest/storage.ts": ["extensions/quest/index.ts", "extensions/quest/steering.ts"],
+    "extensions/quest/models.ts": ["extensions/quest/index.ts", "extensions/quest/models.test.ts"],
+    "extensions/quest/subagent.ts": ["extensions/quest/index.ts"],
+    "extensions/quest/teams.ts": ["extensions/quest/index.ts"],
+    "extensions/quest/status.ts": ["extensions/quest/index.ts"],
+    "extensions/quest/steering.ts": ["extensions/quest/index.ts"],
+    "extensions/quest/kanban.ts": ["extensions/quest/index.ts"],
+    "extensions/todo/display.ts": ["extensions/todo/display.test.ts", "extensions/todo/index.ts"],
+    "core/contract.test.ts": [],
+    "core/eval-logging.test.ts": [],
+    "core/fs.test.ts": [],
+    "core/hash.test.ts": [],
+    "core/retry-policy.test.ts": [],
+    "core/run-ledger.test.ts": [],
+    "core/session-meta.test.ts": [],
+    "core/session-meta.ts": [],
+    "extensions/memory/detect.test.ts": [],
+    "extensions/memory/index.ts": [],
+    "extensions/memory/profile.test.ts": [],
+    "extensions/quest/codebase.test.ts": [],
+    "extensions/quest/context-broker.ts": [],
+    "extensions/quest/delegate.test.ts": [],
+    "extensions/quest/graph.test.ts": [],
+    "extensions/quest/index.ts": [],
+    "extensions/quest/models.test.ts": [],
+    "extensions/quest/verifier.ts": [],
+    "extensions/todo/display.test.ts": [],
+    "extensions/todo/index.ts": []
+  }
+}
