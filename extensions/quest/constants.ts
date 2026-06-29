@@ -1,11 +1,14 @@
 import { join } from "node:path";
-import { AGENT_DIR } from "../../core";
+import {
+	AGENT_DIR,
+	MAX_BURST,
+	MAX_RETRIES,
+	MAX_VERIFY_RETRIES,
+	MAX_DEPENDENCY_DEPTH,
+} from "../../core";
 import type { TaskStatus, TeamConfig } from "./types";
 
-export const MAX_BURST = 6;
-export const MAX_RETRIES = 2;
-export const MAX_VERIFY_RETRIES = 2;
-export const MAX_DEPENDENCY_DEPTH = 3;
+export { MAX_BURST, MAX_RETRIES, MAX_VERIFY_RETRIES, MAX_DEPENDENCY_DEPTH };
 
 /**
  * Language-agnostic code-hygiene directive injected into steering and verification.

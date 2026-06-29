@@ -11,7 +11,7 @@
  * Bump `CONTRACT_VERSION` on any breaking change to a shape or path so
  * consumers can detect a mismatch instead of corrupting each other's files.
  */
-export const CONTRACT_VERSION = 1;
+export const CONTRACT_VERSION = 2;
 
 /**
  * True if a persisted blob was written by a NEWER contract than this code
@@ -39,6 +39,18 @@ export interface SessionMeta {
 	cwd?: string;
 	cwdHash?: string;
 	updatedAt?: number;
+	/**
+	 * Opaque id for the current agent session (pi's internal session id).
+	 * Stored so other extensions or offline tooling can correlate sub-agent
+	 * spawns back to the orchestrator session that triggered them.
+	 */
+	sessionId?: string;
+	/**
+	 * If the orchestrator is running an active quest, this is that quest's
+	 * name. Lets other extensions (and offline tooling) group events by
+	 * the quest that produced them without reading quest state directly.
+	 */
+	questName?: string;
 	/** Per-extension blob; each extension owns its own key. */
 	extensions?: Partial<Record<ExtensionKey, Record<string, unknown>>>;
 }

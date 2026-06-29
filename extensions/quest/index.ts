@@ -32,6 +32,8 @@ import {
 	loadAgentModels,
 	rememberAgentModel,
 } from "./storage";
+import { RunLedger, EvalLog } from "../../core";
+import type { RunEvent, EvalEntry } from "../../core";
 import { matchModel, promptModelAssignment, toModelLike } from "./models";
 import { resolveTaskModel, buildSubAgentPrompt } from "./delegate";
 import { runSubAgent } from "./subagent";
@@ -50,9 +52,76 @@ import {
 	loadCodebaseIndex,
 } from "./codebase";
 
+function questSlug(name: string): string {
+	return name.replace(/[^a-z0-9-]+/gi, "-").toLowerCase();
+}
+
 export default function (pi: ExtensionAPI) {
 	let questCache: Quest | null = null;
 	let autoPilotLocked = false;
+	const ledgerCache = new Map<string, { ledger: RunLedger; evalLog: EvalLog }>();
+
+	function getLedgers(cwd: string): { ledger: RunLedger; evalLog: EvalLog } {
+		let entry = ledgerCache.get(cwd);
+		if (!entry) {
+			const q = getQuest(cwd) ?? ({ name: "unknown" } as Quest);
+			entry = {
+				ledger: new RunLedger(cwd, questSlug(q.name)),
+				evalLog: new EvalLog(cwd, questSlug(q.name)),
+			};
+			ledgerCache.set(cwd, entry);
+		}
+		return entry;
+	}
+
+	function ensureLedgers(cwd: string, name: string): void {
+		ledgerCache.set(cwd, {
+			ledger: new RunLedger(cwd, questSlug(name)),
+			evalLog: new EvalLog(cwd, questSlug(name)),
+		});
+	}
+
+	function recordRun(cwd: string, event: RunEvent): void {
+		try {
+			getLedgers(cwd).ledger.record(event);
+		} catch {
+			/* best-effort observability */
+		}
+	}
+
+	function recordEval(cwd: string, entry: EvalEntry): void {
+		try {
+			getLedgers(cwd).evalLog.record(entry);
+		} catch {
+			/* best-effort observability */
+		}
+	}
+
+	function makeEval(
+		quest: Quest,
+		task: Quest["tasks"][0],
+		index: number,
+		status: "done" | "failed" | "skipped",
+		verified: boolean,
+		evidence: string | null | undefined,
+	): EvalEntry {
+		return {
+			quest: quest.name,
+			questSlug: questSlug(quest.name),
+			taskIndex: index,
+			taskContent: task.content,
+			agent: task.agent,
+			model: task.model,
+			status,
+			verified,
+			verifyEvidence: evidence ?? null,
+			durationMs: task.startedAt ? (task.completedAt ?? Date.now()) - task.startedAt : 0,
+			tokensIn: 0,
+			tokensOut: 0,
+			attempts: task.attempts,
+			timestamp: Date.now(),
+		};
+	}
 
 	function getQuest(cwd?: string): Quest | null {
 		if (!questCache && cwd) questCache = loadQuest(cwd);
@@ -221,6 +290,7 @@ export default function (pi: ExtensionAPI) {
 				params.gitIntegration,
 			);
 			validateAndSetTeam(quest, params.team);
+			ensureLedgers(ctx.cwd, quest.name);
 			persist(ctx, quest);
 
 			const modeNote =
@@ -652,6 +722,19 @@ export default function (pi: ExtensionAPI) {
 					task.status = "done";
 					task.completedAt = Date.now();
 
+					recordRun(ctx.cwd, {
+						kind: "verify_pass",
+						taskIndex: params.index,
+						taskContent: task.content,
+						agent: "verifier",
+						timestamp: Date.now(),
+						evidence: params.verifyEvidence,
+					});
+					recordEval(
+						ctx.cwd,
+						makeEval(quest, task, params.index, "done", true, params.verifyEvidence),
+					);
+
 					quest.lastFiredTaskIndex = -1;
 					quest.sameTaskCount = 0;
 					persist(ctx, quest);
@@ -704,6 +787,15 @@ export default function (pi: ExtensionAPI) {
 					task.context = `${task.context}\n\n[Verification FAIL #${task.verifyRetries}]: ${params.verifyEvidence || "see above"}. Fix the issues and try again.`;
 					task.completedAt = null;
 
+					recordRun(ctx.cwd, {
+						kind: "verify_fail",
+						taskIndex: params.index,
+						taskContent: task.content,
+						agent: "verifier",
+						timestamp: Date.now(),
+						evidence: params.verifyEvidence,
+						verifyRetriesLeft: retriesLeft,
+					});
 					quest.lastFiredTaskIndex = -1;
 					quest.sameTaskCount = 0;
 					persist(ctx, quest);
@@ -729,6 +821,20 @@ export default function (pi: ExtensionAPI) {
 				task.status = "failed";
 				task.completedAt = Date.now();
 				task.result = `Verification FAIL after ${MAX_VERIFY_RETRIES} retries: ${params.verifyEvidence || "no details"}`;
+
+				recordRun(ctx.cwd, {
+					kind: "verify_fail",
+					taskIndex: params.index,
+					taskContent: task.content,
+					agent: "verifier",
+					timestamp: Date.now(),
+					evidence: params.verifyEvidence,
+					verifyRetriesLeft: 0,
+				});
+				recordEval(
+					ctx.cwd,
+					makeEval(quest, task, params.index, "failed", false, params.verifyEvidence),
+				);
 
 				quest.lastFiredTaskIndex = -1;
 				quest.sameTaskCount = 0;
