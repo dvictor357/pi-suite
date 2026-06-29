@@ -120,6 +120,23 @@ test("supports contractVersion 1 and gracefully ignores future versions", () => 
 	if (future.status === "future") assert.equal(future.contractVersion, 2);
 });
 
+test("planning enrichment degrades gracefully on a future-version cache", () => {
+	const cwd = tempRepo();
+	writeIndex(cwd, 2); // newer than SUPPORTED_CODEBASE_CONTRACT_VERSION
+
+	const tasks = [task()];
+	const result = enrichPlanningContext(tasks, "improve foo", cwd);
+	// Tasks are returned untouched (no enrichment from an unreadable cache)...
+	assert.equal(result.cache.status, "future");
+	assert.deepEqual(result.enrichedTasks, tasks);
+	assert.match(result.summary, /newer than supported/);
+
+	// ...and the verifier impact context falls back to the tool prompt, not cache data.
+	const impact = buildVerificationImpactContext(cwd, "edited src/foo.ts");
+	assert.match(impact, /newer than supported/);
+	assert.doesNotMatch(impact, /Fallback cache impact/);
+});
+
 test("queries and maps codebase cache data", () => {
 	const cwd = tempRepo();
 	writeIndex(cwd);
