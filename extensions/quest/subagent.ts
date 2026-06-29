@@ -12,10 +12,23 @@
  *   - An in-memory `SessionManager` avoids polluting the session tree on disk.
  *   - Reusing `ctx.modelRegistry` shares the user's configured auth/models.
  */
-import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+	createAgentSession,
+	SessionManager,
+	createReadToolDefinition,
+	createGrepToolDefinition,
+	createFindToolDefinition,
+	createLsToolDefinition,
+	createBashToolDefinition,
+	createEditToolDefinition,
+	createWriteToolDefinition,
+} from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
 import { toolsForRole, extractFinalText, type SubAgentResult } from "./delegate";
+import { isSandboxActive, sandboxToolPlan, GUARDED_SANDBOX_TOOLS } from "./sandbox";
+import type { SandboxProfile } from "./sandbox";
+import { evaluateToolCall } from "./sandbox-guard";
 
 export interface SubAgentRequest {
 	/** Sub-agent role (scout, worker, …) — drives the tool scope when `tools` is not set. */
@@ -25,12 +38,74 @@ export interface SubAgentRequest {
 	/** Fully-formed instruction sent to the sub-agent (persona + task + context). */
 	prompt: string;
 	/**
-	 * Pre-computed tool allowlist. When provided, this overrides the role-based
-	 * default (`toolsForRole`). Callers with sandbox policy should pass
-	 * `sandboxToolsForRole(role, profile)` here so write tools are stripped when
-	 * sandbox is active.
+	 * Pre-computed tool allowlist for the non-sandbox path. Ignored when
+	 * `sandboxProfile` is active — there the sub-agent runs with guarded tool
+	 * definitions (see {@link buildGuardedTools}) instead of named built-ins.
 	 */
 	tools?: string[];
+	/**
+	 * Active sandbox profile. When set and sandbox-active, the sub-agent's
+	 * built-in tools are disabled and replaced with guarded definitions that
+	 * enforce path/command policy per call (real enforcement, not just prompt
+	 * guidance), since the spawned session loads no extensions and pi's
+	 * `tool_call` hook therefore never fires inside it.
+	 */
+	sandboxProfile?: SandboxProfile;
+}
+
+/** Tool name → built-in tool-definition factory (all take just the cwd). */
+const TOOL_DEFINITION_FACTORIES: Record<string, (cwd: string) => ToolDefinition<any, any, any>> = {
+	read: createReadToolDefinition,
+	grep: createGrepToolDefinition,
+	find: createFindToolDefinition,
+	ls: createLsToolDefinition,
+	bash: createBashToolDefinition,
+	edit: createEditToolDefinition,
+	write: createWriteToolDefinition,
+};
+
+const GUARDED = new Set<string>(GUARDED_SANDBOX_TOOLS);
+
+/** Wrap a tool definition's `execute` so a policy-violating call is blocked before it runs. */
+function guard(
+	def: ToolDefinition<any, any, any>,
+	profile: SandboxProfile,
+): ToolDefinition<any, any, any> {
+	const run = def.execute.bind(def);
+	return {
+		...def,
+		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+			const decision = evaluateToolCall(profile, def.name, params as Record<string, unknown>);
+			if (decision.block) {
+				return {
+					content: [{ type: "text", text: decision.reason ?? "Sandbox: tool call blocked." }],
+					isError: true,
+					details: undefined,
+				} as Awaited<ReturnType<typeof run>>;
+			}
+			return run(toolCallId, params, signal, onUpdate, ctx);
+		},
+	};
+}
+
+/**
+ * Build the guarded tool-definition set for a sandboxed sub-agent: read-only
+ * tools pass through, {@link GUARDED_SANDBOX_TOOLS} (bash/edit/write) are wrapped
+ * with the sandbox guard.
+ */
+function buildGuardedTools(
+	cwd: string,
+	role: string,
+	profile: SandboxProfile,
+): ToolDefinition<any, any, any>[] {
+	const out: ToolDefinition<any, any, any>[] = [];
+	for (const name of sandboxToolPlan(role, profile)) {
+		const factory = TOOL_DEFINITION_FACTORIES[name];
+		if (!factory) continue;
+		const def = factory(cwd);
+		out.push(GUARDED.has(name) ? guard(def, profile) : def);
+	}
+	return out;
 }
 
 /**
@@ -48,12 +123,20 @@ export async function runSubAgent(
 	let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
 	let onAbort: (() => void) | undefined;
 	try {
+		const sandboxed = req.sandboxProfile && isSandboxActive(req.sandboxProfile);
 		const created = await createAgentSession({
 			cwd: ctx.cwd,
 			model: req.model,
 			modelRegistry: ctx.modelRegistry,
 			sessionManager: SessionManager.inMemory(),
-			tools: req.tools ?? toolsForRole(req.role),
+			// Sandboxed: disable built-in tools and supply guarded definitions so
+			// path/command policy is enforced per call. Otherwise: named tool scope.
+			...(sandboxed
+				? {
+						noTools: "builtin" as const,
+						customTools: buildGuardedTools(ctx.cwd, req.role, req.sandboxProfile!),
+					}
+				: { tools: req.tools ?? toolsForRole(req.role) }),
 		});
 		session = created.session;
 

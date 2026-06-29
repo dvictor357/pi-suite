@@ -45,25 +45,39 @@ Each extension imports the shared contract from `core/` via a relative path
 by the pi runtime at load) and pinned as `devDependencies` so `tsc` checks real
 API usage rather than `any` stand-ins.
 
-## Quest sandbox MVP
+## Quest sandbox
 
-`pi-quest` includes a first-pass sandbox/policy layer for safer sub-agent loops.
-The current MVP is intentionally conservative: it is **prompt/tool-scope based**
-with verifier checks, not an OS-level sandbox.
+`pi-quest` includes a sandbox/policy layer for safer agent loops. It is **not** an
+OS-level sandbox — there is no kernel, container, or filesystem isolation. Enforcement
+happens at pi's tool-call boundary. Be precise about what that means:
 
-Sandbox support includes:
+**Enforced** (a violating call is blocked before it runs):
 
-- optional quest-level `sandbox` policy and per-task sandbox overrides
-- role-based tool scopes: planner/scout/reviewer/verifier stay read-only;
-  workers can be further constrained by sandbox policy
-- sensitive-file deny globs for secrets, keys, credentials, and env files
-- command classification helpers for package install, network, destructive,
-  build, and test commands
-- deterministic git branch/worktree planning helpers and display-only cleanup
-  intent — no destructive cleanup happens automatically
-- sandbox constraints injected into sub-agent prompts
-- sandbox compliance checks added to verification handoffs
-- sandbox status surfaced in quest status, kanban, and task detail views
+- **Tool scope.** Read-only roles (planner/scout/reviewer/verifier) get read-only tools;
+  worker roles get write/shell tools, gated by policy.
+- **Orchestrator tool calls.** A `tool_call` hook (`register-events.ts`) evaluates every
+  bash/edit/write the main agent makes against the active quest's policy and returns
+  `{ block: true, reason }` for a denied path, a destructive/network/package-install
+  command the policy forbids, a denied-command pattern, or a path/command outside an
+  allow-list. See `sandbox-guard.ts` (`evaluateToolCall`).
+- **Sub-agent tool calls.** A spawned sub-agent's isolated session loads no extensions, so
+  the hook above never fires inside it. Instead the spawn path (`subagent.ts`) disables the
+  built-in tools (`noTools: "builtin"`) and supplies **guarded** tool definitions —
+  bash/edit/write wrapped with the same `evaluateToolCall` guard — so the same policy is
+  enforced per call rather than denying file work outright.
+- **Sensitive files.** Built-in deny globs for secrets, keys, credentials, and env files
+  are always enforced for write/edit, on top of the quest's `deniedPaths`.
+
+**Advisory** (guidance and after-the-fact review, not a hard boundary):
+
+- Policy constraints injected into sub-agent prompts.
+- Verifier compliance checks added to verification handoffs.
+- Deterministic git branch/worktree planning + display-only cleanup intent — worktrees are
+  planned and recorded, never created or removed automatically.
+
+Quest-level `sandbox` policy and per-task overrides drive all of the above (overrides can
+only tighten, never loosen). Sandbox status is surfaced in quest status, kanban, and task
+detail views.
 
 ## Why one repo
 

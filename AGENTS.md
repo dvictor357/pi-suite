@@ -48,6 +48,7 @@ core/
   paths.ts            ~/.pi/agent paths and cwdHash-scoped path builders
   hash.ts             cwdHash(cwd) = sha256(cwd).slice(0, 16)
   fs.ts               readJSON/writeJSON/updateJSON/appendLine
+  coerce.ts           Typed unknown→value helpers for the disk-read boundary
   session-meta.ts     Shared status handoff for memory/todo/quest
   retry-policy.ts     Retry/burst/depth constants (single source of truth)
   run-ledger.ts       Append-only JSONL execution log per quest
@@ -56,7 +57,15 @@ core/
 
 extensions/
   quest/
-    index.ts          Registers quest tools, commands, and events
+    index.ts          Thin entry point: builds QuestRuntime, calls register-* modules
+    runtime.ts        createQuestRuntime: shared quest cache, auto-pilot lock, ledgers, helpers
+    register-create.ts    quest_create, quest_decide
+    register-planning.ts  quest_plan, quest_update, quest_approve
+    register-status.ts    quest_status/commit/git_summary/team/history/memory_save
+    register-delegate.ts  quest_assign_model/delegate/abort/task_detail
+    register-events.ts    agent_end auto-pilot, session_start, model_select, sandbox tool_call hook
+    register-command.ts   /quest command + kanban board
+    sandbox-guard.ts  evaluateToolCall: per-call block/allow decision (real enforcement)
     storage.ts        Quest load/save/archive; sync quest conventions + agent-model choices to memory
     todo-sync.ts      Sync quest tasks into pi-todo; build awareness block
     steering.ts       Auto-pilot task selection and status formatting

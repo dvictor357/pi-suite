@@ -235,6 +235,33 @@ function filterSandboxTools(profile: SandboxProfile, tools: string[]): string[] 
 	});
 }
 
+/** Tools that carry a sandbox guard when handed to a sub-agent (write/shell). */
+export const GUARDED_SANDBOX_TOOLS = ["bash", "edit", "write"] as const;
+
+/**
+ * Plan the concrete tool set a sandboxed sub-agent should receive.
+ *
+ * Unlike {@link sandboxToolsForRole} (which bluntly strips write/edit so a
+ * sandboxed worker cannot write at all), this returns the tools the sub-agent
+ * keeps when the spawn path wraps {@link GUARDED_SANDBOX_TOOLS} with the
+ * tool-call guard (see sandbox-guard.ts). Granular path/command enforcement then
+ * happens per call rather than denying file work outright:
+ *
+ * - read-only roles (planner/scout/reviewer/verifier) → read-only tools only;
+ * - write-capable roles → read-only tools + guarded edit + write, plus guarded
+ *   bash only when the policy lists allowed commands (shell stays gated by the
+ *   allow-list, matching {@link filterSandboxTools}).
+ *
+ * Pure — the caller turns these names into (guarded) tool definitions.
+ */
+export function sandboxToolPlan(role: string, profile: SandboxProfile): string[] {
+	const normalizedRole = role.trim().toLowerCase();
+	if (READ_ONLY_SANDBOX_ROLES.has(normalizedRole)) return [...READ_ONLY_SANDBOX_TOOLS];
+	const names = [...READ_ONLY_SANDBOX_TOOLS, "edit", "write"];
+	if (profile.allowCommands.length > 0) names.push("bash");
+	return names;
+}
+
 // ── Sensitive file deny list ────────────────────────────────────────────────
 
 /**

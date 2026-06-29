@@ -4,6 +4,8 @@ import { archiveQuest, loadQuest, saveQuest, syncConventionsToMemory } from "./s
 import { buildSteeringMessage, nextPendingTask, formatQuestStatus } from "./steering";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { syncQuestToTodo } from "./todo-sync";
+import { resolveSandboxProfile } from "./sandbox";
+import { evaluateToolCall } from "./sandbox-guard";
 import type { QuestRuntime } from "./runtime";
 
 export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
@@ -481,5 +483,25 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 		writeQuestSessionMeta(ctx.cwd, rt.getQuest());
 	});
 
-	// ── Commands ──────────────────────────────────────────────────────────────
+	// ── Sandbox enforcement ───────────────────────────────────────────────────
+	// Block tool calls that violate an active quest's sandbox policy. This is the
+	// real-enforcement counterpart to the prompt-injected guidance and the
+	// verifier's after-the-fact checks: a denied path / command / network call is
+	// stopped here, at pi's tool-call chokepoint, before it runs. Sub-agent tool
+	// calls don't reach this hook (their isolated session loads no extensions);
+	// they are guarded by guardTools() at spawn time instead.
+	pi.on("tool_call", (event, ctx) => {
+		const quest = getQuest(ctx.cwd);
+		if (!quest || quest.status !== "active" || !quest.sandbox) return;
+		const profile = resolveSandboxProfile(quest.sandbox);
+		const decision = evaluateToolCall(
+			profile,
+			event.toolName,
+			event.input as unknown as Record<string, unknown>,
+		);
+		if (decision.block) {
+			ctx.ui.notify?.(decision.reason ?? "Sandbox: tool call blocked.", "warning");
+			return { block: true, reason: decision.reason };
+		}
+	});
 }
