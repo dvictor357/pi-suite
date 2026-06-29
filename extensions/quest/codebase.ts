@@ -4,6 +4,15 @@ import { join } from "node:path";
 import type { QuestTask } from "./types";
 
 export const CODEBASE_CACHE_PATH = ".pi/codebase-index.json";
+
+/**
+ * The `.pi/codebase-index.json` cache is OWNED by `pi-minions`, not pi-suite.
+ * pi-quest only reads it (a stable integration contract; see docs/architecture.md
+ * "Codebase intelligence ownership split"). This is the cache shape this code
+ * understands: a cache stamped with a higher `contractVersion` is treated as
+ * absent (`loadCodebaseIndex` → status "future") rather than reinterpreted, so a
+ * future pi-minions format can never corrupt quest orchestration decisions.
+ */
 export const SUPPORTED_CODEBASE_CONTRACT_VERSION = 1;
 
 export interface CodebaseImportEntry {
