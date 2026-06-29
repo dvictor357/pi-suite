@@ -198,3 +198,71 @@ export function buildSubAgentPrompt(opts: {
 	);
 	return lines.join("\n");
 }
+
+/** Final-turn messages shape (structural — no SDK import). */
+export type FinalTurnMessages = ReadonlyArray<{ role?: string; content?: unknown }>;
+
+/** A session event as observed by {@link awaitFinalTurn} (structural subset). */
+export interface AwaitableSessionEvent {
+	type: string;
+	willRetry?: boolean;
+	messages?: unknown;
+}
+
+/** The minimal session surface {@link awaitFinalTurn} needs (structural). */
+export interface AwaitableSession {
+	subscribe(listener: (ev: AwaitableSessionEvent) => void): () => void;
+	dispose(): void;
+}
+
+/**
+ * Wait for a sub-agent session's final turn, with abort wired into the same
+ * promise.
+ *
+ * This is the subtle bit of the spawn path, pulled out of subagent.ts so it can
+ * be unit-tested without loading the SDK runtime. Two things matter:
+ *
+ * 1. Resolve only on a non-retry `agent_end` — an `agent_end` with
+ *    `willRetry` is an interim turn and must be ignored.
+ * 2. Reject on abort *in the same promise*, disposing the session. Disposing a
+ *    session does not necessarily emit `agent_end`, so without the abort-reject
+ *    an awaiter could block forever after the orchestrator aborts.
+ *
+ * Returns the promise plus a `cleanup` that detaches the abort listener; the
+ * caller runs it in a `finally`.
+ */
+export function awaitFinalTurn(
+	session: AwaitableSession,
+	signal: AbortSignal | undefined,
+): { promise: Promise<FinalTurnMessages>; cleanup: () => void } {
+	let onAbort: (() => void) | undefined;
+
+	const promise = new Promise<FinalTurnMessages>((resolve, reject) => {
+		const unsubscribe = session.subscribe((ev) => {
+			if (ev.type === "agent_end" && !ev.willRetry) {
+				unsubscribe();
+				resolve((ev.messages ?? []) as FinalTurnMessages);
+			}
+		});
+
+		if (signal) {
+			const abort = () => {
+				unsubscribe();
+				session.dispose();
+				reject(new Error("Aborted by user."));
+			};
+			if (signal.aborted) {
+				abort();
+				return;
+			}
+			onAbort = abort;
+			signal.addEventListener("abort", onAbort, { once: true });
+		}
+	});
+
+	const cleanup = () => {
+		if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+	};
+
+	return { promise, cleanup };
+}
