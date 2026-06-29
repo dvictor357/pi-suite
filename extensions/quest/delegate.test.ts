@@ -6,8 +6,91 @@ import {
 	extractFinalText,
 	buildSubAgentPrompt,
 	buildSandboxConstraintBlock,
+	awaitFinalTurn,
+	type AwaitableSession,
+	type AwaitableSessionEvent,
 } from "./delegate";
 import type { SandboxProfile } from "./sandbox";
+
+/** A minimal fake session: drive `emit` to push events; records dispose/unsubscribe. */
+function fakeSession() {
+	let listener: ((ev: AwaitableSessionEvent) => void) | undefined;
+	const state = { disposed: false, subscribed: false, unsubscribed: false };
+	const session: AwaitableSession = {
+		subscribe(l) {
+			listener = l;
+			state.subscribed = true;
+			return () => {
+				state.unsubscribed = true;
+				listener = undefined;
+			};
+		},
+		dispose() {
+			state.disposed = true;
+		},
+	};
+	return {
+		session,
+		state,
+		emit: (ev: AwaitableSessionEvent) => listener?.(ev),
+	};
+}
+
+describe("awaitFinalTurn", () => {
+	test("resolves on a non-retry agent_end with its messages", async () => {
+		const f = fakeSession();
+		const { promise } = awaitFinalTurn(f.session, undefined);
+		f.emit({ type: "agent_end", willRetry: false, messages: [{ role: "assistant" }] });
+		assert.deepEqual(await promise, [{ role: "assistant" }]);
+		assert.equal(f.state.unsubscribed, true);
+	});
+
+	test("ignores agent_end with willRetry and other event types", async () => {
+		const f = fakeSession();
+		const { promise } = awaitFinalTurn(f.session, undefined);
+		f.emit({ type: "turn_end" });
+		f.emit({ type: "agent_end", willRetry: true, messages: [{ role: "assistant", content: "x" }] });
+		let settled = false;
+		void promise.then(() => (settled = true));
+		await Promise.resolve();
+		assert.equal(settled, false);
+		f.emit({ type: "agent_end", willRetry: false, messages: [{ role: "assistant" }] });
+		await promise;
+		assert.equal(settled, true);
+	});
+
+	test("rejects and disposes on abort", async () => {
+		const f = fakeSession();
+		const ac = new AbortController();
+		const { promise, cleanup } = awaitFinalTurn(f.session, ac.signal);
+		ac.abort();
+		await assert.rejects(promise, /Aborted by user/);
+		assert.equal(f.state.disposed, true);
+		assert.equal(f.state.unsubscribed, true);
+		cleanup();
+	});
+
+	test("already-aborted signal rejects immediately", async () => {
+		const f = fakeSession();
+		const ac = new AbortController();
+		ac.abort();
+		const { promise } = awaitFinalTurn(f.session, ac.signal);
+		await assert.rejects(promise, /Aborted by user/);
+		assert.equal(f.state.disposed, true);
+	});
+
+	test("cleanup detaches the abort listener (no reject after resolve)", async () => {
+		const f = fakeSession();
+		const ac = new AbortController();
+		const { promise, cleanup } = awaitFinalTurn(f.session, ac.signal);
+		f.emit({ type: "agent_end", willRetry: false, messages: [] });
+		await promise;
+		cleanup();
+		// Aborting after cleanup must not throw or double-dispose-trigger.
+		ac.abort();
+		assert.equal(f.state.disposed, false);
+	});
+});
 
 test("toolsForRole gives read-only scopes exploratory/judging roles", () => {
 	for (const role of ["scout", "verifier", "reviewer", "planner", "SCOUT", " Reviewer "]) {

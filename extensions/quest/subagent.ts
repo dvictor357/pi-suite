@@ -25,7 +25,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
-import { toolsForRole, extractFinalText, type SubAgentResult } from "./delegate";
+import { toolsForRole, extractFinalText, awaitFinalTurn, type SubAgentResult } from "./delegate";
 import { isSandboxActive, sandboxToolPlan, GUARDED_SANDBOX_TOOLS } from "./sandbox";
 import type { SandboxProfile } from "./sandbox";
 import { evaluateToolCall } from "./sandbox-guard";
@@ -121,7 +121,7 @@ export async function runSubAgent(
 	if (signal?.aborted) return { ok: false, output: "", error: "Aborted before start." };
 
 	let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
-	let onAbort: (() => void) | undefined;
+	let cleanup: (() => void) | undefined;
 	try {
 		const sandboxed = req.sandboxProfile && isSandboxActive(req.sandboxProfile);
 		const created = await createAgentSession({
@@ -140,37 +140,19 @@ export async function runSubAgent(
 		});
 		session = created.session;
 
-		// Resolve on the sub-agent's final turn; reject on abort. Wiring the abort
-		// into the same promise is what prevents a hang: disposing the session does
-		// not necessarily emit `agent_end`, so without an abort-reject `await
-		// finished` could block forever after the orchestrator aborts.
-		const finished = new Promise<ReadonlyArray<{ role?: string; content?: unknown }>>(
-			(resolve, reject) => {
-				const unsubscribe = session!.subscribe((ev) => {
-					if (ev.type === "agent_end" && !ev.willRetry) {
-						unsubscribe();
-						resolve(ev.messages as ReadonlyArray<{ role?: string; content?: unknown }>);
-					}
-				});
-				if (signal) {
-					onAbort = () => {
-						unsubscribe();
-						session?.dispose();
-						reject(new Error("Aborted by user."));
-					};
-					signal.addEventListener("abort", onAbort, { once: true });
-				}
-			},
-		);
+		// awaitFinalTurn (delegate.ts) owns the resolve-on-final-turn / reject-on-abort
+		// wiring; it is unit-tested there with a fake session.
+		const { promise, cleanup: detach } = awaitFinalTurn(session, signal);
+		cleanup = detach;
 
 		await session.prompt(req.prompt);
-		const messages = await finished;
+		const messages = await promise;
 
 		return { ok: true, output: extractFinalText(messages) };
 	} catch (err) {
 		return { ok: false, output: "", error: err instanceof Error ? err.message : String(err) };
 	} finally {
-		if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+		cleanup?.();
 		session?.dispose();
 	}
 }
