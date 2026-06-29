@@ -49,6 +49,9 @@ core/
   hash.ts             cwdHash(cwd) = sha256(cwd).slice(0, 16)
   fs.ts               readJSON/writeJSON/updateJSON/appendLine
   session-meta.ts     Shared status handoff for memory/todo/quest
+  retry-policy.ts     Retry/burst/depth constants (single source of truth)
+  run-ledger.ts       Append-only JSONL execution log per quest
+  eval-logging.ts     Per-task eval audit trail (JSONL)
   *.test.ts           Core tests
 
 extensions/
@@ -65,6 +68,8 @@ extensions/
     kanban.ts         TUI kanban board
     status.ts         Status badge and session meta
     types.ts          Quest/team types
+    context-broker.ts Composable sub-agent prompt context builder
+    verifier.ts       Structured verification loop (prompt building, retry)
 
   todo/
     index.ts          Registers todo tools, commands, events, storage, cache, archives

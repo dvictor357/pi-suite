@@ -19,14 +19,23 @@ are now deprecated in favor of this suite.
 
 ```
 pi-suite/
-├── core/             # shared cross-extension contract (types, paths, helpers) + *.test.ts
+├── core/                  # shared cross-extension contract + *.test.ts
+│   ├── contract.ts        #   JSON types, CONTRACT_VERSION
+│   ├── paths.ts / hash.ts #   ~/.pi/agent path helpers, cwdHash
+│   ├── fs.ts              #   readJSON / writeJSON / updateJSON / appendLine
+│   ├── session-meta.ts    #   shared status handoff between extensions
+│   ├── retry-policy.ts    #   retry/burst/depth constants (one source of truth)
+│   ├── run-ledger.ts      #   append-only JSONL execution log per quest
+│   └── eval-logging.ts    #   per-task eval audit trail (JSONL)
 ├── extensions/
-│   ├── quest/        # pi-quest   → extensions/quest/index.ts
-│   ├── todo/         # pi-todo    → extensions/todo/index.ts
-│   └── memory/       # pi-memory  → extensions/memory/index.ts
-├── docs/             # architecture & design notes
-├── tsconfig.json     # one typecheck gate over core + all extensions
-└── .prettierrc.json  # one formatting convention for the whole suite
+│   ├── quest/             # pi-quest   → extensions/quest/index.ts
+│   │   ├── context-broker.ts  #   composable sub-agent prompt builder
+│   │   └── verifier.ts       #   structured verification loop
+│   ├── todo/              # pi-todo    → extensions/todo/index.ts
+│   └── memory/            # pi-memory  → extensions/memory/index.ts
+├── docs/                  # architecture & design notes
+├── tsconfig.json          # one typecheck gate over core + all extensions
+└── .prettierrc.json       # one formatting convention for the whole suite
 ```
 
 Each extension imports the shared contract from `core/` via a relative path
@@ -62,7 +71,7 @@ To run just one extension, install the suite and disable the others with `pi con
 ```bash
 npm install        # dev tooling: typescript, prettier, tsx, pi host types
 npm run typecheck  # tsc --noEmit over core + all extensions (against real pi types)
-npm test           # node:test via tsx — core contract (cwdHash, writeJSON, session-meta)
+npm test           # node:test via tsx — core contract + retry-policy + run-ledger + eval-logging
 npm run format     # prettier --write (tabs; see .editorconfig / .prettierrc.json)
 ```
 
