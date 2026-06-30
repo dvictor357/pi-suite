@@ -17,8 +17,9 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 
-import type { Quest } from "./types";
+import type { Quest, QuestTask } from "./types";
 import { loadQuest, saveQuest } from "./storage";
+import { buildSteeringMessage, nextPendingTask } from "./steering";
 import { RunLedger, EvalLog } from "../../core";
 import type { RunEvent, EvalEntry } from "../../core";
 import { loadTeams, ensureBuiltInTeams } from "./teams";
@@ -50,6 +51,22 @@ export interface QuestRuntime {
 	// ── Auto-pilot lock ──────────────────────────────────────────────────────────
 	isAutoPilotLocked(): boolean;
 	setAutoPilotLocked(locked: boolean): void;
+
+	// ── Task firing ──────────────────────────────────────────────────────────────
+	/**
+	 * Steer the agent into a specific task: mark it running, bump bookkeeping,
+	 * persist, and deliver the steering message under the auto-pilot lock. This is
+	 * the single code path that starts a task — shared by the `agent_end` auto-pilot
+	 * and by the command/kanban handlers that need an initial kick.
+	 */
+	fireTask(ctx: ExtensionContext, quest: Quest, task: QuestTask, index: number): void;
+	/**
+	 * Fire the next eligible pending task of the active cached quest, if any.
+	 * Returns whether a task was fired. Safe to call when idle: slash commands and
+	 * kanban actions use this to start work immediately instead of waiting for the
+	 * next `agent_end` (which a slash command never produces on its own).
+	 */
+	fireNextTask(ctx: ExtensionContext): boolean;
 
 	// ── Observability ledgers ────────────────────────────────────────────────────
 	getLedgers(cwd: string): { ledger: RunLedger; evalLog: EvalLog };
@@ -171,6 +188,33 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		syncQuestToTodo(quest, ctx.cwd);
 	}
 
+	function fireTask(ctx: ExtensionContext, quest: Quest, task: QuestTask, index: number): void {
+		task.status = "running";
+		task.attempts++;
+		if (!task.startedAt) task.startedAt = Date.now();
+		quest.lastFiredTaskIndex = index;
+		quest.tasksSincePause++;
+		persist(ctx, quest);
+
+		autoPilotLocked = true;
+		try {
+			pi.sendUserMessage(buildSteeringMessage(quest, task, index, ctx.cwd), {
+				deliverAs: "steer",
+			});
+		} finally {
+			autoPilotLocked = false;
+		}
+	}
+
+	function fireNextTask(ctx: ExtensionContext): boolean {
+		const quest = getQuest(ctx.cwd);
+		if (!quest || quest.status !== "active") return false;
+		const next = nextPendingTask(quest);
+		if (!next) return false;
+		fireTask(ctx, quest, next.task, next.index);
+		return true;
+	}
+
 	const textResult = (s: string) => ({
 		content: [{ type: "text" as const, text: s }],
 		details: {},
@@ -242,6 +286,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 				q.pauseReason = null;
 				persist(ctx, q);
 				ctx.ui.notify?.(`Quest "${q.name}" resumed.`, "info");
+				fireNextTask(ctx);
 			},
 			onStart: () => {
 				const q = getQuest(ctx.cwd);
@@ -259,6 +304,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 				q.pauseReason = null;
 				persist(ctx, q);
 				ctx.ui.notify?.(`Quest "${q.name}" started — ${q.tasks.length} tasks.`, "info");
+				fireNextTask(ctx);
 			},
 			onApprove: () => {
 				const q = getQuest(ctx.cwd);
@@ -275,6 +321,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 					`Plan approved: "${q.name}" — ${q.tasks.length} tasks. Auto-pilot engaged.`,
 					"info",
 				);
+				fireNextTask(ctx);
 			},
 			onRetryTask: (taskIndex: number) => {
 				const q = getQuest(ctx.cwd);
@@ -323,6 +370,8 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		setAutoPilotLocked: (locked: boolean) => {
 			autoPilotLocked = locked;
 		},
+		fireTask,
+		fireNextTask,
 		getLedgers,
 		ensureLedgers,
 		recordRun,

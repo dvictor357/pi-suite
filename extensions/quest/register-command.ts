@@ -205,6 +205,7 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 						`Quest "${quest.name}" started — ${quest.tasks.length} tasks. Auto-pilot engaged.`,
 						"info",
 					);
+					rt.fireNextTask(ctx);
 					return;
 				}
 				case "pause": {
@@ -240,6 +241,7 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 						`Quest "${quest.name}" resumed. ${done}/${quest.tasks.length} done.${next ? ` Next: ${next.task.content}` : ""}`,
 						"info",
 					);
+					rt.fireNextTask(ctx);
 					return;
 				}
 				case "approve": {
@@ -277,6 +279,9 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 						`✅ Plan approved: "${quest.name}" — ${quest.tasks.length} tasks. Auto-pilot engaged.${next ? ` First: ${next.task.content}` : ""}\n\n${planSummary}${moreTasks}`,
 						"info",
 					);
+					// Kick off the first task now. A slash command produces no `agent_end`,
+					// so without this the auto-pilot would sit idle until the next prompt.
+					rt.fireNextTask(ctx);
 					return;
 				}
 				case "kanban": {

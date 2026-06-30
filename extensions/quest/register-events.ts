@@ -1,12 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { MAX_BURST, MAX_RETRIES } from "./constants";
 import { archiveQuest, loadQuest, saveQuest, syncConventionsToMemory } from "./storage";
-import {
-	buildSteeringMessage,
-	nextPendingTask,
-	formatQuestStatus,
-	wasTurnAborted,
-} from "./steering";
+import { nextPendingTask, formatQuestStatus, wasTurnAborted } from "./steering";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { syncQuestToTodo } from "./todo-sync";
 import { resolveSandboxProfile } from "./sandbox";
@@ -438,21 +433,7 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 			}
 
 			// Fire the next task
-			next.task.status = "running";
-			next.task.attempts++;
-			if (!next.task.startedAt) next.task.startedAt = Date.now();
-			quest.lastFiredTaskIndex = next.index;
-			quest.tasksSincePause++;
-			persist(ctx, quest);
-
-			rt.setAutoPilotLocked(true);
-			try {
-				pi.sendUserMessage(buildSteeringMessage(quest, next.task, next.index, ctx.cwd), {
-					deliverAs: "steer",
-				});
-			} finally {
-				rt.setAutoPilotLocked(false);
-			}
+			rt.fireTask(ctx, quest, next.task, next.index);
 		} catch (e) {
 			console.error("[pi-quest] agent_end handler crashed:", e);
 			const quest = getQuest(ctx.cwd);
