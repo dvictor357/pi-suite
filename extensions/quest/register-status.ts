@@ -135,6 +135,7 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 				],
 				details: {
 					stepIndex: index,
+					taskIndex: index,
 					commitHash: params.commitHash,
 					totalCommits: quest.commits.length,
 				},

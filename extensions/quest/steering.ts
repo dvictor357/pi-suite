@@ -188,7 +188,7 @@ export function buildSteeringMessage(
 	const assignedModel = task.model?.trim() || remembered?.trim();
 	const modelLine = assignedModel
 		? `**Model:** \`${assignedModel}\` — delegate with quest_delegate(index=${index}).`
-		: `**Model:** none assigned for role \`${task.agent}\`. Propose one via quest_assign_model(role="${task.agent}", proposed="…", taskIndex=${index}), then quest_delegate(index=${index}).`;
+		: `**Model:** none assigned for role \`${task.agent}\`. Propose one via quest_assign_model(role="${task.agent}", proposed="…", stepIndex=${index}), then quest_delegate(index=${index}).`;
 
 	return [
 		`## Quest: ${quest.name} (${done}/${total} done)`,

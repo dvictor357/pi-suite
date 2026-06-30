@@ -166,7 +166,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				const proposal = params.proposed?.trim() || teamHints[role];
 				if (!proposal) {
 					return textResult(
-						`No model assigned for role "${role}". Call quest_assign_model(role="${role}", proposed="…", taskIndex=${params.index}) first, or pass proposed= to quest_delegate.`,
+						`No model assigned for role "${role}". Call quest_assign_model(role="${role}", proposed="…", stepIndex=${params.index}) first, or pass proposed= to quest_delegate.`,
 					);
 				}
 				if (!ctx.hasUI) {
@@ -379,7 +379,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 		}
 		return {
 			content: [{ type: "text" as const, text: lines.join("\n") }],
-			details: { step: t, index: params.index },
+			details: { step: t, task: t, index: params.index },
 		};
 	};
 

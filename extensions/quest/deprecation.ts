@@ -4,7 +4,7 @@
  * When old task-named parameters are used where a step-named alternative exists,
  * this module logs an unobtrusive structured entry to a developer observability
  * file. The log is never shown to users — it exists only so maintainers can see
- * whether old entry points are still in active use before eventually removing them.
+ * whether legacy compatibility paths are still in active use.
  */
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
