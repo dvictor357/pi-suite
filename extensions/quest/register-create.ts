@@ -15,7 +15,7 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 		label: "Quest Create",
 		description: [
 			"Create a new quest from a goal. This starts the planning phase.",
-			"Quest will then auto-pilot through tasks using sub-agents until complete.",
+			"Quest will then auto-pilot through steps using sub-agents until complete.",
 			"Call this when the user gives a project goal or multi-step task.",
 		].join(" "),
 		parameters: Type.Object({
@@ -33,12 +33,12 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 			planningMode: Type.Optional(
 				StringEnum(["auto", "approve"] as const, {
 					description:
-						"'auto' skips approval and starts immediately after planning. 'approve' waits for quest_approve before executing tasks.",
+						"'auto' skips approval and starts immediately after planning. 'approve' waits for quest_approve before executing steps.",
 				}),
 			),
 			verifyOnComplete: Type.Optional(
 				Type.Boolean({
-					description: "Auto-verify completed tasks with a verifier sub-agent (default: true)",
+					description: "Auto-verify completed steps with a verifier sub-agent (default: true)",
 					default: true,
 				}),
 			),
@@ -46,13 +46,13 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 				Type.Object({
 					autoCommit: Type.Optional(
 						Type.Boolean({
-							description: "Auto-commit on task completion (default: true)",
+							description: "Auto-commit on step completion (default: true)",
 							default: true,
 						}),
 					),
 					autoBranch: Type.Optional(
 						Type.Boolean({
-							description: "Auto-create branches per task (default: true)",
+							description: "Auto-create branches per step (default: true)",
 							default: true,
 						}),
 					),
@@ -155,7 +155,7 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 			const codebaseGuidance = [
 				`Codebase intelligence: ${codebaseStatusSummary(codebaseCache)}`,
 				codebaseAvailable
-					? `Before planning large code tasks, call codebase(operation="scan"), then codebase(operation="query", pattern=...) and codebase(operation="map", file=...) to discover relevant files and dependency context.`
+					? `Before planning large code steps, call codebase(operation="scan"), then codebase(operation="query", pattern=...) and codebase(operation="map", file=...) to discover relevant files and dependency context.`
 					: hasCodebaseCache(ctx.cwd)
 						? `The codebase tool is unavailable; use direct fallback from .pi/codebase-index.json for planning context.`
 						: `The codebase tool is unavailable and no cache exists; proceed with normal scout/read exploration.`,
@@ -168,8 +168,8 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 							`Quest created: **${params.name}**${overwriteWarning}`,
 							``,
 							`Next: Plan the quest. Use subagent(agent="scout") to explore the codebase,`,
-							`then subagent(agent="planner") to create a task breakdown. Save the plan`,
-							`with **quest_plan** — pass the tasks array and set autoStart: true.`,
+							`then subagent(agent="planner") to create a step breakdown. Save the plan`,
+							`with **quest_plan** — pass the steps array and set autoStart: true.`,
 							``,
 							`Research: Note the current date. Use web_search to find the latest relevant information about this goal (best practices, APIs, security considerations, etc.). Save key findings with quest_memory_save.`,
 							awareness,

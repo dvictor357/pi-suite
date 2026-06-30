@@ -102,7 +102,7 @@ describe("resolveSandboxProfile", () => {
 		});
 	});
 
-	test("escapes mode: task can escalate but not de-escalate", () => {
+	test("escapes mode: step can escalate but not de-escalate", () => {
 		const policy: SandboxPolicy = {
 			...DEFAULT_SANDBOX_POLICY,
 			mode: "restricted",
@@ -131,7 +131,7 @@ describe("resolveSandboxProfile", () => {
 		assert.deepEqual(profile.allowedPaths, ["src/**", "docs/**"]);
 	});
 
-	test("when quest has no allowed paths in restricted mode, task override paths are ignored (strict tightening)", () => {
+	test("when quest has no allowed paths in restricted mode, step override paths are ignored (strict tightening)", () => {
 		const policy: SandboxPolicy = {
 			mode: "restricted",
 			allowedPaths: [],
@@ -149,7 +149,7 @@ describe("resolveSandboxProfile", () => {
 		assert.deepEqual(profile.allowedPaths, [], "empty quest deny-all stays empty");
 	});
 
-	test("when quest has no allowed commands in restricted mode, task override commands are ignored (strict tightening)", () => {
+	test("when quest has no allowed commands in restricted mode, step override commands are ignored (strict tightening)", () => {
 		const policy: SandboxPolicy = {
 			mode: "restricted",
 			allowedPaths: [],
@@ -167,7 +167,7 @@ describe("resolveSandboxProfile", () => {
 		assert.deepEqual(profile.allowCommands, [], "empty quest deny-all stays empty");
 	});
 
-	test("when quest has no allowed paths in none mode, task override paths are used (full access baseline)", () => {
+	test("when quest has no allowed paths in none mode, step override paths are used (full access baseline)", () => {
 		const policy: SandboxPolicy = {
 			...DEFAULT_SANDBOX_POLICY,
 			allowedPaths: [],
@@ -179,7 +179,7 @@ describe("resolveSandboxProfile", () => {
 		assert.deepEqual(profile.allowedPaths, ["safe/**"]);
 	});
 
-	test("task escalation to restricted with allowedPaths is still empty when quest has no allow-list", () => {
+	test("step escalation to restricted with allowedPaths is still empty when quest has no allow-list", () => {
 		const policy: SandboxPolicy = {
 			...DEFAULT_SANDBOX_POLICY,
 			allowedPaths: [],
@@ -234,7 +234,7 @@ describe("resolveSandboxProfile", () => {
 		assert.deepEqual(profile.allowCommands, ["npm test", "npm run build"]);
 	});
 
-	test("when quest has no allowed commands in none mode, task override commands are used", () => {
+	test("when quest has no allowed commands in none mode, step override commands are used", () => {
 		const policy: SandboxPolicy = {
 			...DEFAULT_SANDBOX_POLICY,
 			allowCommands: [],
@@ -730,7 +730,7 @@ describe("computeWorktreePlan", () => {
 		assert.equal(plan!.autoCleanup, true);
 	});
 
-	test("includes task index in branch name when provided", () => {
+	test("includes step index in branch name when provided", () => {
 		const plan = computeWorktreePlan({
 			questName: "auth",
 			worktree: enabledWorktree,
@@ -974,11 +974,11 @@ describe("questBranchName", () => {
 		assert.equal(questBranchName("auth-refactor"), questBranchName("auth-refactor"));
 	});
 
-	test("includes task index when provided", () => {
+	test("includes step index when provided", () => {
 		assert.equal(questBranchName("auth-refactor", 3), "quest/auth-refactor/task-3");
 	});
 
-	test("handles task index of 0", () => {
+	test("handles step index of 0", () => {
 		assert.equal(questBranchName("init", 0), "quest/init/task-0");
 	});
 

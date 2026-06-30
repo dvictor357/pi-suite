@@ -10,8 +10,8 @@ export function writeQuestSessionMeta(cwd: string, quest: Quest | null): void {
 	writeSessionMeta("quest", cwd, {
 		name: quest.name,
 		status: quest.status,
-		done: quest.tasks.filter((t) => t.status === "done").length,
-		total: quest.tasks.length,
+		done: quest.steps.filter((t) => t.status === "done").length,
+		total: quest.steps.length,
 	});
 }
 
@@ -21,8 +21,8 @@ export function renderStatus(ctx: ExtensionContext, quest: Quest | null) {
 		ctx.ui.setStatus?.("quest", "");
 		return;
 	}
-	const done = quest.tasks.filter((t) => t.status === "done").length;
-	const total = quest.tasks.length;
+	const done = quest.steps.filter((t) => t.status === "done").length;
+	const total = quest.steps.length;
 	const icon = quest.status === "active" ? "⚔" : quest.status === "planning" ? "📋" : "⏸";
 	const label = total ? `${icon} ${done}/${total}` : `${icon} plan`;
 	const color = quest.status === "active" ? "warning" : "dim";

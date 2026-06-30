@@ -5,7 +5,7 @@ import { TEAMS_DIR } from "./constants";
 import { archiveQuest, emptyQuest, listArchives, loadQuest } from "./storage";
 import { clearQuestFromTodo, compactAwarenessBlock } from "./todo-sync";
 import { ensureBuiltInTeams, loadTeams, teamInstallFromGit } from "./teams";
-import { formatQuestStatus, nextPendingTask } from "./steering";
+import { formatQuestStatus, nextPendingStep } from "./steering";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import type { QuestRuntime } from "./runtime";
 
@@ -67,7 +67,7 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 								compactAwarenessBlock(ctx.cwd),
 								``,
 								`Plan this quest. Use subagent(agent="scout") to explore the codebase,`,
-								`then subagent(agent="planner") to create a task breakdown.`,
+								`then subagent(agent="planner") to create a step breakdown.`,
 								`Save the plan with **quest_plan(tasks=[...], autoStart=true)**.`,
 								``,
 								`Research: Note the current date. Use web_search to find the latest relevant information about this goal (best practices, APIs, security considerations, etc.). Save key findings with quest_memory_save.`,
@@ -183,8 +183,8 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 						ctx.ui.notify("Quest is already active.", "info");
 						return;
 					}
-					if (quest.tasks.length === 0) {
-						ctx.ui.notify("No tasks planned. Use quest_plan to add tasks first.", "error");
+					if (quest.steps.length === 0) {
+						ctx.ui.notify("No steps planned. Use quest_plan to add steps first.", "error");
 						return;
 					}
 					if (quest.planningMode === "approve" && !quest.planApproved) {
@@ -195,14 +195,14 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 						return;
 					}
 					quest.status = "active";
-					quest.tasksSincePause = 0;
-					quest.lastFiredTaskIndex = -1;
-					quest.sameTaskCount = 0;
+					quest.stepsSincePause = 0;
+					quest.lastFiredStepIndex = -1;
+					quest.sameStepCount = 0;
 					quest.pauseReason = null;
 					persist(ctx, quest);
 
 					ctx.ui.notify(
-						`Quest "${quest.name}" started — ${quest.tasks.length} tasks. Auto-pilot engaged.`,
+						`Quest "${quest.name}" started — ${quest.steps.length} steps. Auto-pilot engaged.`,
 						"info",
 					);
 					rt.fireNextTask(ctx);
@@ -216,8 +216,8 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 					}
 					quest.status = "paused";
 					quest.pauseReason = "Paused by user.";
-					quest.lastFiredTaskIndex = -1;
-					quest.sameTaskCount = 0;
+					quest.lastFiredStepIndex = -1;
+					quest.sameStepCount = 0;
 					persist(ctx, quest);
 					ctx.ui.notify(`Quest "${quest.name}" paused. /quest resume to continue.`, "info");
 					return;
@@ -229,16 +229,16 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 						return;
 					}
 					quest.status = "active";
-					quest.tasksSincePause = 0;
-					quest.lastFiredTaskIndex = -1;
-					quest.sameTaskCount = 0;
+					quest.stepsSincePause = 0;
+					quest.lastFiredStepIndex = -1;
+					quest.sameStepCount = 0;
 					quest.pauseReason = null;
 					persist(ctx, quest);
 
-					const done = quest.tasks.filter((t) => t.status === "done").length;
-					const next = nextPendingTask(quest);
+					const done = quest.steps.filter((t) => t.status === "done").length;
+					const next = nextPendingStep(quest);
 					ctx.ui.notify(
-						`Quest "${quest.name}" resumed. ${done}/${quest.tasks.length} done.${next ? ` Next: ${next.task.content}` : ""}`,
+						`Quest "${quest.name}" resumed. ${done}/${quest.steps.length} done.${next ? ` Next: ${next.task.content}` : ""}`,
 						"info",
 					);
 					rt.fireNextTask(ctx);
@@ -254,32 +254,32 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 						ctx.ui.notify("Plan already approved. Quest is in progress.", "info");
 						return;
 					}
-					if (quest.tasks.length === 0) {
-						ctx.ui.notify("No tasks to approve. Use quest_plan to create a plan first.", "error");
+					if (quest.steps.length === 0) {
+						ctx.ui.notify("No steps to approve. Use quest_plan to create a plan first.", "error");
 						return;
 					}
 
-					const planSummary = quest.tasks
+					const planSummary = quest.steps
 						.slice(0, 8)
 						.map((t, i) => `${i + 1}. ${t.content} [${t.agent}]`)
 						.join("\n");
 					const moreTasks =
-						quest.tasks.length > 8 ? `\n  … and ${quest.tasks.length - 8} more` : "";
+						quest.steps.length > 8 ? `\n  … and ${quest.steps.length - 8} more` : "";
 
 					quest.planApproved = true;
 					quest.status = "active";
-					quest.tasksSincePause = 0;
-					quest.lastFiredTaskIndex = -1;
-					quest.sameTaskCount = 0;
+					quest.stepsSincePause = 0;
+					quest.lastFiredStepIndex = -1;
+					quest.sameStepCount = 0;
 					quest.pauseReason = null;
 					persist(ctx, quest);
 
-					const next = nextPendingTask(quest);
+					const next = nextPendingStep(quest);
 					ctx.ui.notify(
-						`✅ Plan approved: "${quest.name}" — ${quest.tasks.length} tasks. Auto-pilot engaged.${next ? ` First: ${next.task.content}` : ""}\n\n${planSummary}${moreTasks}`,
+						`✅ Plan approved: "${quest.name}" — ${quest.steps.length} steps. Auto-pilot engaged.${next ? ` First: ${next.task.content}` : ""}\n\n${planSummary}${moreTasks}`,
 						"info",
 					);
-					// Kick off the first task now. A slash command produces no `agent_end`,
+					// Kick off the first step now. A slash command produces no `agent_end`,
 					// so without this the auto-pilot would sit idle until the next prompt.
 					rt.fireNextTask(ctx);
 					return;
@@ -333,7 +333,7 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 							"\n\n" +
 							quest.commits
 								.map((c) => {
-									return `- \`${c.hash.slice(0, 8)}\` #${c.taskIndex + 1}: ${c.message}`;
+									return `- \`${c.hash.slice(0, 8)}\` #${c.stepIndex + 1}: ${c.message}`;
 								})
 								.join("\n");
 					}
@@ -356,7 +356,7 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 									minute: "2-digit",
 								})
 							: "?";
-						return `${idx + 1}. **${a.name}** — ${a.done}/${a.tasks} done — ${date}\n   ${a.goal}`;
+						return `${idx + 1}. **${a.name}** — ${a.done}/${a.steps} done — ${date}\n   ${a.goal}`;
 					});
 					ctx.ui.notify(`Completed quests:\n\n${lines.join("\n\n")}`, "info");
 					return;
@@ -372,7 +372,7 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 						return;
 					}
 					const name = quest.name;
-					const done = quest.tasks.filter((t) => t.status === "done").length;
+					const done = quest.steps.filter((t) => t.status === "done").length;
 					if (quest.status !== "done") {
 						quest.status = "done";
 						quest.completedAt = Date.now();
@@ -383,7 +383,7 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 					writeQuestSessionMeta(ctx.cwd, null);
 					clearQuestFromTodo(ctx.cwd); // flush quest items, not re-sync them as completed
 					ctx.ui.notify(
-						`Quest "${name}" cancelled and archived (${done}/${quest.tasks.length} tasks done).`,
+						`Quest "${name}" cancelled and archived (${done}/${quest.steps.length} steps done).`,
 						"info",
 					);
 					return;

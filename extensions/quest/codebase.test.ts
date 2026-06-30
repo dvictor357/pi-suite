@@ -15,7 +15,7 @@ import {
 	mapCodebaseFile,
 	queryCodebaseIndex,
 } from "./codebase";
-import type { QuestTask } from "./types";
+import type { QuestStep } from "./types";
 
 function tempRepo(): string {
 	const cwd = mkdtempSync(join(tmpdir(), "pi-suite-codebase-"));
@@ -81,7 +81,7 @@ function writeIndex(cwd: string, contractVersion = 1): void {
 	);
 }
 
-function task(overrides: Partial<QuestTask> = {}): QuestTask {
+function task(overrides: Partial<QuestStep> = {}): QuestStep {
 	return {
 		content: "Update foo behavior",
 		status: "pending",
@@ -124,11 +124,11 @@ test("planning enrichment degrades gracefully on a future-version cache", () => 
 	const cwd = tempRepo();
 	writeIndex(cwd, 2); // newer than SUPPORTED_CODEBASE_CONTRACT_VERSION
 
-	const tasks = [task()];
-	const result = enrichPlanningContext(tasks, "improve foo", cwd);
-	// Tasks are returned untouched (no enrichment from an unreadable cache)...
+	const steps = [task()];
+	const result = enrichPlanningContext(steps, "improve foo", cwd);
+	// Steps are returned untouched (no enrichment from an unreadable cache)...
 	assert.equal(result.cache.status, "future");
-	assert.deepEqual(result.enrichedTasks, tasks);
+	assert.deepEqual(result.enrichedTasks, steps);
 	assert.match(result.summary, /newer than supported/);
 
 	// ...and the verifier impact context falls back to the tool prompt, not cache data.

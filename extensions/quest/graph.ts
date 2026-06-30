@@ -1,5 +1,5 @@
 /**
- * Pure dependency-graph helpers for quest task lists. Tasks reference their
+ * Pure dependency-graph helpers for quest step lists. Steps reference their
  * dependencies by index; these functions take just `{ dependencies }[]` so they
  * stay testable in isolation.
  */
@@ -7,11 +7,11 @@
 type DepNode = { dependencies: number[] };
 
 /**
- * Return one cycle (as a list of task indices) if the dependency graph contains
+ * Return one cycle (as a list of step indices) if the dependency graph contains
  * one, else null. Standard colour-marking DFS (0=unvisited, 1=on-stack, 2=done).
  */
-export function detectDependencyCycle(tasks: DepNode[]): number[] | null {
-	const n = tasks.length;
+export function detectDependencyCycle(steps: DepNode[]): number[] | null {
+	const n = steps.length;
 	const state = new Array<number>(n).fill(0);
 	const path: number[] = [];
 
@@ -24,7 +24,7 @@ export function detectDependencyCycle(tasks: DepNode[]): number[] | null {
 		if (state[i] === 2) return null;
 		state[i] = 1;
 		path.push(i);
-		for (const dep of tasks[i]?.dependencies ?? []) {
+		for (const dep of steps[i]?.dependencies ?? []) {
 			const result = dfs(dep);
 			if (result) return result;
 		}
@@ -52,8 +52,8 @@ export function detectDependencyCycle(tasks: DepNode[]): number[] | null {
  * mutable `visited` set, so a value cached during a cycle short-circuit could be
  * wrong — this version never caches a truncated result.
  */
-export function getMaxDependencyDepth(tasks: DepNode[]): number {
-	const n = tasks.length;
+export function getMaxDependencyDepth(steps: DepNode[]): number {
+	const n = steps.length;
 	const memo = new Array<number>(n).fill(-1);
 	const onStack = new Array<boolean>(n).fill(false);
 
@@ -63,7 +63,7 @@ export function getMaxDependencyDepth(tasks: DepNode[]): number {
 		if (memo[i] !== -1) return memo[i];
 		onStack[i] = true;
 		let max = 0;
-		for (const dep of tasks[i]?.dependencies ?? []) {
+		for (const dep of steps[i]?.dependencies ?? []) {
 			max = Math.max(max, 1 + depth(dep));
 		}
 		onStack[i] = false;

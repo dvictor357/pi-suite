@@ -27,11 +27,11 @@ import {
 	type KanbanActions,
 	type KanbanColumn,
 } from "./kanban";
-import type { Quest, QuestTask } from "./types";
+import type { Quest, QuestStep } from "./types";
 
 // ── Minimal quest builder ─────────────────────────────────────────────────
 
-function t(overrides: Partial<QuestTask> = {}): QuestTask {
+function t(overrides: Partial<QuestStep> = {}): QuestStep {
 	return {
 		content: "Default task",
 		status: "pending",
@@ -51,13 +51,13 @@ function t(overrides: Partial<QuestTask> = {}): QuestTask {
 	};
 }
 
-function tasks(count: number, overrides: Partial<QuestTask> = {}): QuestTask[] {
-	return Array.from({ length: count }, (_, i) => t({ content: `Task ${i + 1}`, ...overrides }));
+function tasks(count: number, overrides: Partial<QuestStep> = {}): QuestStep[] {
+	return Array.from({ length: count }, (_, i) => t({ content: `Step ${i + 1}`, ...overrides }));
 }
 
 // ── buildColumns ──────────────────────────────────────────────────────────
 
-test("buildColumns groups tasks into four columns", () => {
+test("buildColumns groups steps into four columns", () => {
 	const ts = [
 		t({ status: "pending", content: "A" }),
 		t({ status: "running", content: "B" }),
@@ -72,22 +72,22 @@ test("buildColumns groups tasks into four columns", () => {
 	assert.equal(cols[1].title, "DOING");
 	assert.equal(cols[2].title, "DONE");
 	assert.equal(cols[3].title, "FAILED");
-	assert.equal(cols[0].tasks.length, 1); // pending
-	assert.equal(cols[1].tasks.length, 2); // running + verifying
-	assert.equal(cols[2].tasks.length, 1); // done
-	assert.equal(cols[3].tasks.length, 2); // failed + skipped
+	assert.equal(cols[0].steps.length, 1); // pending
+	assert.equal(cols[1].steps.length, 2); // running + verifying
+	assert.equal(cols[2].steps.length, 1); // done
+	assert.equal(cols[3].steps.length, 2); // failed + skipped
 });
 
 test("buildColumns returns empty arrays for empty quest", () => {
 	const cols = buildColumns([]);
 	assert.equal(cols.length, 4);
-	for (const c of cols) assert.equal(c.tasks.length, 0);
+	for (const c of cols) assert.equal(c.steps.length, 0);
 });
 
-test("buildColumns preserves original task references", () => {
+test("buildColumns preserves original step references", () => {
 	const ts = [t({ content: "X" })];
 	const cols = buildColumns(ts);
-	assert.strictEqual(cols[0].tasks[0], ts[0]);
+	assert.strictEqual(cols[0].steps[0], ts[0]);
 });
 
 // ── truncate ──────────────────────────────────────────────────────────────
@@ -110,7 +110,7 @@ test("truncate handles edge cases", () => {
 
 // ── formatTaskCell ────────────────────────────────────────────────────────
 
-test("formatTaskCell wraps task with icon and index", () => {
+test("formatTaskCell wraps step with icon and index", () => {
 	const task = t({ content: "Fix bug", status: "pending" });
 	const icons: Record<string, string> = { pending: "☐", running: "▶", done: "☑" };
 	const cell = formatTaskCell(task, 3, 30, icons);
@@ -119,7 +119,7 @@ test("formatTaskCell wraps task with icon and index", () => {
 });
 
 test("formatTaskCell truncates long content", () => {
-	const task = t({ content: "A very long task name that should be cut off here", status: "done" });
+	const task = t({ content: "A very long step name that should be cut off here", status: "done" });
 	const icons: Record<string, string> = { pending: "☐", done: "☑" };
 	const cell = formatTaskCell(task, 0, 20, icons);
 	assert.ok(cell.length <= 20);
@@ -224,7 +224,7 @@ test("progressSummary handles empty tasks", () => {
 // ── clampSelection ────────────────────────────────────────────────────────
 
 function col(title: string, n: number): KanbanColumn {
-	return { title, tasks: tasks(n), color: "muted" };
+	return { title, steps: tasks(n), color: "muted" };
 }
 
 test("clampSelection within bounds is identity", () => {
@@ -278,17 +278,17 @@ test("moveSelection clamps at boundaries", () => {
 	assert.deepEqual(moveSelection({ col: 0, row: 1 }, cols, "right"), { col: 0, row: 1 });
 });
 
-test("moveSelection clamps row to new column's task count", () => {
+test("moveSelection clamps row to new column's step count", () => {
 	const cols = [col("A", 1), col("B", 0)];
 	const sel = moveSelection({ col: 0, row: 0 }, cols, "right");
 	assert.deepEqual(sel, { col: 1, row: 0 });
 });
 
-// ── getSelectedTask ───────────────────────────────────────────────────────
+// ── getSelectedStep ───────────────────────────────────────────────────────
 
-test("getSelectedTask returns task and its quest index", () => {
+test("getSelectedStep returns step and its quest index", () => {
 	const ts = tasks(5, { status: "pending" });
-	const quest = { tasks: ts } as Quest;
+	const quest = { steps: ts } as Quest;
 	const cols = buildColumns(ts);
 	const result = getSelectedTask(quest, cols, { col: 0, row: 2 });
 	assert.ok(result);
@@ -296,9 +296,9 @@ test("getSelectedTask returns task and its quest index", () => {
 	assert.equal(result.index, 2);
 });
 
-test("getSelectedTask returns null for out-of-bounds", () => {
+test("getSelectedStep returns null for out-of-bounds", () => {
 	const ts = tasks(1);
-	const quest = { tasks: ts } as Quest;
+	const quest = { steps: ts } as Quest;
 	const cols = buildColumns(ts);
 	assert.equal(getSelectedTask(quest, cols, { col: 0, row: 5 }), null);
 	assert.equal(getSelectedTask(quest, cols, { col: 5, row: 0 }), null);
@@ -335,14 +335,14 @@ test("resolveMaxRows floors at 1", () => {
 
 test("renderCell produces a padded string for a task", () => {
 	const task = t({ content: "Hello", status: "pending" });
-	const col: KanbanColumn = { title: "TODO", tasks: [task], color: "muted" };
+	const col: KanbanColumn = { title: "TODO", steps: [task], color: "muted" };
 	const cell = renderCell(col, task, 0, false, [task], identityTheme, 20);
 	assert.equal(cell.length, 20);
 	assert.ok(cell.includes("Hello"));
 });
 
 test("renderCell produces empty space for no task", () => {
-	const col: KanbanColumn = { title: "TODO", tasks: [], color: "muted" };
+	const col: KanbanColumn = { title: "TODO", steps: [], color: "muted" };
 	const cell = renderCell(col, undefined, 0, false, [], identityTheme, 20);
 	assert.equal(cell, " ".repeat(20));
 });
@@ -350,7 +350,7 @@ test("renderCell produces empty space for no task", () => {
 test("renderCell uses selectedBg when selected", () => {
 	// identityTheme passes colors through so we can check the strings.
 	const task = t({ content: "Hi", status: "pending" });
-	const col: KanbanColumn = { title: "TODO", tasks: [task], color: "muted" };
+	const col: KanbanColumn = { title: "TODO", steps: [task], color: "muted" };
 	const cell = renderCell(col, task, 0, true, [task], identityTheme, 20);
 
 	// identityTheme wraps: bg("selectedBg", fg("text", padded)) → padded
@@ -366,10 +366,10 @@ function q(overrides: Partial<Quest> = {}): Quest {
 		name: "test-quest",
 		goal: "test goal",
 		status: "active",
-		tasks: [],
-		tasksSincePause: 0,
-		lastFiredTaskIndex: -1,
-		sameTaskCount: 0,
+		steps: [],
+		stepsSincePause: 0,
+		lastFiredStepIndex: -1,
+		sameStepCount: 0,
 		pauseReason: null,
 		conventions: [],
 		planningMode: "auto",
@@ -417,14 +417,14 @@ test("buildStatusLine includes team when set", () => {
 });
 
 test("buildStatusLine shows approval hint", () => {
-	const line = buildStatusLine(q({ planningMode: "approve", planApproved: false, tasks: [t()] }), [
+	const line = buildStatusLine(q({ planningMode: "approve", planApproved: false, steps: [t()] }), [
 		t(),
 	]);
 	assert.ok(line.includes("[awaiting approval]"));
 });
 
 test("buildStatusLine hides approval hint when already approved", () => {
-	const line = buildStatusLine(q({ planningMode: "approve", planApproved: true, tasks: [t()] }), [
+	const line = buildStatusLine(q({ planningMode: "approve", planApproved: true, steps: [t()] }), [
 		t(),
 	]);
 	assert.ok(!line.includes("awaiting approval"));
@@ -545,7 +545,7 @@ test("buildTaskSuffix shows sandbox lock when task.sandbox set", () => {
 	assert.ok(!buildTaskSuffix(task, 22).includes("🔒i"));
 });
 
-test("buildTaskSuffix shows isolated badge when task sandbox mode is isolated", () => {
+test("buildTaskSuffix shows isolated badge when step sandbox mode is isolated", () => {
 	const task = t({ agent: "worker", sandbox: { mode: "isolated" } });
 	assert.ok(buildTaskSuffix(task, 22).includes("🔒i"));
 });
@@ -580,7 +580,7 @@ test("formatTaskCellRich shows prefix, content, and suffix", () => {
 test("formatTaskCellRich truncates content to fit metadata", () => {
 	const icons: Record<string, string> = { pending: "☐" };
 	const task = t({
-		content: "A very long task name that should be cut to make room",
+		content: "A very long step name that should be cut to make room",
 		status: "pending",
 		agent: "worker",
 		verified: true,
@@ -613,14 +613,14 @@ test("formatTaskCellRich handles extreme narrow width", () => {
 
 test("renderCell includes agent badge on wide columns", () => {
 	const task = t({ content: "Hello", status: "pending", agent: "reviewer" });
-	const col: KanbanColumn = { title: "TODO", tasks: [task], color: "muted" };
+	const col: KanbanColumn = { title: "TODO", steps: [task], color: "muted" };
 	const cell = renderCell(col, task, 0, false, [task], identityTheme, 25);
 	assert.ok(cell.includes("[reviewer]"));
 });
 
 test("renderCell omits metadata on narrow columns", () => {
 	const task = t({ content: "Hello", status: "pending", agent: "scout", verified: true });
-	const col: KanbanColumn = { title: "TODO", tasks: [task], color: "muted" };
+	const col: KanbanColumn = { title: "TODO", steps: [task], color: "muted" };
 	const cell = renderCell(col, task, 0, false, [task], identityTheme, 14);
 	assert.ok(!cell.includes("["));
 	assert.ok(!cell.includes("✓"));
@@ -674,10 +674,10 @@ test("formatTimestamp produces a date-time string", () => {
 
 test("buildTaskDetail includes title and status", () => {
 	const task = t({ content: "Fix bug", status: "running", agent: "worker" });
-	const quest = q({ tasks: [task] });
+	const quest = q({ steps: [task] });
 	const lines = buildTaskDetail(task, 0, quest, 80, { running: "▶" });
 	const joined = lines.join("\n");
-	assert.ok(joined.includes("Task #1"));
+	assert.ok(joined.includes("Step #1"));
 	assert.ok(joined.includes("Fix bug"));
 	assert.ok(joined.includes("Status: running"));
 	assert.ok(joined.includes("Agent: worker"));
@@ -691,7 +691,7 @@ test("buildTaskDetail shows timing when started", () => {
 		startedAt: Date.now() - 120000,
 		completedAt: Date.now(),
 	});
-	const quest = q({ tasks: [task] });
+	const quest = q({ steps: [task] });
 	const lines = buildTaskDetail(task, 0, quest, 80, { done: "☑" });
 	const joined = lines.join("\n");
 	assert.ok(joined.includes("Started:"));
@@ -701,7 +701,7 @@ test("buildTaskDetail shows timing when started", () => {
 
 test("buildTaskDetail shows not started when no start time", () => {
 	const task = t({ content: "X", status: "pending", agent: "worker" });
-	const quest = q({ tasks: [task] });
+	const quest = q({ steps: [task] });
 	const lines = buildTaskDetail(task, 0, quest, 80, { pending: "☐" });
 	const joined = lines.join("\n");
 	assert.ok(joined.includes("Not started yet"));
@@ -710,7 +710,7 @@ test("buildTaskDetail shows not started when no start time", () => {
 test("buildTaskDetail shows dependencies", () => {
 	const depTask = t({ content: "Setup DB", status: "done", agent: "worker" });
 	const task = t({ content: "Add API", status: "pending", agent: "worker", dependencies: [0] });
-	const quest = q({ tasks: [depTask, task] });
+	const quest = q({ steps: [depTask, task] });
 	const lines = buildTaskDetail(task, 1, quest, 80, { pending: "☐" });
 	const joined = lines.join("\n");
 	assert.ok(joined.includes("#1"));
@@ -725,7 +725,7 @@ test("buildTaskDetail shows git info", () => {
 		commitHash: "abc1234567890def",
 		branchName: "feature/x",
 	});
-	const quest = q({ tasks: [task] });
+	const quest = q({ steps: [task] });
 	const lines = buildTaskDetail(task, 0, quest, 80, { done: "☑" });
 	const joined = lines.join("\n");
 	assert.ok(joined.includes("Commit: abc12345"));
@@ -740,7 +740,7 @@ test("buildTaskDetail shows verification", () => {
 		verified: true,
 		verifyResult: "All tests pass",
 	});
-	const quest = q({ tasks: [task] });
+	const quest = q({ steps: [task] });
 	const lines = buildTaskDetail(task, 0, quest, 80, { done: "☑" });
 	const joined = lines.join("\n");
 	assert.ok(joined.includes("✅"));
@@ -754,7 +754,7 @@ test("buildTaskDetail shows in-progress verification", () => {
 		agent: "worker",
 		verifyRetries: 2,
 	});
-	const quest = q({ tasks: [task] });
+	const quest = q({ steps: [task] });
 	const lines = buildTaskDetail(task, 0, quest, 80, { verifying: "🔍" });
 	const joined = lines.join("\n");
 	assert.ok(joined.includes("in progress"));
@@ -763,7 +763,7 @@ test("buildTaskDetail shows in-progress verification", () => {
 
 test("buildTaskDetail shows model when assigned", () => {
 	const task = t({ content: "X", status: "pending", agent: "worker", model: "claude-opus-4-5" });
-	const quest = q({ tasks: [task] });
+	const quest = q({ steps: [task] });
 	const lines = buildTaskDetail(task, 0, quest, 80, { pending: "☐" });
 	const joined = lines.join("\n");
 	assert.ok(joined.includes("Model: claude-opus-4-5"));
@@ -777,7 +777,7 @@ test("buildTaskDetail includes context and result sections", () => {
 		context: "Do the thing carefully.",
 		result: "The thing was done.",
 	});
-	const quest = q({ tasks: [task] });
+	const quest = q({ steps: [task] });
 	const lines = buildTaskDetail(task, 0, quest, 80, { done: "☑" });
 	const joined = lines.join("\n");
 	assert.ok(joined.includes("── Context ──"));
@@ -788,7 +788,7 @@ test("buildTaskDetail includes context and result sections", () => {
 
 test("buildTaskDetail shows fallback for missing context/result", () => {
 	const task = t({ content: "X", status: "pending", agent: "worker" });
-	const quest = q({ tasks: [task] });
+	const quest = q({ steps: [task] });
 	const lines = buildTaskDetail(task, 0, quest, 80, { pending: "☐" });
 	const joined = lines.join("\n");
 	assert.ok(joined.includes("(none)"));
@@ -803,7 +803,7 @@ test("buildTaskDetail wraps long lines", () => {
 		context:
 			"This is a very long context string that should definitely wrap across multiple lines when the terminal is narrow enough.",
 	});
-	const quest = q({ tasks: [task] });
+	const quest = q({ steps: [task] });
 	const lines = buildTaskDetail(task, 0, quest, 30, { done: "☑" });
 	// At width 30 (maxW = 28), the long context should produce multiple lines
 	const contextLines = lines.filter((l) => l.includes("should"));
@@ -824,10 +824,10 @@ test("buildHelpOverlay documents key bindings", () => {
 	const lines = buildHelpOverlay(80);
 	const joined = lines.join("\n");
 	assert.ok(joined.includes("Navigate columns"));
-	assert.ok(joined.includes("Open task detail"));
+	assert.ok(joined.includes("Open step detail"));
 	assert.ok(joined.includes("Show this help"));
 	assert.ok(joined.includes("Close kanban"));
-	assert.ok(joined.includes("Scroll task detail"));
+	assert.ok(joined.includes("Scroll step detail"));
 	assert.ok(joined.includes("Page scroll"));
 	assert.ok(joined.includes("Jump to top"));
 	assert.ok(joined.includes("Return to previous mode"));
@@ -856,7 +856,7 @@ test("buildActionHints shows resume when paused and callback set", () => {
 });
 
 test("buildActionHints shows start when planning and callback set", () => {
-	const quest = q({ status: "planning", tasks: [t()] });
+	const quest = q({ status: "planning", steps: [t()] });
 	const actions: KanbanActions = { onStart: () => {} };
 	const hints = buildActionHints(quest, actions);
 	assert.ok(hints.includes("s start"));
@@ -867,7 +867,7 @@ test("buildActionHints shows approve when approval mode and callback set", () =>
 		status: "planning",
 		planningMode: "approve",
 		planApproved: false,
-		tasks: [t()],
+		steps: [t()],
 	});
 	const actions: KanbanActions = { onApprove: () => {} };
 	const hints = buildActionHints(quest, actions);
@@ -879,7 +879,7 @@ test("buildActionHints shows both approve and start in approval mode", () => {
 		status: "planning",
 		planningMode: "approve",
 		planApproved: false,
-		tasks: [t()],
+		steps: [t()],
 	});
 	const actions: KanbanActions = { onStart: () => {}, onApprove: () => {} };
 	const hints = buildActionHints(quest, actions);
@@ -888,7 +888,7 @@ test("buildActionHints shows both approve and start in approval mode", () => {
 });
 
 test("buildActionHints does not show retry on board (only available in detail)", () => {
-	const quest = q({ status: "active", tasks: [t({ status: "failed" })] });
+	const quest = q({ status: "active", steps: [t({ status: "failed" })] });
 	const actions: KanbanActions = { onRetryTask: () => {} };
 	const hints = buildActionHints(quest, actions);
 	assert.ok(!hints.includes("r retry task"), "retry hint should not appear on board");
@@ -908,7 +908,7 @@ test("buildActionHints hides pause when not active", () => {
 });
 
 test("buildActionHints hides retry when no failed tasks", () => {
-	const quest = q({ status: "active", tasks: [t({ status: "pending" })] });
+	const quest = q({ status: "active", steps: [t({ status: "pending" })] });
 	const actions: KanbanActions = { onRetryTask: () => {} };
 	const hints = buildActionHints(quest, actions);
 	assert.ok(!hints.includes("retry"));
@@ -919,7 +919,7 @@ test("buildActionHints does not show approve when already approved", () => {
 		status: "planning",
 		planningMode: "approve",
 		planApproved: true,
-		tasks: [t()],
+		steps: [t()],
 	});
 	const actions: KanbanActions = { onApprove: () => {} };
 	const hints = buildActionHints(quest, actions);
@@ -929,18 +929,18 @@ test("buildActionHints does not show approve when already approved", () => {
 // ── QuestKanban class tests ───────────────────────────────────────────────
 
 test("QuestKanban constructor starts in board mode with selection at origin", () => {
-	const quest = q({ tasks: [t()] });
+	const quest = q({ steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme);
 	assert.equal(kb.currentMode, "board");
 	assert.deepEqual(kb.selection, { col: 0, row: 0 });
 });
 
-test("QuestKanban setQuest clamps selection when tasks shrink", () => {
-	const quest = q({ tasks: [t({ content: "A" }), t({ content: "B" })] });
+test("QuestKanban setQuest clamps selection when steps shrink", () => {
+	const quest = q({ steps: [t({ content: "A" }), t({ content: "B" })] });
 	const kb = new QuestKanban(quest, identityTheme);
 	// Manually hack: the tests can only verify clamp via public API.
 	// setQuest on a smaller quest should keep selection valid.
-	const smaller = q({ tasks: [t({ content: "X" })] });
+	const smaller = q({ steps: [t({ content: "X" })] });
 	kb.setQuest(smaller);
 	// Selection should still be in bounds
 	const sel = kb.selection;
@@ -949,9 +949,9 @@ test("QuestKanban setQuest clamps selection when tasks shrink", () => {
 });
 
 test("QuestKanban setQuest preserves valid selection", () => {
-	const quest = q({ tasks: [t({ content: "A" }), t({ content: "B" })] });
+	const quest = q({ steps: [t({ content: "A" }), t({ content: "B" })] });
 	const kb = new QuestKanban(quest, identityTheme);
-	const replacement = q({ tasks: [t({ content: "X" }), t({ content: "Y" }), t({ content: "Z" })] });
+	const replacement = q({ steps: [t({ content: "X" }), t({ content: "Y" }), t({ content: "Z" })] });
 	kb.setQuest(replacement);
 	const sel = kb.selection;
 	assert.equal(sel.col, 0);
@@ -961,7 +961,7 @@ test("QuestKanban setQuest preserves valid selection", () => {
 // ── Mode transitions via handleInput ──────────────────────────────────────
 
 test("handleInput ? toggles help from board and back", () => {
-	const quest = q({ tasks: [t()] });
+	const quest = q({ steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme);
 	assert.equal(kb.currentMode, "board");
 	kb.handleInput("?");
@@ -971,7 +971,7 @@ test("handleInput ? toggles help from board and back", () => {
 });
 
 test("handleInput h toggles help from board and back", () => {
-	const quest = q({ tasks: [t()] });
+	const quest = q({ steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme);
 	kb.handleInput("h");
 	assert.equal(kb.currentMode, "help");
@@ -980,7 +980,7 @@ test("handleInput h toggles help from board and back", () => {
 });
 
 test("handleInput Esc from help returns to board", () => {
-	const quest = q({ tasks: [t()] });
+	const quest = q({ steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme);
 	kb.handleInput("?");
 	assert.equal(kb.currentMode, "help");
@@ -989,7 +989,7 @@ test("handleInput Esc from help returns to board", () => {
 });
 
 test("handleInput Backspace from help returns to board", () => {
-	const quest = q({ tasks: [t()] });
+	const quest = q({ steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme);
 	kb.handleInput("?");
 	assert.equal(kb.currentMode, "help");
@@ -998,7 +998,7 @@ test("handleInput Backspace from help returns to board", () => {
 });
 
 test("handleInput help returns to detail when opened from detail", () => {
-	const quest = q({ tasks: [t()] });
+	const quest = q({ steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme);
 	kb.handleInput("\r"); // Enter → detail
 	assert.equal(kb.currentMode, "detail");
@@ -1009,13 +1009,13 @@ test("handleInput help returns to detail when opened from detail", () => {
 });
 
 test("handleInput Enter opens detail for selected task", () => {
-	const quest = q({ tasks: [t({ content: "Task A", status: "pending", agent: "worker" })] });
+	const quest = q({ steps: [t({ content: "Step A", status: "pending", agent: "worker" })] });
 	const kb = new QuestKanban(quest, identityTheme);
 	kb.handleInput("\r"); // Enter
 	assert.equal(kb.currentMode, "detail");
 });
 
-test("handleInput Enter does nothing when no task selected", () => {
+test("handleInput Enter does nothing when no step selected", () => {
 	const quest = q(); // no tasks
 	const kb = new QuestKanban(quest, identityTheme);
 	assert.equal(kb.currentMode, "board");
@@ -1025,7 +1025,7 @@ test("handleInput Enter does nothing when no task selected", () => {
 });
 
 test("handleInput Esc from detail returns to board", () => {
-	const quest = q({ tasks: [t()] });
+	const quest = q({ steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme);
 	kb.handleInput("\r"); // Enter → detail
 	assert.equal(kb.currentMode, "detail");
@@ -1034,7 +1034,7 @@ test("handleInput Esc from detail returns to board", () => {
 });
 
 test("handleInput Backspace from detail returns to board", () => {
-	const quest = q({ tasks: [t()] });
+	const quest = q({ steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme);
 	kb.handleInput("\r"); // detail
 	assert.equal(kb.currentMode, "detail");
@@ -1043,7 +1043,7 @@ test("handleInput Backspace from detail returns to board", () => {
 });
 
 test("handleInput Enter from detail returns to board", () => {
-	const quest = q({ tasks: [t()] });
+	const quest = q({ steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme);
 	kb.handleInput("\r"); // Enter → detail
 	assert.equal(kb.currentMode, "detail");
@@ -1054,7 +1054,7 @@ test("handleInput Enter from detail returns to board", () => {
 // ── Help mode dismiss cycles ──────────────────────────────────────────────
 
 test("handleInput help → detail → help → board transition chain", () => {
-	const quest = q({ tasks: [t()] });
+	const quest = q({ steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme);
 	kb.handleInput("\r"); // detail
 	kb.handleInput("?"); // help
@@ -1068,7 +1068,7 @@ test("handleInput help → detail → help → board transition chain", () => {
 // ── Detail scroll keys (no-ops tested via mode stability) ─────────────────
 
 test("handleInput scroll keys in detail mode keep mode", () => {
-	const quest = q({ tasks: [t({ content: "X", status: "pending", agent: "worker" })] });
+	const quest = q({ steps: [t({ content: "X", status: "pending", agent: "worker" })] });
 	const kb = new QuestKanban(quest, identityTheme);
 	kb.handleInput("\r"); // detail
 	// Arrow-up
@@ -1094,7 +1094,7 @@ test("handleInput scroll keys in detail mode keep mode", () => {
 // ── Action callbacks ──────────────────────────────────────────────────────
 
 test("handleInput p calls onPause in board mode", () => {
-	const quest = q({ status: "active", tasks: [t()] });
+	const quest = q({ status: "active", steps: [t()] });
 	let called = false;
 	const actions: KanbanActions = {
 		onPause: () => {
@@ -1107,7 +1107,7 @@ test("handleInput p calls onPause in board mode", () => {
 });
 
 test("handleInput r calls onResume in board mode", () => {
-	const quest = q({ status: "paused", tasks: [t()] });
+	const quest = q({ status: "paused", steps: [t()] });
 	let called = false;
 	const actions: KanbanActions = {
 		onResume: () => {
@@ -1120,7 +1120,7 @@ test("handleInput r calls onResume in board mode", () => {
 });
 
 test("handleInput s calls onStart in board mode", () => {
-	const quest = q({ status: "planning", tasks: [t()] });
+	const quest = q({ status: "planning", steps: [t()] });
 	let called = false;
 	const actions: KanbanActions = {
 		onStart: () => {
@@ -1137,7 +1137,7 @@ test("handleInput a calls onApprove in board mode", () => {
 		status: "planning",
 		planningMode: "approve",
 		planApproved: false,
-		tasks: [t()],
+		steps: [t()],
 	});
 	let called = false;
 	const actions: KanbanActions = {
@@ -1150,10 +1150,10 @@ test("handleInput a calls onApprove in board mode", () => {
 	assert.ok(called, "onApprove should have been called");
 });
 
-test("handleInput r in detail mode calls onRetryTask for failed task", () => {
-	// Single failed task goes to FAILED column (col 3). Navigate right to reach it.
+test("handleInput r in detail mode calls onRetryStep for failed task", () => {
+	// Single failed step goes to FAILED column (col 3). Navigate right to reach it.
 	const task = t({ content: "Broken", status: "failed", agent: "worker" });
-	const quest = q({ tasks: [task] });
+	const quest = q({ steps: [task] });
 	let retryIndex = -1;
 	const actions: KanbanActions = {
 		onRetryTask: (i: number) => {
@@ -1172,7 +1172,7 @@ test("handleInput r in detail mode calls onRetryTask for failed task", () => {
 
 test("handleInput r in detail mode ignores non-failed task", () => {
 	const task = t({ content: "OK", status: "pending", agent: "worker" });
-	const quest = q({ tasks: [task] });
+	const quest = q({ steps: [task] });
 	let called = false;
 	const actions: KanbanActions = {
 		onRetryTask: () => {
@@ -1182,11 +1182,11 @@ test("handleInput r in detail mode ignores non-failed task", () => {
 	const kb = new QuestKanban(quest, identityTheme, actions);
 	kb.handleInput("\r"); // detail
 	kb.handleInput("r"); // should not trigger retry on non-failed
-	assert.ok(!called, "onRetryTask should not fire for non-failed task");
+	assert.ok(!called, "onRetryStep should not fire for non-failed task");
 });
 
 test("handleInput ignores action keys when callback not set", () => {
-	const quest = q({ status: "active", tasks: [t()] });
+	const quest = q({ status: "active", steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme); // no actions
 	// These should not throw
 	kb.handleInput("p");
@@ -1201,13 +1201,13 @@ test("handleInput ignores action keys when callback not set", () => {
 test("render board mode produces header with quest name", () => {
 	const quest = q({
 		name: "test-quest",
-		tasks: [t({ content: "Task A", status: "pending", agent: "worker" })],
+		steps: [t({ content: "Step A", status: "pending", agent: "worker" })],
 	});
 	const kb = new QuestKanban(quest, identityTheme);
 	const lines = kb.render(80);
 	const joined = lines.join("\n");
 	assert.ok(joined.includes("test-quest"), "should include quest name");
-	assert.ok(joined.includes("Task A"), "should include task content");
+	assert.ok(joined.includes("Step A"), "should include step content");
 });
 
 test("render board mode empty quest shows placeholder", () => {
@@ -1215,7 +1215,7 @@ test("render board mode empty quest shows placeholder", () => {
 	const kb = new QuestKanban(quest, identityTheme);
 	const lines = kb.render(80);
 	const joined = lines.join("\n");
-	assert.ok(joined.includes("No tasks yet"), "should show empty state");
+	assert.ok(joined.includes("No steps yet"), "should show empty state");
 });
 
 test("render board mode empty quest does not throw", () => {
@@ -1225,30 +1225,30 @@ test("render board mode empty quest does not throw", () => {
 	assert.doesNotThrow(() => kb.render(30)); // narrow
 });
 
-test("render detail mode shows task info", () => {
+test("render detail mode shows step info", () => {
 	const quest = q({
 		name: "q",
-		tasks: [t({ content: "Fix bug", status: "running", agent: "worker", context: "Do it." })],
+		steps: [t({ content: "Fix bug", status: "running", agent: "worker", context: "Do it." })],
 	});
 	const kb = new QuestKanban(quest, identityTheme);
 	kb.handleInput("\r"); // Enter → detail
 	const lines = kb.render(80);
 	const joined = lines.join("\n");
-	assert.ok(joined.includes("Fix bug"), "should include task content");
+	assert.ok(joined.includes("Fix bug"), "should include step content");
 });
 
 test("render detail mode empty state when nothing selected", () => {
 	const quest = q(); // no tasks
 	const kb = new QuestKanban(quest, identityTheme);
 	// Force detail mode by tricking it — but selection is empty so it shows empty state.
-	// Since openDetail() is a no-op when no task selected, we can't enter detail with no tasks.
-	// Test: render in board mode when no tasks should not throw.
+	// Since openDetail() is a no-op when no step selected, we can't enter detail with no steps.
+	// Test: render in board mode when no steps should not throw.
 	const lines = kb.render(40);
 	assert.ok(lines.length > 0);
 });
 
 test("render help mode shows keyboard help", () => {
-	const quest = q({ tasks: [t()] });
+	const quest = q({ steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme);
 	kb.handleInput("?"); // help
 	const lines = kb.render(80);
@@ -1259,7 +1259,7 @@ test("render help mode shows keyboard help", () => {
 
 test("render board mode includes column headers", () => {
 	const quest = q({
-		tasks: [
+		steps: [
 			t({ content: "A", status: "pending", agent: "worker" }),
 			t({ content: "B", status: "running", agent: "worker" }),
 			t({ content: "C", status: "done", agent: "worker" }),
@@ -1276,7 +1276,7 @@ test("render board mode includes column headers", () => {
 });
 
 test("render board mode includes footer hints", () => {
-	const quest = q({ tasks: [t()] });
+	const quest = q({ steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme);
 	const lines = kb.render(80);
 	const joined = lines.join("\n");
@@ -1284,7 +1284,7 @@ test("render board mode includes footer hints", () => {
 });
 
 test("render board includes action hints when actions wired", () => {
-	const quest = q({ status: "active", tasks: [t()] });
+	const quest = q({ status: "active", steps: [t()] });
 	const actions: KanbanActions = { onPause: () => {} };
 	const kb = new QuestKanban(quest, identityTheme, actions);
 	const lines = kb.render(80);
@@ -1300,8 +1300,8 @@ function maxLineLength(lines: string[]): number {
 
 test("render board lines do not exceed width", () => {
 	const quest = q({
-		tasks: [
-			t({ content: "A task with a reasonably long name", status: "pending", agent: "worker" }),
+		steps: [
+			t({ content: "A step with a reasonably long name", status: "pending", agent: "worker" }),
 			t({ content: "Another task", status: "running", agent: "scout" }),
 			t({ content: "Done thing", status: "done", agent: "worker", verified: true }),
 		],
@@ -1315,7 +1315,7 @@ test("render board lines do not exceed width", () => {
 });
 
 test("render help lines do not exceed width", () => {
-	const quest = q({ tasks: [t()] });
+	const quest = q({ steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme);
 	kb.handleInput("?");
 	// The footer line is dynamic (includes mode name); test at widths where it fits.
@@ -1328,7 +1328,7 @@ test("render help lines do not exceed width", () => {
 
 test("render detail lines do not exceed width", () => {
 	const quest = q({
-		tasks: [t({ content: "Task X", status: "pending", agent: "worker", context: "Some context." })],
+		steps: [t({ content: "Step X", status: "pending", agent: "worker", context: "Some context." })],
 	});
 	const kb = new QuestKanban(quest, identityTheme);
 	kb.handleInput("\r"); // detail
@@ -1341,7 +1341,7 @@ test("render detail lines do not exceed width", () => {
 
 test("render narrow detail wraps long content", () => {
 	const quest = q({
-		tasks: [
+		steps: [
 			t({
 				content: "Task",
 				status: "done",
@@ -1362,20 +1362,20 @@ test("render narrow detail wraps long content", () => {
 // ── Render caching invalidation ───────────────────────────────────────────
 
 test("render invalidates cache after handleInput", () => {
-	const quest = q({ tasks: [t({ content: "Original", status: "pending", agent: "worker" })] });
+	const quest = q({ steps: [t({ content: "Original", status: "pending", agent: "worker" })] });
 	const kb = new QuestKanban(quest, identityTheme);
 	// Warm the cache
 	kb.render(80);
 	// Change quest externally
-	const updated = q({ tasks: [t({ content: "Updated", status: "pending", agent: "worker" })] });
+	const updated = q({ steps: [t({ content: "Updated", status: "pending", agent: "worker" })] });
 	kb.setQuest(updated);
 	const after = kb.render(80).join("\n");
-	assert.ok(after.includes("Updated"), "should reflect new task content");
-	assert.ok(!after.includes("Original"), "should not show old task content");
+	assert.ok(after.includes("Updated"), "should reflect new step content");
+	assert.ok(!after.includes("Original"), "should not show old step content");
 });
 
 test("render returns same lines when nothing changed", () => {
-	const quest = q({ tasks: [t()] });
+	const quest = q({ steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme);
 	const a = kb.render(80);
 	const b = kb.render(80);
@@ -1385,7 +1385,7 @@ test("render returns same lines when nothing changed", () => {
 // ── onClose callback ──────────────────────────────────────────────────────
 
 test("handleInput Esc in board mode calls onClose", () => {
-	const quest = q({ tasks: [t()] });
+	const quest = q({ steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme);
 	let closed = false;
 	kb.onClose = () => {
@@ -1396,7 +1396,7 @@ test("handleInput Esc in board mode calls onClose", () => {
 });
 
 test("handleInput non-Esc in board mode does not call onClose", () => {
-	const quest = q({ tasks: [t()] });
+	const quest = q({ steps: [t()] });
 	const kb = new QuestKanban(quest, identityTheme);
 	let closed = false;
 	kb.onClose = () => {

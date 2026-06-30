@@ -10,7 +10,7 @@
  * surface, leaving only the actual sub-agent spawn (which requires SDK values)
  * in the caller.
  */
-import type { QuestTask } from "./types";
+import type { QuestStep } from "./types";
 import { MAX_VERIFY_RETRIES, FORMAT_DIRECTIVE } from "./constants";
 import { buildVerificationImpactContext } from "./codebase";
 import type { SandboxProfile } from "./sandbox";
@@ -23,7 +23,7 @@ export interface VerifyResult {
 	outcome: VerifyOutcome;
 	/** Human-readable evidence for the decision. */
 	evidence: string;
-	/** How many verification retries this task has consumed (before this result). */
+	/** How many verification retries this step has consumed (before this result). */
 	retryCount: number;
 }
 
@@ -32,12 +32,12 @@ export interface VerificationConfig {
 	cwd: string;
 	/** Sub-agent name for the verifier role (e.g. "verifier"). */
 	verifierAgent: string;
-	/** Whether the task result has an impact-context block available. */
+	/** Whether the step result has an impact-context block available. */
 	includeImpact: boolean;
 }
 
 /**
- * Decide whether a task that just completed should enter verification.
+ * Decide whether a step that just completed should enter verification.
  *
  * Returns `true` when the quest's `verifyOnComplete` is set AND the team
  * (if any) has verification enabled.
@@ -117,7 +117,7 @@ export function buildSandboxComplianceChecks(profile?: SandboxProfile): string[]
  * returned string to `subagent(agent="verifier")`.
  */
 export function buildVerificationPrompt(opts: {
-	task: QuestTask;
+	task: QuestStep;
 	taskIndex: number;
 	config: VerificationConfig;
 	result: string;
@@ -127,9 +127,9 @@ export function buildVerificationPrompt(opts: {
 	const { task, config, result, taskIndex } = opts;
 
 	lines.push(
-		`You are a verifier. Judge whether this completed task is correct and complete.`,
+		`You are a verifier. Judge whether this completed step is correct and complete.`,
 		``,
-		`## Task to verify`,
+		`## Step to verify`,
 		`**Index:** #${taskIndex + 1}`,
 		`**Label:** ${task.content}`,
 		``,
@@ -139,7 +139,7 @@ export function buildVerificationPrompt(opts: {
 		result,
 		``,
 		`## Verification checklist`,
-		`1. Does the result match the task requirements?`,
+		`1. Does the result match the step requirements?`,
 		`2. Is the implementation correct and complete?`,
 		`3. Are there any issues or missing pieces?`,
 		FORMAT_DIRECTIVE,

@@ -147,9 +147,13 @@ export function emptyQuest(
 		name,
 		goal,
 		status: "planning",
+		steps: [],
 		tasks: [],
+		stepsSincePause: 0,
 		tasksSincePause: 0,
+		lastFiredStepIndex: -1,
 		lastFiredTaskIndex: -1,
+		sameStepCount: 0,
 		sameTaskCount: 0,
 		pauseReason: null,
 		conventions: [],
@@ -176,8 +180,9 @@ export function loadQuest(cwd: string): Quest | null {
 		const activePath = questActivePath(cwd);
 		if (!existsSync(activePath)) return null;
 		const raw = JSON.parse(readFileSync(activePath, "utf8"));
-		if (raw && raw.version === 1 && Array.isArray(raw.tasks)) {
-			raw.tasks = raw.tasks.map((t: any) => ({
+		const rawSteps = Array.isArray(raw?.steps) ? raw.steps : raw?.tasks;
+		if (raw && raw.version === 1 && Array.isArray(rawSteps)) {
+			raw.steps = rawSteps.map((t: any) => ({
 				content: t.content || "",
 				status: t.status || "pending",
 				agent: t.agent || "worker",
@@ -198,6 +203,8 @@ export function loadQuest(cwd: string): Quest | null {
 						? normalizeSandboxOverrides(t.sandbox)
 						: undefined,
 			}));
+			// Legacy mirror for downgrade compatibility. New code uses steps.
+			raw.tasks = raw.steps;
 			if (raw.planningMode !== "auto" && raw.planningMode !== "approve") {
 				raw.planningMode = "auto";
 			}
@@ -211,6 +218,23 @@ export function loadQuest(cwd: string): Quest | null {
 			}
 			if (!raw.commits || !Array.isArray(raw.commits)) {
 				raw.commits = [];
+			} else {
+				raw.commits = raw.commits.map((c: any) => {
+					const stepIndex =
+						typeof c.stepIndex === "number"
+							? c.stepIndex
+							: typeof c.taskIndex === "number"
+								? c.taskIndex
+								: 0;
+					return {
+						stepIndex,
+						taskIndex: stepIndex,
+						hash: typeof c.hash === "string" ? c.hash : "",
+						message: typeof c.message === "string" ? c.message : "",
+						branch: typeof c.branch === "string" ? c.branch : undefined,
+						timestamp: typeof c.timestamp === "number" ? c.timestamp : Date.now(),
+					};
+				});
 			}
 			if (!raw.researchFindings || !Array.isArray(raw.researchFindings)) {
 				raw.researchFindings = [];
@@ -239,9 +263,27 @@ export function loadQuest(cwd: string): Quest | null {
 			if (!validStatuses.includes(raw.status)) {
 				raw.status = "idle";
 			}
-			if (typeof raw.tasksSincePause !== "number") raw.tasksSincePause = 0;
-			if (typeof raw.lastFiredTaskIndex !== "number") raw.lastFiredTaskIndex = -1;
-			if (typeof raw.sameTaskCount !== "number") raw.sameTaskCount = 0;
+			raw.stepsSincePause =
+				typeof raw.stepsSincePause === "number"
+					? raw.stepsSincePause
+					: typeof raw.tasksSincePause === "number"
+						? raw.tasksSincePause
+						: 0;
+			raw.tasksSincePause = raw.stepsSincePause;
+			raw.lastFiredStepIndex =
+				typeof raw.lastFiredStepIndex === "number"
+					? raw.lastFiredStepIndex
+					: typeof raw.lastFiredTaskIndex === "number"
+						? raw.lastFiredTaskIndex
+						: -1;
+			raw.lastFiredTaskIndex = raw.lastFiredStepIndex;
+			raw.sameStepCount =
+				typeof raw.sameStepCount === "number"
+					? raw.sameStepCount
+					: typeof raw.sameTaskCount === "number"
+						? raw.sameTaskCount
+						: 0;
+			raw.sameTaskCount = raw.sameStepCount;
 			// ── Sandbox (backwards-compatible: absent = no sandbox) ──────
 			if (raw.sandbox && typeof raw.sandbox === "object") {
 				raw.sandbox = normalizeSandboxPolicy(raw.sandbox);
@@ -258,6 +300,14 @@ export function loadQuest(cwd: string): Quest | null {
 
 export function saveQuest(quest: Quest, cwd: string): void {
 	quest.updatedAt = Date.now();
+	quest.tasks = quest.steps;
+	quest.tasksSincePause = quest.stepsSincePause;
+	quest.lastFiredTaskIndex = quest.lastFiredStepIndex;
+	quest.sameTaskCount = quest.sameStepCount;
+	quest.commits = quest.commits.map((commit) => ({
+		...commit,
+		taskIndex: commit.stepIndex,
+	}));
 	writeJSON(questActivePath(cwd), quest);
 }
 
@@ -273,8 +323,8 @@ export function archiveQuest(quest: Quest, cwd: string): string | null {
 			name: quest.name,
 			goal: quest.goal,
 			completedAt: quest.completedAt ?? Date.now(),
-			taskCount: quest.tasks.length,
-			doneCount: quest.tasks.filter((t) => t.status === "done").length,
+			taskCount: quest.steps.length,
+			doneCount: quest.steps.filter((t) => t.status === "done").length,
 		});
 		return path;
 	} catch (e) {
@@ -340,14 +390,18 @@ export function rebuildArchiveIndex(cwd: string): void {
 		for (const f of files) {
 			try {
 				const raw = asRecord(JSON.parse(readFileSync(join(archiveDir, f), "utf8")));
-				const tasks = Array.isArray(raw.tasks) ? raw.tasks : [];
+				const steps = Array.isArray(raw.steps)
+					? raw.steps
+					: Array.isArray(raw.tasks)
+						? raw.tasks
+						: [];
 				entries.push({
 					path: join(archiveDir, f),
 					name: strOr(raw.name, f),
 					goal: optStr(raw.goal) ?? "",
 					completedAt: optNum(raw.completedAt) ?? null,
-					taskCount: tasks.length,
-					doneCount: tasks.filter((t) => asRecord(t).status === "done").length,
+					taskCount: steps.length,
+					doneCount: steps.filter((t) => asRecord(t).status === "done").length,
 				});
 			} catch (e) {
 				console.error("[pi-quest] rebuildArchiveIndex/read:", e); /* skip corrupt */
@@ -366,14 +420,14 @@ export function listArchives(
 ): {
 	name: string;
 	goal: string;
-	tasks: number;
+	steps: number;
 	done: number;
 	completedAt: number | null;
 }[] {
 	const toSummary = (e: QuestArchiveEntry) => ({
 		name: e.name,
 		goal: e.goal,
-		tasks: e.taskCount,
+		steps: e.taskCount,
 		done: e.doneCount,
 		completedAt: e.completedAt,
 	});

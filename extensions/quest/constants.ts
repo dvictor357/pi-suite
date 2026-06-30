@@ -6,7 +6,7 @@ import {
 	MAX_VERIFY_RETRIES,
 	MAX_DEPENDENCY_DEPTH,
 } from "../../core";
-import type { TaskStatus, TeamConfig } from "./types";
+import type { StepStatus, TeamConfig } from "./types";
 
 export { MAX_BURST, MAX_RETRIES, MAX_VERIFY_RETRIES, MAX_DEPENDENCY_DEPTH };
 
@@ -16,7 +16,7 @@ export { MAX_BURST, MAX_RETRIES, MAX_VERIFY_RETRIES, MAX_DEPENDENCY_DEPTH };
  * use whatever formatter/linter the project itself already relies on.
  */
 export const FORMAT_DIRECTIVE = [
-	"**Before marking a code task done:** apply this project's own formatting and lint conventions.",
+	"**Before marking a code step done:** apply this project's own formatting and lint conventions.",
 	"Detect the tooling the codebase already uses — a format/lint script in its manifest, a config file",
 	"(e.g. .editorconfig or a formatter/linter config), or the standard tool for its language/ecosystem —",
 	"then run it and confirm the working tree is clean and consistent. Do NOT assume a specific language",
@@ -30,7 +30,7 @@ export const ARCHIVE_INDEX_PATH = join(ARCHIVE_DIR, "archive-index.json");
 export const TEAMS_DIR = join(AGENT_DIR, "quests", "teams");
 export const ERROR_LOG_PATH = join(AGENT_DIR, "quests", "error.log");
 
-export const ICON: Record<TaskStatus, string> = {
+export const ICON: Record<StepStatus, string> = {
 	pending: "☐",
 	running: "▶",
 	verifying: "🔍",

@@ -13,7 +13,7 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 	pi.registerTool({
 		name: "quest_status",
 		label: "Quest Status",
-		description: "Show the current quest, its tasks, and progress.",
+		description: "Show the current quest, its steps, and progress.",
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
 			const quest = getQuest(ctx.cwd);
@@ -47,7 +47,7 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 		].join(" "),
 		parameters: Type.Object({
 			taskIndex: Type.Number({
-				description: "Task index (0-based) that this commit belongs to",
+				description: "Step index (0-based) that this commit belongs to",
 			}),
 			commitHash: Type.String({
 				description: "Git commit hash (short or full SHA)",
@@ -66,23 +66,24 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 				};
 			}
 
-			if (params.taskIndex < 0 || params.taskIndex >= quest.tasks.length) {
+			if (params.taskIndex < 0 || params.taskIndex >= quest.steps.length) {
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Invalid task index ${params.taskIndex}. Valid: 0-${quest.tasks.length - 1}.`,
+							text: `Invalid step index ${params.taskIndex}. Valid: 0-${quest.steps.length - 1}.`,
 						},
 					],
 					details: {},
 				};
 			}
 
-			const task = quest.tasks[params.taskIndex];
-			task.commitHash = params.commitHash;
-			if (params.branchName) task.branchName = params.branchName;
+			const step = quest.steps[params.taskIndex];
+			step.commitHash = params.commitHash;
+			if (params.branchName) step.branchName = params.branchName;
 
 			quest.commits.push({
+				stepIndex: params.taskIndex,
 				taskIndex: params.taskIndex,
 				hash: params.commitHash,
 				message: params.commitMessage,
@@ -97,7 +98,7 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 					{
 						type: "text",
 						text: [
-							`📝 Commit recorded for task #${params.taskIndex + 1}: **${task.content}**`,
+							`📝 Commit recorded for step #${params.taskIndex + 1}: **${step.content}**`,
 							`  Hash: \`${params.commitHash.slice(0, 8)}\``,
 							`  Message: ${params.commitMessage}`,
 							params.branchName ? `  Branch: ${params.branchName}` : "",
@@ -149,8 +150,9 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 
 			const commitsByTask = quest.commits.reduce(
 				(acc, c) => {
-					const task = quest.tasks[c.taskIndex];
-					const key = `#${c.taskIndex + 1} ${task?.content || "unknown"}`;
+					const stepIndex = c.stepIndex;
+					const step = quest.steps[stepIndex];
+					const key = `#${stepIndex + 1} ${step?.content || "unknown"}`;
 					if (!acc[key]) acc[key] = [];
 					acc[key].push(c);
 					return acc;
@@ -161,7 +163,7 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 			const lines: string[] = [
 				`## Git Summary: ${quest.name}`,
 				``,
-				`**${quest.commits.length} commit(s)** across **${Object.keys(commitsByTask).length} task(s)**`,
+				`**${quest.commits.length} commit(s)** across **${Object.keys(commitsByTask).length} step(s)**`,
 				``,
 			];
 
@@ -188,7 +190,7 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 				}
 				lines.push(``);
 				lines.push(
-					`**Tasks completed:** ${quest.tasks.filter((t) => t.status === "done").length}/${quest.tasks.length}`,
+					`**Steps completed:** ${quest.steps.filter((t) => t.status === "done").length}/${quest.steps.length}`,
 				);
 				lines.push(`**Commits:** ${quest.commits.length}`);
 				if (git.autoBranch) {
@@ -278,7 +280,7 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 							day: "numeric",
 						})
 					: "?";
-				return `${idx + 1}. **${a.name}** — ${a.done}/${a.tasks} done — ${date}\n   ${a.goal}`;
+				return `${idx + 1}. **${a.name}** — ${a.done}/${a.steps} done — ${date}\n   ${a.goal}`;
 			});
 			return {
 				content: [{ type: "text", text: lines.join("\n\n") }],

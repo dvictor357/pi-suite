@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { MAX_BURST, MAX_RETRIES } from "./constants";
 import { archiveQuest, loadQuest, saveQuest, syncConventionsToMemory } from "./storage";
-import { nextPendingTask, formatQuestStatus, wasTurnAborted } from "./steering";
+import { nextPendingStep, formatQuestStatus, wasTurnAborted } from "./steering";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { syncQuestToTodo } from "./todo-sync";
 import { resolveSandboxProfile } from "./sandbox";
@@ -19,13 +19,13 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 
 			// User interrupt (Esc). `agent_end` fires for an aborted turn just like a
 			// completed one, so without this guard the handler would steer in the
-			// *next* task on every abort — forcing repeated Escapes to stop the quest,
-			// and orphaning each fired task in `running` (nextPendingTask skips those).
-			// Treat one interrupt as "halt the auto-pilot": roll the in-flight task(s)
+			// *next* step on every abort — forcing repeated Escapes to stop the quest,
+			// and orphaning each fired step in `running` (nextPendingStep skips those).
+			// Treat one interrupt as "halt the auto-pilot": roll the in-flight step(s)
 			// back to pending and pause so a single Esc stops, and /quest resume picks
 			// up cleanly where it left off.
 			if (wasTurnAborted(event.messages)) {
-				for (const t of quest.tasks) {
+				for (const t of quest.steps) {
 					if (t.status === "running") {
 						t.status = "pending";
 						t.startedAt = null;
@@ -34,8 +34,8 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 				}
 				quest.status = "paused";
 				quest.pauseReason = "Interrupted (Esc). /quest resume to continue.";
-				quest.lastFiredTaskIndex = -1;
-				quest.sameTaskCount = 0;
+				quest.lastFiredStepIndex = -1;
+				quest.sameStepCount = 0;
 				persist(ctx, quest);
 				if (ctx.hasUI) {
 					ctx.ui.notify(
@@ -46,11 +46,11 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 				return;
 			}
 
-			const next = nextPendingTask(quest);
+			const next = nextPendingStep(quest);
 			if (!next) {
-				const verifyingTasks = quest.tasks.filter((t) => t.status === "verifying");
+				const verifyingTasks = quest.steps.filter((t) => t.status === "verifying");
 				if (verifyingTasks.length > 0) {
-					const allResolved = quest.tasks.every(
+					const allResolved = quest.steps.every(
 						(t) =>
 							t.status === "done" ||
 							t.status === "skipped" ||
@@ -59,14 +59,14 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 					);
 					const vfyList = verifyingTasks
 						.map((t) => {
-							const idx = quest.tasks.indexOf(t);
+							const idx = quest.steps.indexOf(t);
 							return `- #${idx + 1} **${t.content}**`;
 						})
 						.join("\n");
 					if (allResolved) {
 						if (ctx.hasUI) {
 							const action = await ctx.ui.select(
-								`${verifyingTasks.length} task(s) need verification. What now?`,
+								`${verifyingTasks.length} step(s) need verification. What now?`,
 								[
 									"Verify them now (agent will handle it)",
 									"Skip verification for all",
@@ -81,10 +81,10 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 										[
 											`## Verification Pending ⏳`,
 											``,
-											`${verifyingTasks.length} task(s) awaiting verification:`,
+											`${verifyingTasks.length} step(s) awaiting verification:`,
 											verifyingTasks
 												.map((t) => {
-													const idx = quest.tasks.indexOf(t);
+													const idx = quest.steps.indexOf(t);
 													return `- #${idx + 1} **${t.content}** — Use subagent(agent="verifier") then call quest_update(index=${idx}, verifyOutcome="PASS"|"FAIL", verifyEvidence=...)`;
 												})
 												.join("\n"),
@@ -108,7 +108,7 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 								}
 								persist(ctx, quest);
 								ctx.ui.notify(
-									`${verifyingTasks.length} task(s) verified (skipped). Continuing...`,
+									`${verifyingTasks.length} step(s) verified (skipped). Continuing...`,
 									"info",
 								);
 								return;
@@ -116,14 +116,14 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 						}
 
 						quest.status = "paused";
-						quest.pauseReason = `Waiting for verification on ${verifyingTasks.length} task(s): ${verifyingTasks.map((t) => t.content).join(", ")}. Resolve with quest_update(verifyOutcome=...).`;
-						quest.lastFiredTaskIndex = -1;
-						quest.sameTaskCount = 0;
+						quest.pauseReason = `Waiting for verification on ${verifyingTasks.length} step(s): ${verifyingTasks.map((t) => t.content).join(", ")}. Resolve with quest_update(verifyOutcome=...).`;
+						quest.lastFiredStepIndex = -1;
+						quest.sameStepCount = 0;
 						persist(ctx, quest);
 
 						if (ctx.hasUI) {
 							ctx.ui.notify(
-								`Quest paused: ${verifyingTasks.length} task(s) need verification.\n${vfyList}`,
+								`Quest paused: ${verifyingTasks.length} step(s) need verification.\n${vfyList}`,
 								"warning",
 							);
 						} else {
@@ -133,10 +133,10 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 									[
 										`## Verification Pending ⏳`,
 										``,
-										`${verifyingTasks.length} task(s) awaiting verification:`,
+										`${verifyingTasks.length} step(s) awaiting verification:`,
 										verifyingTasks
 											.map((t) => {
-												const idx = quest.tasks.indexOf(t);
+												const idx = quest.steps.indexOf(t);
 												return `- #${idx + 1} **${t.content}** — call quest_update(index=${idx}, verifyOutcome="PASS"|"FAIL", verifyEvidence=...)`;
 											})
 											.join("\n"),
@@ -151,15 +151,15 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 						}
 						return;
 					} else {
-						// allResolved is false — some tasks pending because deps are verifying
+						// allResolved is false — some steps pending because deps are verifying
 						quest.status = "paused";
-						quest.pauseReason = `Verification pending on ${verifyingTasks.length} task(s): ${verifyingTasks.map((t) => t.content).join(", ")}. Complete verification to unblock dependent tasks.`;
-						quest.lastFiredTaskIndex = -1;
-						quest.sameTaskCount = 0;
+						quest.pauseReason = `Verification pending on ${verifyingTasks.length} step(s): ${verifyingTasks.map((t) => t.content).join(", ")}. Complete verification to unblock dependent steps.`;
+						quest.lastFiredStepIndex = -1;
+						quest.sameStepCount = 0;
 						persist(ctx, quest);
 						if (ctx.hasUI) {
 							ctx.ui.notify(
-								`Quest paused: ${verifyingTasks.length} task(s) need verification before dependents can proceed.\n${vfyList}`,
+								`Quest paused: ${verifyingTasks.length} step(s) need verification before dependents can proceed.\n${vfyList}`,
 								"warning",
 							);
 						}
@@ -167,8 +167,8 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 					}
 				}
 
-				const allDone = quest.tasks.every((t) => t.status === "done" || t.status === "skipped");
-				const anyFailed = quest.tasks.some((t) => t.status === "failed");
+				const allDone = quest.steps.every((t) => t.status === "done" || t.status === "skipped");
+				const anyFailed = quest.steps.some((t) => t.status === "failed");
 
 				if (allDone && !anyFailed) {
 					quest.status = "done";
@@ -208,7 +208,7 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 							[
 								`## Quest Complete: ${quest.name} 🎉`,
 								``,
-								`${quest.tasks.filter((t) => t.status === "done").length}/${quest.tasks.length} tasks done.`,
+								`${quest.steps.filter((t) => t.status === "done").length}/${quest.steps.length} steps done.`,
 								gitSection,
 								``,
 								quest.conventions.length
@@ -225,17 +225,17 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 						rt.setAutoPilotLocked(false);
 					}
 				} else if (anyFailed) {
-					const failedTasks = quest.tasks.filter((t) => t.status === "failed");
+					const failedTasks = quest.steps.filter((t) => t.status === "failed");
 					const failedList = failedTasks
 						.map((t) => {
-							const i = quest.tasks.indexOf(t);
+							const i = quest.steps.indexOf(t);
 							return `  #${i + 1}: ${t.content} — ${t.result || "no details"}`;
 						})
 						.join("\n");
 
 					if (ctx.hasUI) {
 						const action = await ctx.ui.select(
-							`${failedTasks.length} task(s) failed. What would you like to do?`,
+							`${failedTasks.length} step(s) failed. What would you like to do?`,
 							["Retry failed tasks", "Skip all failed", "Pause and review"],
 						);
 
@@ -248,13 +248,13 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 								t.result = null;
 							}
 							quest.status = "active";
-							quest.tasksSincePause = 0;
-							quest.lastFiredTaskIndex = -1;
-							quest.sameTaskCount = 0;
+							quest.stepsSincePause = 0;
+							quest.lastFiredStepIndex = -1;
+							quest.sameStepCount = 0;
 							quest.pauseReason = null;
 							persist(ctx, quest);
 							ctx.ui.notify(
-								`${failedTasks.length} task(s) reset for retry. Auto-pilot resuming.`,
+								`${failedTasks.length} step(s) reset for retry. Auto-pilot resuming.`,
 								"info",
 							);
 							return;
@@ -267,25 +267,25 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 								t.completedAt = Date.now();
 							}
 							quest.status = "active";
-							quest.tasksSincePause = 0;
-							quest.lastFiredTaskIndex = -1;
-							quest.sameTaskCount = 0;
+							quest.stepsSincePause = 0;
+							quest.lastFiredStepIndex = -1;
+							quest.sameStepCount = 0;
 							quest.pauseReason = null;
 							persist(ctx, quest);
-							ctx.ui.notify(`${failedTasks.length} task(s) skipped. Auto-pilot resuming.`, "info");
+							ctx.ui.notify(`${failedTasks.length} step(s) skipped. Auto-pilot resuming.`, "info");
 							return;
 						}
 					}
 
 					quest.status = "paused";
-					quest.pauseReason = "Some tasks failed. Review and decide: retry, skip, or redefine.";
-					quest.lastFiredTaskIndex = -1;
-					quest.sameTaskCount = 0;
+					quest.pauseReason = "Some steps failed. Review and decide: retry, skip, or redefine.";
+					quest.lastFiredStepIndex = -1;
+					quest.sameStepCount = 0;
 					persist(ctx, quest);
 
 					if (ctx.hasUI) {
 						ctx.ui.notify(
-							`Quest paused: ${failedTasks.length} task(s) failed.\nFailed:\n${failedList}`,
+							`Quest paused: ${failedTasks.length} step(s) failed.\nFailed:\n${failedList}`,
 							"warning",
 						);
 					} else {
@@ -295,9 +295,9 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 								[
 									`## Quest Paused: ${quest.name} ⚠`,
 									``,
-									`Some tasks failed. Review the status with quest_status and decide next steps:`,
+									`Some steps failed. Review the status with quest_status and decide next steps:`,
 									`- Fix the issue and call quest_update to retry`,
-									`- Skip failed tasks with quest_update(status="skipped")`,
+									`- Skip failed steps with quest_update(status="skipped")`,
 									`- /quest resume to continue`,
 								].join("\n"),
 								{ deliverAs: "steer" },
@@ -308,49 +308,49 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 					}
 				} else {
 					quest.status = "paused";
-					quest.pauseReason = "All remaining tasks are blocked by unfinished dependencies.";
+					quest.pauseReason = "All remaining steps are blocked by unfinished dependencies.";
 					persist(ctx, quest);
 				}
 				return;
 			}
 
 			// Stall detection
-			if (next.index === quest.lastFiredTaskIndex) {
-				quest.sameTaskCount++;
-				if (quest.sameTaskCount > 2) {
+			if (next.index === quest.lastFiredStepIndex) {
+				quest.sameStepCount++;
+				if (quest.sameStepCount > 2) {
 					if (ctx.hasUI) {
 						const action = await ctx.ui.select(
-							`Task "${next.task.content}" stalled after ${quest.sameTaskCount} attempts. What now?`,
+							`Step "${next.task.content}" stalled after ${quest.sameStepCount} attempts. What now?`,
 							["Skip this task", "Mark as failed", "Pause quest"],
 						);
 
 						if (action === "Skip this task") {
 							next.task.status = "skipped";
-							next.task.result = `Skipped by user after stalling (${quest.sameTaskCount} attempts).`;
+							next.task.result = `Skipped by user after stalling (${quest.sameStepCount} attempts).`;
 							next.task.completedAt = Date.now();
-							quest.lastFiredTaskIndex = -1;
-							quest.sameTaskCount = 0;
+							quest.lastFiredStepIndex = -1;
+							quest.sameStepCount = 0;
 							persist(ctx, quest);
-							ctx.ui.notify(`Task #${next.index + 1} skipped.`, "info");
+							ctx.ui.notify(`Step #${next.index + 1} skipped.`, "info");
 							return;
 						}
 
 						if (action === "Mark as failed") {
 							next.task.status = "failed";
-							next.task.result = `Failed by user after stalling (${quest.sameTaskCount} attempts).`;
+							next.task.result = `Failed by user after stalling (${quest.sameStepCount} attempts).`;
 							next.task.completedAt = Date.now();
-							quest.lastFiredTaskIndex = -1;
-							quest.sameTaskCount = 0;
+							quest.lastFiredStepIndex = -1;
+							quest.sameStepCount = 0;
 							persist(ctx, quest);
-							ctx.ui.notify(`Task #${next.index + 1} marked failed.`, "warning");
+							ctx.ui.notify(`Step #${next.index + 1} marked failed.`, "warning");
 							return;
 						}
 					}
 
 					quest.status = "paused";
-					quest.pauseReason = `Task #${next.index + 1} stalled (${quest.sameTaskCount} attempts without progress).`;
-					quest.lastFiredTaskIndex = -1;
-					quest.sameTaskCount = 0;
+					quest.pauseReason = `Step #${next.index + 1} stalled (${quest.sameStepCount} attempts without progress).`;
+					quest.lastFiredStepIndex = -1;
+					quest.sameStepCount = 0;
 					persist(ctx, quest);
 
 					if (ctx.hasUI) {
@@ -359,7 +359,7 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 						rt.setAutoPilotLocked(true);
 						try {
 							pi.sendUserMessage(
-								`## Quest Paused: Stalled ⚠\n\nTask #${next.index + 1} "${next.task.content}" has been attempted ${quest.sameTaskCount} times without completion.\nUse quest_update to mark it failed or skipped, then /quest resume.`,
+								`## Quest Paused: Stalled ⚠\n\nStep #${next.index + 1} "${next.task.content}" has been attempted ${quest.sameStepCount} times without completion.\nUse quest_update to mark it failed or skipped, then /quest resume.`,
 								{ deliverAs: "steer" },
 							);
 						} finally {
@@ -369,60 +369,60 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 					return;
 				}
 			} else {
-				quest.sameTaskCount = 1;
+				quest.sameStepCount = 1;
 			}
 
 			if (next.task.attempts > MAX_RETRIES) {
 				next.task.status = "failed";
 				next.task.result = `Auto-failed after ${MAX_RETRIES + 1} attempts.`;
-				quest.lastFiredTaskIndex = -1;
-				quest.sameTaskCount = 0;
+				quest.lastFiredStepIndex = -1;
+				quest.sameStepCount = 0;
 				persist(ctx, quest);
 				return;
 			}
 
-			if (quest.tasksSincePause >= MAX_BURST) {
-				const done = quest.tasks.filter((t) => t.status === "done").length;
-				const total = quest.tasks.length;
+			if (quest.stepsSincePause >= MAX_BURST) {
+				const done = quest.steps.filter((t) => t.status === "done").length;
+				const total = quest.steps.length;
 
 				if (ctx.hasUI) {
 					const cont = await ctx.ui.confirm(
 						"Quest Checkpoint",
 						[
-							`**${quest.tasksSincePause} tasks** completed in this burst.`,
+							`**${quest.stepsSincePause} tasks** completed in this burst.`,
 							``,
 							`Progress: **${done}/${total}** done`,
 							`Next: **${next.task.content}** [${next.task.agent}]`,
 							``,
-							`Continue to next task?`,
+							`Continue to next step?`,
 						].join("\n"),
 					);
 
 					if (cont) {
-						quest.tasksSincePause = 0;
-						quest.lastFiredTaskIndex = -1;
-						quest.sameTaskCount = 0;
+						quest.stepsSincePause = 0;
+						quest.lastFiredStepIndex = -1;
+						quest.sameStepCount = 0;
 						persist(ctx, quest);
 					} else {
 						quest.status = "paused";
-						quest.pauseReason = `User paused at checkpoint after ${quest.tasksSincePause} tasks. /quest resume to continue.`;
-						quest.lastFiredTaskIndex = -1;
-						quest.sameTaskCount = 0;
+						quest.pauseReason = `User paused at checkpoint after ${quest.stepsSincePause} steps. /quest resume to continue.`;
+						quest.lastFiredStepIndex = -1;
+						quest.sameStepCount = 0;
 						persist(ctx, quest);
 						ctx.ui.notify(`Quest paused. /quest resume to continue.`, "info");
 						return;
 					}
 				} else {
 					quest.status = "paused";
-					quest.pauseReason = `Auto-paused after ${MAX_BURST} tasks. /quest resume to continue.`;
-					quest.lastFiredTaskIndex = -1;
-					quest.sameTaskCount = 0;
+					quest.pauseReason = `Auto-paused after ${MAX_BURST} steps. /quest resume to continue.`;
+					quest.lastFiredStepIndex = -1;
+					quest.sameStepCount = 0;
 					persist(ctx, quest);
 
 					rt.setAutoPilotLocked(true);
 					try {
 						pi.sendUserMessage(
-							`## Quest Paused: Checkpoint ⏸\n\n${quest.tasksSincePause}/${MAX_BURST} tasks completed. Progress:\n${formatQuestStatus(quest)}\n\n/quest resume to continue.`,
+							`## Quest Paused: Checkpoint ⏸\n\n${quest.stepsSincePause}/${MAX_BURST} steps completed. Progress:\n${formatQuestStatus(quest)}\n\n/quest resume to continue.`,
 							{ deliverAs: "steer" },
 						);
 					} finally {
@@ -432,8 +432,8 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 				}
 			}
 
-			// Fire the next task
-			rt.fireTask(ctx, quest, next.task, next.index);
+			// Fire the next step
+			rt.fireStep(ctx, quest, next.task, next.index);
 		} catch (e) {
 			console.error("[pi-quest] agent_end handler crashed:", e);
 			const quest = getQuest(ctx.cwd);
@@ -466,7 +466,7 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 
 		if (quest?.status === "active") {
 			ctx.ui.notify(
-				`Quest active: ${quest.name} (${quest.tasks.filter((t) => t.status === "done").length}/${quest.tasks.length} done)`,
+				`Quest active: ${quest.name} (${quest.steps.filter((t) => t.status === "done").length}/${quest.steps.length} done)`,
 				"info",
 			);
 		} else if (quest?.status === "paused") {
@@ -474,20 +474,20 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 				`Quest paused: ${quest.name} — ${quest.pauseReason ?? "/quest resume to continue"}`,
 				"warning",
 			);
-		} else if (quest?.planningMode === "approve" && !quest.planApproved && quest.tasks.length > 0) {
+		} else if (quest?.planningMode === "approve" && !quest.planApproved && quest.steps.length > 0) {
 			ctx.ui.notify(
-				`Quest awaiting approval: ${quest.name} — ${quest.tasks.length} tasks planned. /quest approve to start.`,
+				`Quest awaiting approval: ${quest.name} — ${quest.steps.length} steps planned. /quest approve to start.`,
 				"warning",
 			);
 		} else if (quest?.status === "planning") {
 			ctx.ui.notify(
-				`Quest planning: ${quest.name} — ${quest.tasks.length} tasks. /quest start or quest_plan to continue.`,
+				`Quest planning: ${quest.name} — ${quest.steps.length} steps. /quest start or quest_plan to continue.`,
 				"info",
 			);
 		} else if (quest?.status === "done") {
-			const done = quest.tasks.filter((t) => t.status === "done").length;
+			const done = quest.steps.filter((t) => t.status === "done").length;
 			ctx.ui.notify(
-				`Quest completed: ${quest.name} — ${done}/${quest.tasks.length} tasks done.`,
+				`Quest completed: ${quest.name} — ${done}/${quest.steps.length} steps done.`,
 				"info",
 			);
 		}

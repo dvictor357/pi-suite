@@ -1,7 +1,7 @@
 /**
  * quest/sandbox.ts — pure sandbox policy resolution.
  *
- * Quest-level policy + per-task overrides → a resolved runtime profile used at
+ * Quest-level policy + per-step overrides → a resolved runtime profile used at
  * sub-agent spawn time. All functions are pure and SDK-free so they can be
  * unit-tested (like delegate.ts).
  */
@@ -9,7 +9,7 @@ import type { SandboxMode, SandboxPolicy, SandboxOverrides, WorktreeConfig } fro
 
 /**
  * Resolved runtime sandbox profile computed from quest-level policy and
- * per-task overrides. This is the shape consumed by the sub-agent spawn path
+ * per-step overrides. This is the shape consumed by the sub-agent spawn path
  * (subagent.ts) when deciding tool scope, path filtering, and isolation.
  */
 export interface SandboxProfile {
@@ -48,18 +48,18 @@ const MODE_ORDER: Record<SandboxMode, number> = { none: 0, restricted: 1, isolat
 
 /**
  * Resolve a runtime {@link SandboxProfile} from quest-level policy and optional
- * per-task overrides.
+ * per-step overrides.
  *
  * Rules:
  * 1. If `policy` is undefined, use {@link DEFAULT_SANDBOX_POLICY}.
- * 2. Task overrides can only tighten — never loosen — the quest-level policy.
- * 3. Mode escalation: a task can go from "none" → "restricted", "none" → "isolated",
+ * 2. Step overrides can only tighten — never loosen — the quest-level policy.
+ * 3. Mode escalation: a step can go from "none" → "restricted", "none" → "isolated",
  *    or "restricted" → "isolated", but never the reverse.
  * 4. Path/command lists: task-level allowed paths intersect with quest-level;
  *    task-level denied paths are unioned.
- * 5. Boolean flags (allowNetwork, allowPackageInstall): task override takes effect
+ * 5. Boolean flags (allowNetwork, allowPackageInstall): step override takes effect
  *    only when it's more restrictive (true → false).
- * 6. Worktree: uses quest-level config; task overrides don't carry worktree metadata.
+ * 6. Worktree: uses quest-level config; step overrides don't carry worktree metadata.
  */
 export function resolveSandboxProfile(
 	policy?: SandboxPolicy,
@@ -81,7 +81,7 @@ export function resolveSandboxProfile(
 	const taskAllowed = overrides?.allowedPaths;
 	let allowedPaths: string[];
 	if (questAllowed.length === 0 && mode !== "none") {
-		// Quest-level deny-all in restricted/isolated mode. Task overrides CANNOT
+		// Quest-level deny-all in restricted/isolated mode. Step overrides CANNOT
 		// add back what the quest denies — the intersection stays empty.
 		allowedPaths = [];
 	} else if (taskAllowed && taskAllowed.length > 0) {
@@ -446,7 +446,7 @@ export function sanitizeBranchName(name: string): string {
 }
 
 /**
- * Build a deterministic branch name for a quest (and optionally a task within
+ * Build a deterministic branch name for a quest (and optionally a step within
  * that quest). Format: `quest/<quest-name>` or `quest/<quest-name>/task-<index>`.
  * Names are sanitized via {@link sanitizeBranchName}.
  */
@@ -615,7 +615,7 @@ export function cleanupIntent(
 }
 
 /**
- * Validate a task name for use in a worktree branch. Names that sanitize to
+ * Validate a step name for use in a worktree branch. Names that sanitize to
  * nothing meaningful or contain only noise characters are rejected.
  *
  * Returns the sanitized branch-safe name when valid, or `null` when the name

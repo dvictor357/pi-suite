@@ -35,7 +35,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				Type.String({ description: "Short rationale for proposing this model" }),
 			),
 			taskIndex: Type.Optional(
-				Type.Number({ description: "Also stamp the approved model onto this task (0-based)" }),
+				Type.Number({ description: "Also stamp the approved model onto this step (0-based)" }),
 			),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
@@ -115,14 +115,14 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 		name: "quest_delegate",
 		label: "Quest Delegate",
 		description: [
-			"Run a quest task by spawning an isolated sub-agent with the model assigned to its role.",
+			"Run a quest step by spawning an isolated sub-agent with the model assigned to its role.",
 			"The model is resolved from the task, else the project's remembered choice for the role.",
 			"If none is assigned, pass `proposed` (or call quest_assign_model first). Read-only roles",
 			"(scout/verifier/reviewer/planner) get a read-only tool scope. Returns the sub-agent's",
 			"result; you then call quest_update to record completion.",
 		].join(" "),
 		parameters: Type.Object({
-			index: Type.Number({ description: "Task index to delegate (0-based)" }),
+			index: Type.Number({ description: "Step index to delegate (0-based)" }),
 			proposed: Type.Optional(
 				Type.String({ description: "Model to propose if the role has none assigned yet" }),
 			),
@@ -130,12 +130,12 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const quest = getQuest(ctx.cwd);
 			if (!quest) return textResult("No active quest. Use quest_create first.");
-			if (params.index < 0 || params.index >= quest.tasks.length) {
+			if (params.index < 0 || params.index >= quest.steps.length) {
 				return textResult(
-					`Invalid task index ${params.index}. Valid: 0-${quest.tasks.length - 1}.`,
+					`Invalid step index ${params.index}. Valid: 0-${quest.steps.length - 1}.`,
 				);
 			}
-			const task = quest.tasks[params.index];
+			const task = quest.steps[params.index];
 			const role = task.agent;
 
 			const remembered = loadAgentModels(ctx.cwd)[role]?.model;
@@ -182,8 +182,8 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			const sandboxTools = sandboxToolsForRole(role, sandboxProfile);
 
 			const dependencyResults = task.dependencies.map((d) => ({
-				content: quest.tasks[d]?.content ?? "",
-				result: quest.tasks[d]?.result ?? null,
+				content: quest.steps[d]?.content ?? "",
+				result: quest.steps[d]?.result ?? null,
 			}));
 			const prompt = buildSubAgentPrompt({
 				role,
@@ -206,7 +206,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					content: [
 						{
 							type: "text",
-							text: `Sub-agent for task #${params.index + 1} failed: ${res.error ?? "unknown error"}`,
+							text: `Sub-agent for step #${params.index + 1} failed: ${res.error ?? "unknown error"}`,
 						},
 					],
 					details: { index: params.index, role, model: model.id, ok: false, error: res.error },
@@ -217,7 +217,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					{
 						type: "text",
 						text: [
-							`Sub-agent (\`${role}\` · ${model.id}) finished task #${params.index + 1}: **${task.content}**`,
+							`Sub-agent (\`${role}\` · ${model.id}) finished step #${params.index + 1}: **${task.content}**`,
 							``,
 							res.output || "(no output)",
 							``,
@@ -256,8 +256,8 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				};
 			}
 			const name = quest.name;
-			const done = quest.tasks.filter((t) => t.status === "done").length;
-			const total = quest.tasks.length;
+			const done = quest.steps.filter((t) => t.status === "done").length;
+			const total = quest.steps.length;
 			if (quest.status !== "done") {
 				quest.status = "done";
 				quest.completedAt = Date.now();
@@ -271,7 +271,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				content: [
 					{
 						type: "text",
-						text: `Quest "${name}" aborted and archived (${done}/${total} tasks done).`,
+						text: `Quest "${name}" aborted and archived (${done}/${total} steps done).`,
 					},
 				],
 				details: { name, done, total },
@@ -281,11 +281,11 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 
 	pi.registerTool({
 		name: "quest_task_detail",
-		label: "Quest Task Detail",
+		label: "Quest Step Detail",
 		description:
-			"Get full details for a specific task including context, result, attempts, timing, and verification status.",
+			"Get full details for a specific step including context, result, attempts, timing, and verification status.",
 		parameters: Type.Object({
-			index: Type.Number({ description: "Task index (0-based)" }),
+			index: Type.Number({ description: "Step index (0-based)" }),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			const quest = getQuest(ctx.cwd);
@@ -295,26 +295,26 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					details: {},
 				};
 			}
-			if (params.index < 0 || params.index >= quest.tasks.length) {
+			if (params.index < 0 || params.index >= quest.steps.length) {
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Invalid task index ${params.index}. Valid: 0-${quest.tasks.length - 1}.`,
+							text: `Invalid step index ${params.index}. Valid: 0-${quest.steps.length - 1}.`,
 						},
 					],
 					details: {},
 				};
 			}
-			const t = quest.tasks[params.index];
+			const t = quest.steps[params.index];
 			const deps = t.dependencies.length
-				? t.dependencies.map((d) => `#${d + 1} ${quest.tasks[d].content}`).join(", ")
+				? t.dependencies.map((d) => `#${d + 1} ${quest.steps[d].content}`).join(", ")
 				: "none";
 			const time = t.startedAt
 				? `${Math.round(((t.completedAt ?? Date.now()) - t.startedAt) / 1000)}s`
 				: "not started";
 			const lines = [
-				`## Task #${params.index + 1}: ${t.content}`,
+				`## Step #${params.index + 1}: ${t.content}`,
 				``,
 				`**Status:** ${t.status}  |  **Agent:** ${t.agent}  |  **Attempts:** ${t.attempts}`,
 				`**Dependencies:** ${deps}`,
@@ -344,7 +344,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					sandboxLines.push(`**Sandbox:** ${mode} 🔒`);
 				}
 				if (t.sandbox?.mode) {
-					sandboxLines.push(`  Task override: +${t.sandbox.mode}`);
+					sandboxLines.push(`  Step override: +${t.sandbox.mode}`);
 				}
 				if (quest.sandbox?.worktree?.path) {
 					sandboxLines.push(`  Worktree: ${quest.sandbox.worktree.path}`);

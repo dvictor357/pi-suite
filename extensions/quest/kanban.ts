@@ -1,5 +1,5 @@
 import { matchesKey, Key } from "@earendil-works/pi-tui";
-import type { Quest, QuestTask } from "./types";
+import type { Quest, QuestStep } from "./types";
 import { ICON } from "./constants";
 
 // ── Pure helpers (exported for testing) ───────────────────────────────────
@@ -21,23 +21,23 @@ export const identityTheme: KanbanTheme = {
 /** Column definition produced by buildColumns. */
 export interface KanbanColumn {
 	title: string;
-	tasks: QuestTask[];
+	steps: QuestStep[];
 	color: string;
 }
 
-/** Group tasks into TODO / DOING / DONE / FAILED columns. */
-export function buildColumns(tasks: QuestTask[]): KanbanColumn[] {
+/** Group steps into TODO / DOING / DONE / FAILED columns. */
+export function buildColumns(steps: QuestStep[]): KanbanColumn[] {
 	return [
-		{ title: "TODO", tasks: tasks.filter((t) => t.status === "pending"), color: "muted" },
+		{ title: "TODO", steps: steps.filter((t) => t.status === "pending"), color: "muted" },
 		{
 			title: "DOING",
-			tasks: tasks.filter((t) => t.status === "running" || t.status === "verifying"),
+			steps: steps.filter((t) => t.status === "running" || t.status === "verifying"),
 			color: "accent",
 		},
-		{ title: "DONE", tasks: tasks.filter((t) => t.status === "done"), color: "success" },
+		{ title: "DONE", steps: steps.filter((t) => t.status === "done"), color: "success" },
 		{
 			title: "FAILED",
-			tasks: tasks.filter((t) => t.status === "failed" || t.status === "skipped"),
+			steps: steps.filter((t) => t.status === "failed" || t.status === "skipped"),
 			color: "error",
 		},
 	];
@@ -50,9 +50,9 @@ export function truncate(text: string, maxLen: number): string {
 	return text;
 }
 
-/** Build a one-line display label for a task cell. */
+/** Build a one-line display label for a step cell. */
 export function formatTaskCell(
-	task: QuestTask,
+	task: QuestStep,
 	index: number,
 	colWidth: number,
 	icon: Record<string, string>,
@@ -74,7 +74,7 @@ export function formatDuration(ms: number): string {
 }
 
 /** Build a compact metadata label summarising the task's key fields. */
-export function buildMetadataLabel(task: QuestTask): string {
+export function buildMetadataLabel(task: QuestStep): string {
 	const parts: string[] = [];
 	if (task.verified) parts.push("✅verified");
 	if (task.commitHash) parts.push(`\`${task.commitHash.slice(0, 8)}\``);
@@ -97,15 +97,15 @@ export interface ProgressCounts {
 	pending: number;
 }
 
-/** Compute progress counts from quest tasks. */
-export function progressSummary(tasks: QuestTask[]): ProgressCounts {
+/** Compute progress counts from quest steps. */
+export function progressSummary(steps: QuestStep[]): ProgressCounts {
 	let done = 0;
 	let failed = 0;
 	let skipped = 0;
 	let running = 0;
 	let verifying = 0;
 	let pending = 0;
-	for (const t of tasks) {
+	for (const t of steps) {
 		switch (t.status) {
 			case "done":
 				done++;
@@ -127,7 +127,7 @@ export function progressSummary(tasks: QuestTask[]): ProgressCounts {
 				break;
 		}
 	}
-	return { total: tasks.length, done, failed, skipped, running, verifying, pending };
+	return { total: steps.length, done, failed, skipped, running, verifying, pending };
 }
 
 /** Selection state. */
@@ -139,8 +139,8 @@ export interface KanbanSelection {
 /** Clamp selection to valid bounds given columns. */
 export function clampSelection(sel: KanbanSelection, cols: KanbanColumn[]): KanbanSelection {
 	const col = Math.max(0, Math.min(sel.col, cols.length - 1));
-	const tasks = cols[col]?.tasks ?? [];
-	const row = Math.max(0, Math.min(sel.row, tasks.length - 1));
+	const steps = cols[col]?.steps ?? [];
+	const row = Math.max(0, Math.min(sel.row, steps.length - 1));
 	return { col, row };
 }
 
@@ -161,7 +161,7 @@ export function moveSelection(
 			if (sel.row <= 0) return sel;
 			return clampSelection({ col: sel.col, row: sel.row - 1 }, cols);
 		case "down": {
-			const maxRow = (cols[sel.col]?.tasks.length ?? 1) - 1;
+			const maxRow = (cols[sel.col]?.steps.length ?? 1) - 1;
 			if (sel.row >= maxRow) return sel;
 			return clampSelection({ col: sel.col, row: sel.row + 1 }, cols);
 		}
@@ -169,18 +169,18 @@ export function moveSelection(
 }
 
 /**
- * Find the selected task given the quest, columns, and current selection.
- * Returns the task along with its original index in quest.tasks.
+ * Find the selected step given the quest, columns, and current selection.
+ * Returns the step along with its original index in quest.steps.
  */
 export function getSelectedTask(
 	quest: Quest,
 	cols: KanbanColumn[],
 	sel: KanbanSelection,
-): { task: QuestTask; index: number } | null {
+): { task: QuestStep; index: number } | null {
 	const col = cols[sel.col];
-	if (!col || sel.row >= col.tasks.length) return null;
-	const task = col.tasks[sel.row];
-	const index = quest.tasks.indexOf(task);
+	if (!col || sel.row >= col.steps.length) return null;
+	const task = col.steps[sel.row];
+	const index = quest.steps.indexOf(task);
 	if (index === -1) return null;
 	return { task, index };
 }
@@ -188,8 +188,8 @@ export function getSelectedTask(
 // ── Status & header helpers ──────────────────────────────────────────────
 
 /** Build a compact one-line quest status summary for the board header. */
-export function buildStatusLine(quest: Quest, tasks: QuestTask[]): string {
-	const p = progressSummary(tasks);
+export function buildStatusLine(quest: Quest, steps: QuestStep[]): string {
+	const p = progressSummary(steps);
 	const parts: string[] = [];
 
 	parts.push(`[${quest.status.toUpperCase()}]`);
@@ -202,18 +202,18 @@ export function buildStatusLine(quest: Quest, tasks: QuestTask[]): string {
 
 	if (quest.sandbox?.mode) parts.push(`sandbox:${quest.sandbox.mode}`);
 	if (quest.team) parts.push(`team:${quest.team}`);
-	if (quest.planningMode === "approve" && !quest.planApproved && quest.tasks.length > 0) {
+	if (quest.planningMode === "approve" && !quest.planApproved && quest.steps.length > 0) {
 		parts.push("[awaiting approval]");
 	}
 
 	return parts.join(" · ");
 }
 
-// ── Rich task cell formatting ─────────────────────────────────────────────
+// ── Rich step cell formatting ─────────────────────────────────────────────
 
 /** Compute the space a task's prefix takes: " ☐#12 "  (icon + # + index + spaces). */
 export function measureTaskPrefix(
-	task: QuestTask,
+	task: QuestStep,
 	index: number,
 	icon: Record<string, string>,
 ): number {
@@ -221,7 +221,7 @@ export function measureTaskPrefix(
 }
 
 /**
- * Build a compact right-hand metadata suffix for a task cell.
+ * Build a compact right-hand metadata suffix for a step cell.
  * The suffix is progressively disclosed based on available column width:
  *   < 18 → "" (no metadata)
  *   < 22 → agent only "[worker]"
@@ -230,7 +230,7 @@ export function measureTaskPrefix(
  *   34+  → full with deps "[worker] ✓ ⎇abc1234 ↳#1,#2"
  * Returns "" when there is nothing to show.
  */
-export function buildTaskSuffix(task: QuestTask, colWidth: number): string {
+export function buildTaskSuffix(task: QuestStep, colWidth: number): string {
 	const parts: string[] = [];
 
 	// Agent badge — always included when colWidth >= 18
@@ -243,7 +243,7 @@ export function buildTaskSuffix(task: QuestTask, colWidth: number): string {
 		}
 	}
 
-	// Sandbox indicator — compact badge when task has sandbox overrides.
+	// Sandbox indicator — compact badge when step has sandbox overrides.
 	// Differentiate: restricted → 🔒, isolated → 🔒i, any sandbox → 🔒
 	if (task.sandbox && colWidth >= 22) {
 		const sbIcon = task.sandbox.mode === "isolated" ? "🔒i" : "🔒";
@@ -271,12 +271,12 @@ export function buildTaskSuffix(task: QuestTask, colWidth: number): string {
 }
 
 /**
- * Render a rich task cell with inline metadata when column width permits.
- * Layout:  ☐#3 Task content…  [worker] ✓ ⎇abc1234
+ * Render a rich step cell with inline metadata when column width permits.
+ * Layout:  ☐#3 Step content…  [worker] ✓ ⎇abc1234
  * When colWidth is too narrow for metadata, degrades to basic formatTaskCell.
  */
 export function formatTaskCellRich(
-	task: QuestTask,
+	task: QuestStep,
 	index: number,
 	colWidth: number,
 	icon: Record<string, string>,
@@ -345,8 +345,8 @@ export function formatTimestamp(ms: number): string {
 }
 
 /**
- * Build compact sandbox detail lines for display in the task detail pane.
- * Shows quest-level policy and any per-task overrides.
+ * Build compact sandbox detail lines for display in the step detail pane.
+ * Shows quest-level policy and any per-step overrides.
  */
 export function buildSandboxDetailLines(
 	quest: { sandbox?: { mode?: string; worktree?: { path?: string } | null } },
@@ -363,17 +363,17 @@ export function buildSandboxDetailLines(
 			lines.push(line);
 	}
 	if (task.sandbox?.mode) {
-		for (const line of wrapLines(`  Task override: +${task.sandbox.mode}`, maxW)) lines.push(line);
+		for (const line of wrapLines(`  Step override: +${task.sandbox.mode}`, maxW)) lines.push(line);
 	}
 	return lines;
 }
 
 /**
- * Build the complete detail view for a task as an array of lines.
+ * Build the complete detail view for a step as an array of lines.
  * The caller is responsible for scrolling (slicing from a scroll offset).
  */
 export function buildTaskDetail(
-	task: QuestTask,
+	task: QuestStep,
 	index: number,
 	quest: Quest,
 	width: number,
@@ -384,7 +384,7 @@ export function buildTaskDetail(
 
 	// ── Title line ──
 	const iconChar = icon[task.status] ?? "•";
-	const titleText = truncate(`${iconChar} Task #${index + 1}: ${task.content}`, maxW);
+	const titleText = truncate(`${iconChar} Step #${index + 1}: ${task.content}`, maxW);
 	lines.push(titleText);
 	lines.push("");
 
@@ -399,7 +399,7 @@ export function buildTaskDetail(
 	// ── Dependencies ──
 	if (task.dependencies.length > 0) {
 		const depLabels = task.dependencies.map((d) => {
-			const depTask = quest.tasks[d];
+			const depTask = quest.steps[d];
 			return depTask ? `#${d + 1} ${depTask.content}` : `#${d + 1} (?)`;
 		});
 		for (const label of wrapLines(`Dependencies: ${depLabels.join(", ")}`, maxW)) {
@@ -490,16 +490,16 @@ export function computeLayout(width: number, numCols = 4, gap = 2): KanbanLayout
 
 /** Compute maxRows from columns after layout is known. */
 export function resolveMaxRows(layout: KanbanLayout, cols: KanbanColumn[]): KanbanLayout {
-	return { ...layout, maxRows: Math.max(...cols.map((c) => c.tasks.length), 1) };
+	return { ...layout, maxRows: Math.max(...cols.map((c) => c.steps.length), 1) };
 }
 
 /** Render a single kanban cell line with rich inline metadata. */
 export function renderCell(
 	col: KanbanColumn,
-	task: QuestTask | undefined,
+	task: QuestStep | undefined,
 	_rowIndex: number,
 	isSelected: boolean,
-	allTasks: QuestTask[],
+	allTasks: QuestStep[],
 	theme: KanbanTheme,
 	colWidth: number,
 ): string {
@@ -525,7 +525,7 @@ export interface KanbanActions {
 	onStart?: () => void;
 	/** Approve plan and start. For approve-mode plans only. */
 	onApprove?: () => void;
-	/** Retry a failed task (reset to pending). */
+	/** Retry a failed step (reset to pending). */
 	onRetryTask?: (taskIndex: number) => void;
 }
 
@@ -540,7 +540,7 @@ export function buildActionHints(quest: Quest, actions: KanbanActions): string {
 	if (actions.onPause && quest.status === "active") hints.push("p pause");
 	if (actions.onResume && quest.status === "paused") hints.push("r resume");
 	if (actions.onStart && (quest.status === "planning" || quest.status === "idle")) {
-		if (quest.planningMode === "approve" && !quest.planApproved && quest.tasks.length > 0) {
+		if (quest.planningMode === "approve" && !quest.planApproved && quest.steps.length > 0) {
 			if (actions.onApprove) hints.push("a approve  s start");
 			else hints.push("a approve");
 		} else {
@@ -551,7 +551,7 @@ export function buildActionHints(quest: Quest, actions: KanbanActions): string {
 		actions.onApprove &&
 		quest.planningMode === "approve" &&
 		!quest.planApproved &&
-		quest.tasks.length > 0 &&
+		quest.steps.length > 0 &&
 		!hints.some((h) => h.includes("approve"))
 	) {
 		hints.push("a approve");
@@ -572,14 +572,14 @@ export function buildHelpOverlay(width: number): string[] {
 
 	lines.push(" Board Mode");
 	lines.push(truncate(" ← → ↑ ↓     Navigate columns and tasks", w));
-	lines.push(truncate(" Enter       Open task detail pane", w));
+	lines.push(truncate(" Enter       Open step detail pane", w));
 	lines.push(truncate(" p / r / s / a  Pause, Resume, Start, Approve (context)", w));
 	lines.push(truncate(" ?  /  h     Show this help overlay", w));
 	lines.push(truncate(" Esc         Close kanban (return to chat)", w));
 	lines.push("");
 
 	lines.push(" Detail Mode");
-	lines.push(truncate(" ↑ ↓         Scroll task detail", w));
+	lines.push(truncate(" ↑ ↓         Scroll step detail", w));
 	lines.push(truncate(" PgUp PgDn   Page scroll", w));
 	lines.push(truncate(" Home / End  Jump to top / bottom", w));
 	lines.push(truncate(" ?  /  h     Show this help overlay", w));
@@ -630,7 +630,7 @@ export class QuestKanban {
 	}
 
 	private clampSelf(): void {
-		const cols = buildColumns(this.quest.tasks);
+		const cols = buildColumns(this.quest.steps);
 		const clamped = clampSelection(this.selection, cols);
 		this.selectedCol = clamped.col;
 		this.selectedRow = clamped.row;
@@ -651,7 +651,7 @@ export class QuestKanban {
 
 	/** Open the detail pane for the currently-selected task. No-op if none. */
 	private openDetail(): void {
-		const cols = buildColumns(this.quest.tasks);
+		const cols = buildColumns(this.quest.steps);
 		const sel = getSelectedTask(this.quest, cols, this.selection);
 		if (!sel) return;
 		this.mode = "detail";
@@ -702,7 +702,7 @@ export class QuestKanban {
 			}
 			// Retry failed task
 			if (data === "r" && this.actions.onRetryTask) {
-				const cols = buildColumns(this.quest.tasks);
+				const cols = buildColumns(this.quest.steps);
 				const sel = getSelectedTask(this.quest, cols, this.selection);
 				if (sel && sel.task.status === "failed") {
 					this.actions.onRetryTask(sel.index);
@@ -768,7 +768,7 @@ export class QuestKanban {
 			this.actions.onApprove();
 			return;
 		}
-		const cols = buildColumns(this.quest.tasks);
+		const cols = buildColumns(this.quest.steps);
 		let moved = false;
 		if (matchesKey(data, Key.left)) {
 			const next = moveSelection(this.selection, cols, "left");
@@ -804,23 +804,23 @@ export class QuestKanban {
 		if (this.cachedLines && this.cachedWidth === width) return this.cachedLines;
 
 		const theme = this.theme;
-		const cols = buildColumns(this.quest.tasks);
+		const cols = buildColumns(this.quest.steps);
 		const layout = resolveMaxRows(computeLayout(width), cols);
 		const { colWidth, gap, maxRows } = layout;
 
-		const totalTasks = cols.reduce((sum, c) => sum + c.tasks.length, 0);
+		const totalSteps = cols.reduce((sum, c) => sum + c.steps.length, 0);
 
 		const lines: string[] = [];
 
 		// ── Header ──
 		const title = `Quest: ${this.quest.name}`;
 		lines.push(theme.fg("accent", theme.bold(title)));
-		const statusLine = buildStatusLine(this.quest, this.quest.tasks);
+		const statusLine = buildStatusLine(this.quest, this.quest.steps);
 		lines.push(theme.fg("dim", `  ${statusLine}`));
 		lines.push("");
 
-		if (totalTasks === 0) {
-			lines.push(theme.fg("muted", "  No tasks yet. Create a plan with quest_plan."));
+		if (totalSteps === 0) {
+			lines.push(theme.fg("muted", "  No steps yet. Create a plan with quest_plan."));
 			lines.push("");
 			lines.push(theme.fg("dim", "esc close"));
 			this.cachedWidth = width;
@@ -831,7 +831,7 @@ export class QuestKanban {
 		// Header row
 		const headerLine = cols
 			.map((c, ci) => {
-				const hdr = ` ${c.title} (${c.tasks.length}) `;
+				const hdr = ` ${c.title} (${c.steps.length}) `;
 				const padded = hdr.padEnd(colWidth).slice(0, colWidth);
 				const colored = theme.fg(c.color, padded);
 				return ci === this.selectedCol ? theme.bg("selectedBg", colored) : colored;
@@ -842,19 +842,19 @@ export class QuestKanban {
 		const sep = cols.map(() => "─".repeat(colWidth)).join(" ".repeat(gap));
 		lines.push(theme.fg("dim", sep));
 
-		// Task rows
+		// Step rows
 		for (let r = 0; r < maxRows; r++) {
 			const rowParts = cols.map((c, ci) => {
-				const task = c.tasks[r];
+				const task = c.steps[r];
 				const isSelected = ci === this.selectedCol && r === this.selectedRow;
-				return renderCell(c, task, r, isSelected, this.quest.tasks, theme, colWidth);
+				return renderCell(c, task, r, isSelected, this.quest.steps, theme, colWidth);
 			});
 			lines.push(rowParts.join(" ".repeat(gap)));
 		}
 
 		lines.push("");
 		const actionHints = buildActionHints(this.quest, this.actions);
-		const footerLine = "←→ columns  ↑↓ tasks  enter detail  ? help  esc close";
+		const footerLine = "←→ columns  ↑↓ steps  enter detail  ? help  esc close";
 		lines.push(theme.fg("dim", footerLine));
 		if (actionHints) {
 			lines.push(theme.fg("dim", `  ${actionHints}`));
@@ -867,16 +867,16 @@ export class QuestKanban {
 
 	private renderDetail(width: number): string[] {
 		const theme = this.theme;
-		const cols = buildColumns(this.quest.tasks);
+		const cols = buildColumns(this.quest.steps);
 		const sel = getSelectedTask(this.quest, cols, this.selection);
 
 		// ── Empty state ──
 		if (!sel) {
 			const lines: string[] = [];
-			lines.push(theme.fg("accent", theme.bold("Task Detail")));
+			lines.push(theme.fg("accent", theme.bold("Step Detail")));
 			lines.push("");
-			lines.push(theme.fg("muted", "  No task selected."));
-			lines.push(theme.fg("muted", "  Return to the board and select a task with arrow keys."));
+			lines.push(theme.fg("muted", "  No step selected."));
+			lines.push(theme.fg("muted", "  Return to the board and select a step with arrow keys."));
 			lines.push("");
 			lines.push(theme.fg("dim", "esc back to board"));
 			return lines;
@@ -896,7 +896,7 @@ export class QuestKanban {
 		const end = Math.min(start + bodyWindow, allLines.length);
 
 		// ── Title bar ──
-		const title = truncate(`Task #${index + 1}: ${task.content}`, width - 2);
+		const title = truncate(`Step #${index + 1}: ${task.content}`, width - 2);
 		result.push(theme.fg("accent", theme.bold(`  ${title}`)));
 		result.push("");
 

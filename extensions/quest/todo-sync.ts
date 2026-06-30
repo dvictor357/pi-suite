@@ -1,13 +1,13 @@
 import { basename } from "node:path";
 import { readJSON, writeJSON, updateJSON, loadProjectMemory } from "./utils";
 import { SESSION_META_PATH, todoListPath as todoPath } from "../../core";
-import type { Quest, QuestTask, SyncedTodoItem, SyncedTodoList } from "./types";
+import type { Quest, QuestStep, SyncedTodoItem, SyncedTodoList } from "./types";
 
 export { todoPath };
 
 export function questTaskToTodo(
 	quest: Quest,
-	task: QuestTask,
+	task: QuestStep,
 	index: number,
 	previous?: SyncedTodoItem,
 ): SyncedTodoItem {
@@ -21,7 +21,7 @@ export function questTaskToTodo(
 				? "completed"
 				: "pending";
 	const result = failed
-		? `[failed] ${task.result ?? task.verifyResult ?? "Task failed"}`
+		? `[failed] ${task.result ?? task.verifyResult ?? "Step failed"}`
 		: (task.result ?? undefined);
 
 	return {
@@ -52,7 +52,7 @@ export function syncQuestToTodo(quest: Quest, cwd: string): void {
 		const nonQuestItems = existingItems.filter(
 			(item) => item?.source !== "quest" && !item?.content?.startsWith("[Quest]"),
 		);
-		const questItems = quest.tasks.map((task, index) =>
+		const questItems = quest.steps.map((task, index) =>
 			questTaskToTodo(quest, task, index, previousQuestItems.get(index)),
 		);
 		const next: SyncedTodoList = {

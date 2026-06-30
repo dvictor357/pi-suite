@@ -7,10 +7,10 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createQuestRuntime } from "./runtime";
 import { emptyQuest, saveQuest } from "./storage";
-import type { Quest, QuestTask } from "./types";
+import type { Quest, QuestStep } from "./types";
 
-/** A QuestTask with all required fields defaulted; override what a test cares about. */
-function makeTask(partial: Partial<QuestTask>): QuestTask {
+/** A QuestStep with all required fields defaulted; override what a test cares about. */
+function makeTask(partial: Partial<QuestStep>): QuestStep {
 	return {
 		content: "do the thing",
 		status: "pending",
@@ -54,19 +54,19 @@ function fakeRuntime() {
 function seedActive(
 	rt: ReturnType<typeof fakeRuntime>["rt"],
 	cwd: string,
-	tasks: QuestTask[],
+	steps: QuestStep[],
 ): Quest {
 	const quest = emptyQuest("Demo", "demo goal");
 	quest.status = "active";
 	quest.planApproved = true;
-	quest.tasks = tasks;
+	quest.steps = steps;
 	saveQuest(quest, cwd);
 	rt.setQuest(quest);
 	return quest;
 }
 
 describe("fireNextTask", () => {
-	test("fires the first eligible pending task and steers exactly once", () => {
+	test("fires the first eligible pending step and steers exactly once", () => {
 		const h = fakeRuntime();
 		try {
 			const quest = seedActive(h.rt, h.cwd, [makeTask({ content: "first" })]);
@@ -74,10 +74,10 @@ describe("fireNextTask", () => {
 			const fired = h.rt.fireNextTask(h.ctx);
 
 			assert.equal(fired, true);
-			assert.equal(quest.tasks[0].status, "running");
-			assert.equal(quest.tasks[0].attempts, 1);
-			assert.equal(quest.lastFiredTaskIndex, 0);
-			assert.equal(quest.tasksSincePause, 1);
+			assert.equal(quest.steps[0].status, "running");
+			assert.equal(quest.steps[0].attempts, 1);
+			assert.equal(quest.lastFiredStepIndex, 0);
+			assert.equal(quest.stepsSincePause, 1);
 			assert.equal(h.steers.length, 1);
 			assert.match(h.steers[0], /first/);
 		} finally {
@@ -85,7 +85,7 @@ describe("fireNextTask", () => {
 		}
 	});
 
-	test("is a no-op once the task is running — no double fire", () => {
+	test("is a no-op once the step is running — no double fire", () => {
 		const h = fakeRuntime();
 		try {
 			// task1 depends on task0, so after task0 fires there is nothing eligible.

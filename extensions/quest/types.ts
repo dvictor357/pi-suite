@@ -1,12 +1,12 @@
 export type QuestStatus = "planning" | "active" | "paused" | "done" | "idle";
-export type TaskStatus = "pending" | "running" | "verifying" | "done" | "failed" | "skipped";
+export type StepStatus = "pending" | "running" | "verifying" | "done" | "failed" | "skipped";
 
-export interface QuestTask {
+export interface QuestStep {
 	content: string;
-	status: TaskStatus;
+	status: StepStatus;
 	agent: string;
 	/**
-	 * Model the orchestrator assigned to this task's sub-agent, once the user has
+	 * Model the orchestrator assigned to this step's sub-agent, once the user has
 	 * approved it via `quest_assign_model`. Empty/undefined means "use the harness
 	 * default for this agent role". Stored as the registry/harness model id.
 	 */
@@ -23,12 +23,18 @@ export interface QuestTask {
 	commitHash: string | null;
 	branchName: string | null;
 	/**
-	 * Per-task sandbox overrides. When present, these tighten (but never loosen)
+	 * Per-step sandbox overrides. When present, these tighten (but never loosen)
 	 * the quest-level {@link SandboxPolicy}. Absent/undefined means "inherit
 	 * quest policy as-is".
 	 */
 	sandbox?: SandboxOverrides;
 }
+
+/** @deprecated Use QuestStep. */
+export type QuestTask = QuestStep;
+
+/** @deprecated Use StepStatus. */
+export type TaskStatus = StepStatus;
 
 export interface GitIntegration {
 	autoCommit: boolean;
@@ -42,10 +48,24 @@ export interface Quest {
 	name: string;
 	goal: string;
 	status: QuestStatus;
-	tasks: QuestTask[];
-	tasksSincePause: number;
-	lastFiredTaskIndex: number;
-	sameTaskCount: number;
+	steps: QuestStep[];
+	/**
+	 * Legacy mirror for downgrade compatibility. New code treats {@link steps} as
+	 * canonical, but persists this field during the transition so older releases
+	 * can still read active/archive quest files.
+	 *
+	 * @deprecated Use steps.
+	 */
+	tasks?: QuestStep[];
+	stepsSincePause: number;
+	lastFiredStepIndex: number;
+	sameStepCount: number;
+	/** @deprecated Use stepsSincePause. */
+	tasksSincePause?: number;
+	/** @deprecated Use lastFiredStepIndex. */
+	lastFiredTaskIndex?: number;
+	/** @deprecated Use sameStepCount. */
+	sameTaskCount?: number;
 	pauseReason: string | null;
 	conventions: string[];
 	team?: string;
@@ -61,7 +81,9 @@ export interface Quest {
 	 */
 	sandbox?: SandboxPolicy;
 	commits: {
-		taskIndex: number;
+		stepIndex: number;
+		/** @deprecated Use stepIndex. */
+		taskIndex?: number;
 		hash: string;
 		message: string;
 		branch?: string;
@@ -101,7 +123,7 @@ export interface TeamConfig {
  *   sub-agent runs with guarded tool definitions (see sandbox-guard.ts), plus
  *   read-only role scoping. Prompt constraints and verifier checks are advisory
  *   on top. Not OS-level isolation.
- * - `"isolated"` — restricted mode plus worktree metadata for task isolation;
+ * - `"isolated"` — restricted mode plus worktree metadata for step isolation;
  *   worktrees are planned/recorded but not created or removed automatically.
  */
 export type SandboxMode = "none" | "restricted" | "isolated";
@@ -158,17 +180,17 @@ export interface SandboxPolicy {
 }
 
 /**
- * Per-task sandbox overrides stored on {@link QuestTask.sandbox}.
+ * Per-step sandbox overrides stored on {@link QuestStep.sandbox}.
  *
- * A task may tighten (restrict further) the quest-level policy but never loosen
+ * A step may tighten (restrict further) the quest-level policy but never loosen
  * it. Absent/undefined means "inherit quest policy as-is". When present, the
- * resolved profile is the intersection of quest policy and task overrides —
+ * resolved profile is the intersection of quest policy and step overrides —
  * always at least as restrictive as the quest-level policy.
  */
 export interface SandboxOverrides {
 	/**
 	 * Override the sandbox mode. Can only escalate: "none" → "restricted" →
-	 * "isolated". A task can never de-escalate the quest-level mode.
+	 * "isolated". A step can never de-escalate the quest-level mode.
 	 */
 	mode?: SandboxMode;
 	/** Additional allowed path globs (intersect with quest-level). */

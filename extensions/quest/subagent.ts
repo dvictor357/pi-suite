@@ -35,7 +35,7 @@ export interface SubAgentRequest {
 	role: string;
 	/** The resolved model the sub-agent runs with. */
 	model: Model<any>;
-	/** Fully-formed instruction sent to the sub-agent (persona + task + context). */
+	/** Fully-formed instruction sent to the sub-agent (persona + step + context). */
 	prompt: string;
 	/**
 	 * Pre-computed tool allowlist for the non-sandbox path. Ignored when

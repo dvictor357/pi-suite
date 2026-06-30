@@ -7,7 +7,7 @@ import {
 	nextVerifyAttempt,
 	parseVerifyOutcome,
 } from "./verifier";
-import type { QuestTask } from "./types";
+import type { QuestStep } from "./types";
 import type { SandboxProfile } from "./sandbox";
 
 // ── shouldVerify ────────────────────────────────────────────────────────────
@@ -217,7 +217,7 @@ describe("buildSandboxComplianceChecks", () => {
 // ── buildVerificationPrompt with sandbox ────────────────────────────────────
 
 describe("buildVerificationPrompt with sandbox", () => {
-	const baseTask: QuestTask = {
+	const baseTask: QuestStep = {
 		content: "Add user auth",
 		status: "verifying",
 		agent: "worker",

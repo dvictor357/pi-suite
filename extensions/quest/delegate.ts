@@ -173,7 +173,7 @@ export function buildSubAgentPrompt(opts: {
 		lines.push(opts.persona.trim(), ``, `---`, ``);
 	}
 	lines.push(
-		`You are a "${opts.role}" sub-agent. Complete exactly this task — nothing more — and report back concisely.`,
+		`You are a "${opts.role}" sub-agent. Complete exactly this step — nothing more — and report back concisely.`,
 		``,
 		`## Task`,
 		opts.content,

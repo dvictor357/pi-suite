@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { QuestTask } from "./types";
+import type { QuestStep } from "./types";
 
 export const CODEBASE_CACHE_PATH = ".pi/codebase-index.json";
 
@@ -76,7 +76,7 @@ export interface CodebaseMapResult extends CodebaseQueryResult {
 
 export interface PlanningEnrichmentResult {
 	cache: CodebaseLoadResult;
-	enrichedTasks: QuestTask[];
+	enrichedTasks: QuestStep[];
 	summary: string;
 }
 
@@ -231,16 +231,16 @@ export function deriveCodebasePatterns(text: string, limit = 5): string[] {
 }
 
 export function enrichPlanningContext(
-	tasks: QuestTask[],
+	steps: QuestStep[],
 	goal: string,
 	cwd: string,
 ): PlanningEnrichmentResult {
 	const cache = loadCodebaseIndex(cwd);
 	if (cache.status !== "ok") {
-		return { cache, enrichedTasks: tasks, summary: codebaseStatusSummary(cache) };
+		return { cache, enrichedTasks: steps, summary: codebaseStatusSummary(cache) };
 	}
 
-	const enrichedTasks = tasks.map((task) => {
+	const enrichedTasks = steps.map((task) => {
 		const patterns = deriveCodebasePatterns(`${task.content}\n${task.context}\n${goal}`, 4);
 		const relevant = uniqueByPath(
 			patterns.flatMap((pattern) => queryCodebaseIndex(cache.index, pattern, 3)),
@@ -256,11 +256,11 @@ export function enrichPlanningContext(
 		return { ...task, context: `${task.context}\n\n${block}` };
 	});
 
-	const enrichedCount = enrichedTasks.filter((task, i) => task.context !== tasks[i].context).length;
+	const enrichedCount = enrichedTasks.filter((task, i) => task.context !== steps[i].context).length;
 	return {
 		cache,
 		enrichedTasks,
-		summary: `Codebase intelligence: enriched ${enrichedCount}/${tasks.length} task contexts from ${CODEBASE_CACHE_PATH} (${cache.index.fileCount} indexed files).`,
+		summary: `Codebase intelligence: enriched ${enrichedCount}/${steps.length} step contexts from ${CODEBASE_CACHE_PATH} (${cache.index.fileCount} indexed files).`,
 	};
 }
 
@@ -274,7 +274,7 @@ export function buildVerificationImpactContext(cwd: string, text: string): strin
 	const cache = loadCodebaseIndex(cwd);
 	const files = extractFilePaths(text);
 	if (!files.length) {
-		return 'Codebase impact: no changed file paths detected in the task result. If files changed, run codebase(operation="impact", file=...) for each changed file.';
+		return 'Codebase impact: no changed file paths detected in the step result. If files changed, run codebase(operation="impact", file=...) for each changed file.';
 	}
 
 	const toolPrompt = [
@@ -300,7 +300,7 @@ export function codebaseStatusSummary(cache: CodebaseLoadResult): string {
 		case "ok":
 			return `Codebase cache ready: ${cache.index.fileCount} files, scanned ${new Date(cache.index.scannedAt).toISOString()}.`;
 		case "missing":
-			return `Codebase cache missing at ${CODEBASE_CACHE_PATH}. If available, run codebase(operation=\"scan\") before planning large code tasks.`;
+			return `Codebase cache missing at ${CODEBASE_CACHE_PATH}. If available, run codebase(operation=\"scan\") before planning large code steps.`;
 		case "future":
 			return `Codebase cache contractVersion ${cache.contractVersion} is newer than supported ${SUPPORTED_CODEBASE_CONTRACT_VERSION}; ignoring direct cache fallback.`;
 		case "unsupported":

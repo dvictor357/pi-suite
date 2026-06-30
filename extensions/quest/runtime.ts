@@ -17,9 +17,9 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 
-import type { Quest, QuestTask } from "./types";
+import type { Quest, QuestStep } from "./types";
 import { loadQuest, saveQuest } from "./storage";
-import { buildSteeringMessage, nextPendingTask } from "./steering";
+import { buildSteeringMessage, nextPendingStep } from "./steering";
 import { RunLedger, EvalLog } from "../../core";
 import type { RunEvent, EvalEntry } from "../../core";
 import { loadTeams, ensureBuiltInTeams } from "./teams";
@@ -44,7 +44,7 @@ export interface QuestRuntime {
 	setQuest(quest: Quest | null): void;
 	/**
 	 * The canonical save path — persists the quest, caches it, refreshes the
-	 * status badge, writes session-meta, and syncs tasks into pi-todo.
+	 * status badge, writes session-meta, and syncs steps into pi-todo.
 	 */
 	persist(ctx: ExtensionContext, quest: Quest): void;
 
@@ -52,17 +52,17 @@ export interface QuestRuntime {
 	isAutoPilotLocked(): boolean;
 	setAutoPilotLocked(locked: boolean): void;
 
-	// ── Task firing ──────────────────────────────────────────────────────────────
+	// ── Step firing ──────────────────────────────────────────────────────────────
 	/**
-	 * Steer the agent into a specific task: mark it running, bump bookkeeping,
+	 * Steer the agent into a specific step: mark it running, bump bookkeeping,
 	 * persist, and deliver the steering message under the auto-pilot lock. This is
-	 * the single code path that starts a task — shared by the `agent_end` auto-pilot
+	 * the single code path that starts a step — shared by the `agent_end` auto-pilot
 	 * and by the command/kanban handlers that need an initial kick.
 	 */
-	fireTask(ctx: ExtensionContext, quest: Quest, task: QuestTask, index: number): void;
+	fireStep(ctx: ExtensionContext, quest: Quest, step: QuestStep, index: number): void;
 	/**
-	 * Fire the next eligible pending task of the active cached quest, if any.
-	 * Returns whether a task was fired. Safe to call when idle: slash commands and
+	 * Fire the next eligible pending step of the active cached quest, if any.
+	 * Returns whether a step was fired. Safe to call when idle: slash commands and
 	 * kanban actions use this to start work immediately instead of waiting for the
 	 * next `agent_end` (which a slash command never produces on its own).
 	 */
@@ -75,7 +75,7 @@ export interface QuestRuntime {
 	recordEval(cwd: string, entry: EvalEntry): void;
 	makeEval(
 		quest: Quest,
-		task: Quest["tasks"][0],
+		step: QuestStep,
 		index: number,
 		status: "done" | "failed" | "skipped",
 		verified: boolean,
@@ -87,7 +87,7 @@ export interface QuestRuntime {
 	textResult(s: string): { content: { type: "text"; text: string }[]; details: object };
 	/** Whether a `codebase` tool is currently registered (active or all). */
 	codebaseToolAvailable(): boolean;
-	/** Stamp an approved model onto a task and persist, when a valid index is given. */
+	/** Stamp an approved model onto a step and persist, when a valid index is given. */
 	stampTaskModel(
 		quest: Quest | null,
 		taskIndex: number | undefined,
@@ -156,7 +156,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 
 	function makeEval(
 		quest: Quest,
-		task: Quest["tasks"][0],
+		step: QuestStep,
 		index: number,
 		status: "done" | "failed" | "skipped",
 		verified: boolean,
@@ -166,16 +166,16 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 			quest: quest.name,
 			questSlug: questSlug(quest.name),
 			taskIndex: index,
-			taskContent: task.content,
-			agent: task.agent,
-			model: task.model,
+			taskContent: step.content,
+			agent: step.agent,
+			model: step.model,
 			status,
 			verified,
 			verifyEvidence: evidence ?? null,
-			durationMs: task.startedAt ? (task.completedAt ?? Date.now()) - task.startedAt : 0,
+			durationMs: step.startedAt ? (step.completedAt ?? Date.now()) - step.startedAt : 0,
 			tokensIn: 0,
 			tokensOut: 0,
-			attempts: task.attempts,
+			attempts: step.attempts,
 			timestamp: Date.now(),
 		};
 	}
@@ -188,17 +188,17 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		syncQuestToTodo(quest, ctx.cwd);
 	}
 
-	function fireTask(ctx: ExtensionContext, quest: Quest, task: QuestTask, index: number): void {
-		task.status = "running";
-		task.attempts++;
-		if (!task.startedAt) task.startedAt = Date.now();
-		quest.lastFiredTaskIndex = index;
-		quest.tasksSincePause++;
+	function fireStep(ctx: ExtensionContext, quest: Quest, step: QuestStep, index: number): void {
+		step.status = "running";
+		step.attempts++;
+		if (!step.startedAt) step.startedAt = Date.now();
+		quest.lastFiredStepIndex = index;
+		quest.stepsSincePause++;
 		persist(ctx, quest);
 
 		autoPilotLocked = true;
 		try {
-			pi.sendUserMessage(buildSteeringMessage(quest, task, index, ctx.cwd), {
+			pi.sendUserMessage(buildSteeringMessage(quest, step, index, ctx.cwd), {
 				deliverAs: "steer",
 			});
 		} finally {
@@ -209,9 +209,9 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 	function fireNextTask(ctx: ExtensionContext): boolean {
 		const quest = getQuest(ctx.cwd);
 		if (!quest || quest.status !== "active") return false;
-		const next = nextPendingTask(quest);
+		const next = nextPendingStep(quest);
 		if (!next) return false;
-		fireTask(ctx, quest, next.task, next.index);
+		fireStep(ctx, quest, next.task, next.index);
 		return true;
 	}
 
@@ -235,8 +235,8 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		ctx: ExtensionContext,
 	): void {
 		if (!quest || taskIndex === undefined) return;
-		if (taskIndex < 0 || taskIndex >= quest.tasks.length) return;
-		quest.tasks[taskIndex].model = modelId;
+		if (taskIndex < 0 || taskIndex >= quest.steps.length) return;
+		quest.steps[taskIndex].model = modelId;
 		persist(ctx, quest);
 	}
 
@@ -245,7 +245,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 			const fromTeam = loadTeams()[team]?.agents?.find((a) => a.name === role)?.markdown;
 			if (fromTeam?.trim()) return fromTeam;
 		}
-		// Guard against path traversal — role comes from task data, not a constant.
+		// Guard against path traversal — role comes from step data, not a constant.
 		if (!/^[a-zA-Z0-9_-]+$/.test(role)) return undefined;
 		const file = join(homedir(), ".pi", "agent", "agents", `${role}.md`);
 		try {
@@ -271,8 +271,8 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 				if (!q || q.status !== "active") return;
 				q.status = "paused";
 				q.pauseReason = "Paused via board.";
-				q.lastFiredTaskIndex = -1;
-				q.sameTaskCount = 0;
+				q.lastFiredStepIndex = -1;
+				q.sameStepCount = 0;
 				persist(ctx, q);
 				ctx.ui.notify?.(`Quest "${q.name}" paused. r to resume.`, "info");
 			},
@@ -280,9 +280,9 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 				const q = getQuest(ctx.cwd);
 				if (!q || q.status !== "paused") return;
 				q.status = "active";
-				q.tasksSincePause = 0;
-				q.lastFiredTaskIndex = -1;
-				q.sameTaskCount = 0;
+				q.stepsSincePause = 0;
+				q.lastFiredStepIndex = -1;
+				q.sameStepCount = 0;
 				q.pauseReason = null;
 				persist(ctx, q);
 				ctx.ui.notify?.(`Quest "${q.name}" resumed.`, "info");
@@ -292,33 +292,33 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 				const q = getQuest(ctx.cwd);
 				if (!q) return;
 				if (q.status === "active") return;
-				if (q.tasks.length === 0) return;
+				if (q.steps.length === 0) return;
 				if (q.planningMode === "approve" && !q.planApproved) {
 					ctx.ui.notify?.("Approval required. Use 'a' to approve the plan first.", "warning");
 					return;
 				}
 				q.status = "active";
-				q.tasksSincePause = 0;
-				q.lastFiredTaskIndex = -1;
-				q.sameTaskCount = 0;
+				q.stepsSincePause = 0;
+				q.lastFiredStepIndex = -1;
+				q.sameStepCount = 0;
 				q.pauseReason = null;
 				persist(ctx, q);
-				ctx.ui.notify?.(`Quest "${q.name}" started — ${q.tasks.length} tasks.`, "info");
+				ctx.ui.notify?.(`Quest "${q.name}" started — ${q.steps.length} steps.`, "info");
 				fireNextTask(ctx);
 			},
 			onApprove: () => {
 				const q = getQuest(ctx.cwd);
-				if (!q || q.planApproved || q.tasks.length === 0) return;
+				if (!q || q.planApproved || q.steps.length === 0) return;
 				if (q.planningMode !== "approve") return;
 				q.planApproved = true;
 				q.status = "active";
-				q.tasksSincePause = 0;
-				q.lastFiredTaskIndex = -1;
-				q.sameTaskCount = 0;
+				q.stepsSincePause = 0;
+				q.lastFiredStepIndex = -1;
+				q.sameStepCount = 0;
 				q.pauseReason = null;
 				persist(ctx, q);
 				ctx.ui.notify?.(
-					`Plan approved: "${q.name}" — ${q.tasks.length} tasks. Auto-pilot engaged.`,
+					`Plan approved: "${q.name}" — ${q.steps.length} steps. Auto-pilot engaged.`,
 					"info",
 				);
 				fireNextTask(ctx);
@@ -326,7 +326,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 			onRetryTask: (taskIndex: number) => {
 				const q = getQuest(ctx.cwd);
 				if (!q) return;
-				const task = q.tasks[taskIndex];
+				const task = q.steps[taskIndex];
 				if (!task || task.status !== "failed") return;
 				task.status = "pending";
 				task.attempts = 0;
@@ -334,7 +334,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 				task.completedAt = null;
 				task.result = null;
 				persist(ctx, q);
-				ctx.ui.notify?.(`Task #${taskIndex + 1} "${task.content}" reset for retry.`, "info");
+				ctx.ui.notify?.(`Step #${taskIndex + 1} "${task.content}" reset for retry.`, "info");
 			},
 		};
 	}
@@ -370,7 +370,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		setAutoPilotLocked: (locked: boolean) => {
 			autoPilotLocked = locked;
 		},
-		fireTask,
+		fireStep,
 		fireNextTask,
 		getLedgers,
 		ensureLedgers,

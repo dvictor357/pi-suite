@@ -115,14 +115,14 @@ test("toolsForRole returns a fresh array (no shared mutable state)", () => {
 	assert.ok(!toolsForRole("worker").includes("danger"));
 });
 
-test("resolveTaskModel precedence: task model wins", () => {
+test("resolveTaskModel precedence: step model wins", () => {
 	assert.deepEqual(resolveTaskModel({ taskModel: "gpt-5", rememberedModel: "claude-opus-4-5" }), {
 		model: "gpt-5",
 		needsPrompt: false,
 	});
 });
 
-test("resolveTaskModel precedence: remembered model when task has none", () => {
+test("resolveTaskModel precedence: remembered model when step has none", () => {
 	assert.deepEqual(resolveTaskModel({ rememberedModel: "claude-opus-4-5" }), {
 		model: "claude-opus-4-5",
 		needsPrompt: false,
@@ -183,7 +183,7 @@ test("buildSubAgentPrompt leads with the persona when provided", () => {
 		persona: "# Scout\nYou recon code without mutating it.",
 	});
 	assert.match(prompt, /^# Scout\nYou recon code without mutating it\.\n\n---/);
-	// persona precedes the role/task framing
+	// persona precedes the role/step framing
 	assert.ok(prompt.indexOf("# Scout") < prompt.indexOf('"scout" sub-agent'));
 });
 
