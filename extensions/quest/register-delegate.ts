@@ -8,6 +8,7 @@ import { loadTeams } from "./teams";
 import { matchModel, promptModelAssignment, toModelLike } from "./models";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { resolveSandboxProfile, sandboxToolsForRole } from "./sandbox";
+import { logDeprecatedParam } from "./deprecation";
 import { runSubAgent } from "./subagent";
 import type { QuestRuntime } from "./runtime";
 
@@ -20,8 +21,8 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 		description: [
 			"Assign a model to a sub-agent role for this project. As orchestrator you propose a model;",
 			"the user approves it or picks another from their configured models. The approved choice is",
-			"remembered in project memory (so the user is asked once per role) and, when taskIndex is given,",
-			"stamped onto that task. Call this before quest_delegate when a role has no model yet.",
+			"remembered in project memory (so the user is asked once per role) and, when stepIndex is given,",
+			"stamped onto that step. Call this before quest_delegate when a role has no model yet.",
 		].join(" "),
 		parameters: Type.Object({
 			role: Type.String({
@@ -35,13 +36,31 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				Type.String({ description: "Short rationale for proposing this model" }),
 			),
 			taskIndex: Type.Optional(
-				Type.Number({ description: "Also stamp the approved model onto this step (0-based)" }),
+				Type.Number({
+					description:
+						"Also stamp the approved model onto this step (0-based) — legacy, prefer stepIndex",
+				}),
+			),
+			stepIndex: Type.Optional(
+				Type.Number({
+					description: "Also stamp the approved model onto this step (0-based)",
+				}),
 			),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			const quest = getQuest(ctx.cwd);
 			const role = params.role.trim();
 			if (!role) return textResult("Role is required.");
+
+			const index = params.stepIndex ?? params.taskIndex;
+			if (params.taskIndex !== undefined && params.stepIndex === undefined) {
+				logDeprecatedParam(
+					"quest_assign_model",
+					params as Record<string, unknown>,
+					"taskIndex",
+					"stepIndex",
+				);
+			}
 
 			if (!ctx.hasUI) {
 				const available = ctx.modelRegistry.getAvailable().map(toModelLike);
@@ -57,7 +76,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					reason: params.reason,
 					timestamp: Date.now(),
 				});
-				stampTaskModel(quest, params.taskIndex, matched.id, ctx);
+				stampTaskModel(quest, index, matched.id, ctx);
 				return {
 					content: [
 						{
@@ -98,7 +117,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				reason: params.reason,
 				timestamp: Date.now(),
 			});
-			stampTaskModel(quest, params.taskIndex, m.id, ctx);
+			stampTaskModel(quest, index, m.id, ctx);
 			return {
 				content: [
 					{
@@ -279,87 +298,111 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 		},
 	});
 
+	// quest_task_detail — legacy name, kept for backward compatibility
+	const detailParams = Type.Object({
+		index: Type.Number({ description: "Step index (0-based)" }),
+	});
+	const detailExecute = async (
+		_id: string,
+		params: { index: number },
+		_signal: unknown,
+		_onUpdate: unknown,
+		ctx: import("@earendil-works/pi-coding-agent").ExtensionContext,
+	) => {
+		const quest = getQuest(ctx.cwd);
+		if (!quest) {
+			return {
+				content: [{ type: "text" as const, text: "No active quest." }],
+				details: {},
+			};
+		}
+		if (params.index < 0 || params.index >= quest.steps.length) {
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: `Invalid step index ${params.index}. Valid: 0-${quest.steps.length - 1}.`,
+					},
+				],
+				details: {},
+			};
+		}
+		const t = quest.steps[params.index];
+		const deps = t.dependencies.length
+			? t.dependencies.map((d) => `#${d + 1} ${quest.steps[d].content}`).join(", ")
+			: "none";
+		const time = t.startedAt
+			? `${Math.round(((t.completedAt ?? Date.now()) - t.startedAt) / 1000)}s`
+			: "not started";
+		const lines = [
+			`## Step #${params.index + 1}: ${t.content}`,
+			``,
+			`**Status:** ${t.status}  |  **Agent:** ${t.agent}  |  **Attempts:** ${t.attempts}`,
+			`**Dependencies:** ${deps}`,
+			`**Timing:** ${time}${t.completedAt ? ` (completed)` : ""}`,
+			``,
+			`**Context:**`,
+			t.context,
+		];
+		if (t.result) {
+			lines.push(``, `**Result:**`, t.result);
+		}
+		if (t.verified) {
+			lines.push(``, `**Verification:** ✅ ${t.verifyResult || "passed"}`);
+		} else if (t.status === "verifying") {
+			lines.push(``, `**Verification:** 🔍 in progress (retries: ${t.verifyRetries})`);
+		}
+		if (t.commitHash) {
+			lines.push(
+				``,
+				`**Commit:** \`${t.commitHash.slice(0, 8)}\`${t.branchName ? ` on ${t.branchName}` : ""}`,
+			);
+		}
+		if (quest.sandbox || t.sandbox) {
+			const mode = t.sandbox?.mode || quest.sandbox?.mode;
+			const sandboxLines: string[] = [];
+			if (mode) {
+				sandboxLines.push(`**Sandbox:** ${mode} 🔒`);
+			}
+			if (t.sandbox?.mode) {
+				sandboxLines.push(`  Step override: +${t.sandbox.mode}`);
+			}
+			if (quest.sandbox?.worktree?.path) {
+				sandboxLines.push(`  Worktree: ${quest.sandbox.worktree.path}`);
+			}
+			if (quest.sandbox?.allowedPaths?.length) {
+				sandboxLines.push(`  Allowed paths: ${quest.sandbox.allowedPaths.join(", ")}`);
+			}
+			if (sandboxLines.length > 0) {
+				lines.push(``, ...sandboxLines);
+			}
+		}
+		return {
+			content: [{ type: "text" as const, text: lines.join("\n") }],
+			details: { step: t, index: params.index },
+		};
+	};
+
 	pi.registerTool({
 		name: "quest_task_detail",
 		label: "Quest Step Detail",
 		description:
 			"Get full details for a specific step including context, result, attempts, timing, and verification status.",
-		parameters: Type.Object({
-			index: Type.Number({ description: "Step index (0-based)" }),
-		}),
+		parameters: detailParams,
 		async execute(_id, params, _signal, _onUpdate, ctx) {
-			const quest = getQuest(ctx.cwd);
-			if (!quest) {
-				return {
-					content: [{ type: "text", text: "No active quest." }],
-					details: {},
-				};
-			}
-			if (params.index < 0 || params.index >= quest.steps.length) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Invalid step index ${params.index}. Valid: 0-${quest.steps.length - 1}.`,
-						},
-					],
-					details: {},
-				};
-			}
-			const t = quest.steps[params.index];
-			const deps = t.dependencies.length
-				? t.dependencies.map((d) => `#${d + 1} ${quest.steps[d].content}`).join(", ")
-				: "none";
-			const time = t.startedAt
-				? `${Math.round(((t.completedAt ?? Date.now()) - t.startedAt) / 1000)}s`
-				: "not started";
-			const lines = [
-				`## Step #${params.index + 1}: ${t.content}`,
-				``,
-				`**Status:** ${t.status}  |  **Agent:** ${t.agent}  |  **Attempts:** ${t.attempts}`,
-				`**Dependencies:** ${deps}`,
-				`**Timing:** ${time}${t.completedAt ? ` (completed)` : ""}`,
-				``,
-				`**Context:**`,
-				t.context,
-			];
-			if (t.result) {
-				lines.push(``, `**Result:**`, t.result);
-			}
-			if (t.verified) {
-				lines.push(``, `**Verification:** ✅ ${t.verifyResult || "passed"}`);
-			} else if (t.status === "verifying") {
-				lines.push(``, `**Verification:** 🔍 in progress (retries: ${t.verifyRetries})`);
-			}
-			if (t.commitHash) {
-				lines.push(
-					``,
-					`**Commit:** \`${t.commitHash.slice(0, 8)}\`${t.branchName ? ` on ${t.branchName}` : ""}`,
-				);
-			}
-			if (quest.sandbox || t.sandbox) {
-				const mode = t.sandbox?.mode || quest.sandbox?.mode;
-				const sandboxLines: string[] = [];
-				if (mode) {
-					sandboxLines.push(`**Sandbox:** ${mode} 🔒`);
-				}
-				if (t.sandbox?.mode) {
-					sandboxLines.push(`  Step override: +${t.sandbox.mode}`);
-				}
-				if (quest.sandbox?.worktree?.path) {
-					sandboxLines.push(`  Worktree: ${quest.sandbox.worktree.path}`);
-				}
-				if (quest.sandbox?.allowedPaths?.length) {
-					sandboxLines.push(`  Allowed paths: ${quest.sandbox.allowedPaths.join(", ")}`);
-				}
-				if (sandboxLines.length > 0) {
-					lines.push(``, ...sandboxLines);
-				}
-			}
-			return {
-				content: [{ type: "text", text: lines.join("\n") }],
-				details: { task: t, index: params.index },
-			};
+			return detailExecute(_id, params, _signal, _onUpdate, ctx);
+		},
+	});
+
+	// quest_step_detail — canonical name
+	pi.registerTool({
+		name: "quest_step_detail",
+		label: "Quest Step Detail",
+		description:
+			"Get full details for a specific step including context, result, attempts, timing, and verification status.",
+		parameters: detailParams,
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			return detailExecute(_id, params, _signal, _onUpdate, ctx);
 		},
 	});
 

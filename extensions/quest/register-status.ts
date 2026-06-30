@@ -5,6 +5,7 @@ import { ensureBuiltInTeams, loadTeams } from "./teams";
 import { formatQuestStatus } from "./steering";
 import { listArchives, saveQuest } from "./storage";
 import { renderStatus, writeQuestSessionMeta } from "./status";
+import { logDeprecatedParam } from "./deprecation";
 import type { QuestRuntime } from "./runtime";
 
 export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
@@ -41,14 +42,22 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 		name: "quest_commit",
 		label: "Quest Commit",
 		description: [
-			"Record a git commit as a deliverable for a completed quest task.",
-			"Use this after committing code changes for a specific task.",
+			"Record a git commit as a deliverable for a completed quest step.",
+			"Use this after committing code changes for a specific step.",
 			"Each commit is tracked and included in the quest's git summary.",
 		].join(" "),
 		parameters: Type.Object({
-			taskIndex: Type.Number({
-				description: "Step index (0-based) that this commit belongs to",
-			}),
+			taskIndex: Type.Optional(
+				Type.Number({
+					description:
+						"Step index (0-based) that this commit belongs to (legacy — prefer stepIndex)",
+				}),
+			),
+			stepIndex: Type.Optional(
+				Type.Number({
+					description: "Step index (0-based) that this commit belongs to",
+				}),
+			),
 			commitHash: Type.String({
 				description: "Git commit hash (short or full SHA)",
 			}),
@@ -58,6 +67,21 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 			),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const index = params.stepIndex ?? params.taskIndex;
+			if (params.taskIndex !== undefined && params.stepIndex === undefined) {
+				logDeprecatedParam(
+					"quest_commit",
+					params as Record<string, unknown>,
+					"taskIndex",
+					"stepIndex",
+				);
+			}
+			if (index === undefined) {
+				return {
+					content: [{ type: "text", text: "A step index (stepIndex) is required." }],
+					details: {},
+				};
+			}
 			const quest = getQuest(ctx.cwd);
 			if (!quest) {
 				return {
@@ -66,25 +90,25 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 				};
 			}
 
-			if (params.taskIndex < 0 || params.taskIndex >= quest.steps.length) {
+			if (index < 0 || index >= quest.steps.length) {
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Invalid step index ${params.taskIndex}. Valid: 0-${quest.steps.length - 1}.`,
+							text: `Invalid step index ${index}. Valid: 0-${quest.steps.length - 1}.`,
 						},
 					],
 					details: {},
 				};
 			}
 
-			const step = quest.steps[params.taskIndex];
+			const step = quest.steps[index];
 			step.commitHash = params.commitHash;
 			if (params.branchName) step.branchName = params.branchName;
 
 			quest.commits.push({
-				stepIndex: params.taskIndex,
-				taskIndex: params.taskIndex,
+				stepIndex: index,
+				taskIndex: index,
 				hash: params.commitHash,
 				message: params.commitMessage,
 				branch: params.branchName,
@@ -98,7 +122,7 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 					{
 						type: "text",
 						text: [
-							`📝 Commit recorded for step #${params.taskIndex + 1}: **${step.content}**`,
+							`📝 Commit recorded for step #${index + 1}: **${step.content}**`,
 							`  Hash: \`${params.commitHash.slice(0, 8)}\``,
 							`  Message: ${params.commitMessage}`,
 							params.branchName ? `  Branch: ${params.branchName}` : "",
@@ -110,7 +134,7 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 					},
 				],
 				details: {
-					taskIndex: params.taskIndex,
+					stepIndex: index,
 					commitHash: params.commitHash,
 					totalCommits: quest.commits.length,
 				},

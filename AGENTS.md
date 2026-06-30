@@ -6,7 +6,7 @@ You are working in `pi-suite`, a TypeScript package for pi. Use this file as you
 
 `pi-suite` ships three pi extensions that work together:
 
-- `pi-quest` plans work, delegates tasks to sub-agents, verifies results, and tracks quest progress.
+- `pi-quest` plans work, delegates steps to sub-agents, verifies results, and tracks quest progress.
 - `pi-todo` keeps a persistent task ledger for the current project.
 - `pi-memory` remembers project/user preferences and injects that context into future agent runs.
 
@@ -62,13 +62,13 @@ extensions/
     register-create.ts    quest_create, quest_decide
     register-planning.ts  quest_plan, quest_update, quest_approve
     register-status.ts    quest_status/commit/git_summary/team/history/memory_save
-    register-delegate.ts  quest_assign_model/delegate/abort/task_detail
+    register-delegate.ts  quest_assign_model/delegate/abort/task_detail/step_detail
     register-events.ts    agent_end auto-pilot, session_start, model_select, sandbox tool_call hook
     register-command.ts   /quest command + kanban board
     sandbox-guard.ts  evaluateToolCall: per-call block/allow decision (real enforcement)
     storage.ts        Quest load/save/archive; sync quest conventions + agent-model choices to memory
     todo-sync.ts      Sync quest tasks into pi-todo; build awareness block
-    steering.ts       Auto-pilot task selection and status formatting
+    steering.ts       Auto-pilot step selection and status formatting
     graph.ts          Dependency validation
     teams.ts          Built-in/user team configs
     models.ts         Pure model matching + user-approval dialog for sub-agent models
@@ -140,7 +140,7 @@ Quest is the autonomous project manager.
 Tools registered by quest:
 
 - `quest_create`, `quest_plan`, `quest_update`, `quest_approve`
-- `quest_status`, `quest_task_detail`, `quest_history`, `quest_abort`
+- `quest_status`, `quest_task_detail` / `quest_step_detail`, `quest_history`, `quest_abort`
 - `quest_commit`, `quest_git_summary`
 - `quest_team`, `quest_decide`, `quest_memory_save`
 - `quest_assign_model`, `quest_delegate` — orchestrator-driven sub-agent model assignment and isolated sub-agent spawn
@@ -148,7 +148,7 @@ Tools registered by quest:
 Sub-agent delegation (Path B) lives in three modules:
 
 - `models.ts` — pure model matching + `promptModelAssignment` (the user-approval dialog).
-- `delegate.ts` — pure, SDK-free decisions: role → tool scope, model precedence (`resolveTaskModel`), prompt building, output extraction.
+- `delegate.ts` — pure, SDK-free decisions: role → tool scope, model precedence (`resolveTaskModel`, legacy internal name), prompt building, output extraction.
 - `subagent.ts` — the only quest module that imports the SDK as a value (`createAgentSession`); kept out of every test path.
 
 Role → model choices approved by the user are remembered in project memory under `agentModels` (see `core/contract.ts` `AgentModelChoice`); `storage.ts` `loadAgentModels`/`rememberAgentModel` own that read/write. Team `modelHints` are advisory proposals only — the user always approves via `quest_assign_model`.
@@ -162,21 +162,26 @@ Command:
 The `/quest` and `/quest kanban` commands open a keyboard-driven kanban board
 (overlay). Keyboard shortcuts in board mode:
 
-- `← → ↑ ↓` Navigate columns and tasks; `Enter` open task detail
+- `← → ↑ ↓` Navigate columns and steps; `Enter` open step detail
 - `p` pause active quest; `r` resume paused quest
 - `s` start quest; `a` approve plan (approval mode only)
 - `?` / `h` toggle keyboard help overlay; `Esc` close kanban
 
-In task detail mode: `↑ ↓` scroll, `PgUp`/`PgDn` page, `Home`/`End` jump,
-`r` retry failed task, `Esc`/`Backspace` back to board.
+In step detail mode: `↑ ↓` scroll, `PgUp`/`PgDn` page, `Home`/`End` jump,
+`r` retry failed step, `Esc`/`Backspace` back to board.
 
 When editing quest:
 
 - Use `persist(ctx, quest)` for normal quest state changes. It saves the quest, updates UI status, writes session meta, and syncs to todo.
-- Keep quest task dependencies acyclic and within `MAX_DEPENDENCY_DEPTH`.
+- Keep quest step dependencies acyclic and within `MAX_DEPENDENCY_DEPTH`.
 - Quest-created todo items must keep `source: "quest"`, `sourceId`, and `sourceIndex`.
-- Syncing quest tasks to todo must not delete user-created todo items.
+- Syncing quest steps to todo must not delete user-created todo items.
 - Verification is expected to default on for new and legacy quests.
+
+**Terminology note (task → step rename):** Quest uses `steps` as the canonical term (e.g.
+`QuestStep`, `quest.steps`, `stepIndex`). The old `task`-named tools, parameters, and
+legacy mirrors (`quest.tasks`, `taskIndex`, `quest_task_detail`) remain accepted forever
+for backward compatibility. New code and docs prefer `step` naming.
 
 ### Todo extension
 
@@ -282,7 +287,7 @@ Add or update tests when you touch:
 
 1. Start in `extensions/quest/index.ts` for tool/command/event wiring.
 2. Put storage logic in `storage.ts`.
-3. Put task-selection logic in `steering.ts`.
+3. Put step-selection logic in `steering.ts`.
 4. Put dependency validation in `graph.ts`.
 5. Put todo handoff logic in `todo-sync.ts`.
 6. Use best-effort handoffs to todo/memory, and never clobber fields you do not own.

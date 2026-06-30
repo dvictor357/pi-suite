@@ -68,7 +68,7 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 								``,
 								`Plan this quest. Use subagent(agent="scout") to explore the codebase,`,
 								`then subagent(agent="planner") to create a step breakdown.`,
-								`Save the plan with **quest_plan(tasks=[...], autoStart=true)**.`,
+								`Save the plan with **quest_plan(steps=[...], autoStart=true)**.`,
 								``,
 								`Research: Note the current date. Use web_search to find the latest relevant information about this goal (best practices, APIs, security considerations, etc.). Save key findings with quest_memory_save.`,
 							]

@@ -9,6 +9,7 @@ import { buildVerificationImpactContext, enrichPlanningContext } from "./codebas
 import { detectDependencyCycle, getMaxDependencyDepth } from "./graph";
 import { nextPendingStep } from "./steering";
 import { resolveSandboxProfile } from "./sandbox";
+import { logDeprecatedParam } from "./deprecation";
 import type { QuestRuntime } from "./runtime";
 
 export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void {
@@ -177,6 +178,9 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			}
 
 			const plannedSteps = params.steps ?? params.tasks ?? [];
+			if (params.tasks !== undefined && params.steps === undefined) {
+				logDeprecatedParam("quest_plan", params as Record<string, unknown>, "tasks", "steps");
+			}
 
 			if (plannedSteps.length === 0) {
 				return {
@@ -315,7 +319,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 						`⚠ **Plan needs your approval.** Review the steps above.`,
 						`- Approve: call **quest_approve()** or type /quest approve`,
 						`- Edit steps: call **quest_approve(edits=[...])** with step modifications`,
-						`- Reject: call quest_plan with a new set of tasks`,
+						`- Reject: call quest_plan with a new set of steps`,
 					].join("\n")
 				: "";
 
@@ -324,7 +328,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					{
 						type: "text",
 						text: [
-							`Plan saved: **${quest.steps.length} tasks**`,
+							`Plan saved: **${quest.steps.length} steps**`,
 							codebaseEnrichment.summary,
 							codebaseToolAvailable()
 								? `For additional planning precision, use codebase(operation="query", pattern=...) and codebase(operation="map", file=...) before delegating broad steps.`
@@ -359,8 +363,8 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 		name: "quest_update",
 		label: "Quest Update",
 		description: [
-			"Update a task's status in the current quest.",
-			"Call this after a sub-agent completes its work on a task.",
+			"Update a step's status in the current quest.",
+			"Call this after a sub-agent completes its work on a step.",
 			"Pass the step index (0-based) and new status.",
 			"Set result to a brief summary of what was done.",
 			"To report verification results: pass verifyOutcome='PASS'|'FAIL' and verifyEvidence.",
@@ -368,7 +372,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 		parameters: Type.Object({
 			index: Type.Number({ description: "Step index (0-based)" }),
 			status: StringEnum(["done", "failed", "skipped"] as const, {
-				description: "New status for the task",
+				description: "New status for the step",
 			}),
 			result: Type.Optional(Type.String({ description: "Brief summary of what happened" })),
 			verifyOutcome: Type.Optional(
@@ -449,7 +453,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					const gitPrompt = git?.autoCommit
 						? [
 								``,
-								`📝 **Git:** After committing, record with quest_commit(taskIndex=${params.index}, commitHash="...", commitMessage="[quest/${quest.name}] step #${params.index + 1}: ${task.content}", ...)`,
+								`📝 **Git:** After committing, record with quest_commit(stepIndex=${params.index}, commitHash="...", commitMessage="[quest/${quest.name}] step #${params.index + 1}: ${task.content}", ...)`,
 							].join("\n")
 						: "";
 					return {
@@ -642,7 +646,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 							`**Commit message prefix:** \`[quest/${quest.name}] step #${params.index + 1}: ${quest.steps[params.index].content}\``,
 							``,
 							`After committing, record the commit with **quest_commit**:`,
-							`\`quest_commit(taskIndex=${params.index}, commitHash="...", commitMessage="...", branchName="...")\``,
+							`\`quest_commit(stepIndex=${params.index}, commitHash="...", commitMessage="...", branchName="...")\``,
 							`Or call quest_git_summary() to review all quest commits.`,
 						]
 							.filter(Boolean)

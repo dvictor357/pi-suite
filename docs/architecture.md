@@ -78,7 +78,7 @@ rules, provides query/map/impact functions, and registers the `codebase` tool.
   orchestrator to run `codebase(operation="scan")`, then `query`/`map`, when that tool is
   available.
 - During `quest_plan`, it reads compatible cache contractVersion `1` directly as a
-  fallback and enriches task contexts with relevant files plus dependency/reverse
+  fallback and enriches step contexts with relevant files plus dependency/reverse
   dependency context.
 - During verification handoff, it prompts the verifier to run
   `codebase(operation="impact", file=...)` for changed files and includes direct cache
@@ -88,6 +88,24 @@ rules, provides query/map/impact functions, and registers the `codebase` tool.
 
 This keeps scanner/cache/query/tool ownership in `pi-minions` while letting `pi-quest`
 use the stable cache/tool contract for orchestration decisions.
+
+## Task → Step rename (completed)
+
+Quest originally used `task` as its unit-of-work term. In v1 the canonical term was
+changed to `step` across the codebase while preserving full backward compatibility:
+
+- **Internal types:** `QuestStep`, `StepStatus` (canonical); `QuestTask`, `TaskStatus`
+  (deprecated aliases, kept for compatibility).
+- **Quest shape:** `quest.steps` (canonical); `quest.tasks` (legacy mirror, written on
+  every save so older releases can still read quest files).
+- **Commit shape:** `commit.stepIndex` (canonical); `commit.taskIndex` (legacy mirror).
+- **Public tools:** New `quest_step_detail` alias alongside `quest_task_detail`;
+  `stepIndex` parameter aliases alongside `taskIndex` on `quest_commit` and
+  `quest_assign_model`. All old `task`-named entry points remain accepted forever.
+- **Wire format unchanged:** Both `steps` and `tasks` arrays coexist on disk. The
+  rename does NOT bump `CONTRACT_VERSION` — it is not a breaking storage change.
+
+This follows the principle: new code prefers `step`, old integrations continue to work.
 
 ## Roadmap alignment
 

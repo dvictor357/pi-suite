@@ -56,6 +56,45 @@ Cross-extension on-disk shapes now carry a `contractVersion` (stamped on write, 
 on read via `isFutureContract`): a file written by a newer suite is not misread or
 clobbered. See `core/contract.ts`.
 
+## Task → Step rename — RESOLVED
+
+Quest originally used `task` as its unit-of-work term (QuestTask, quest.tasks, taskIndex,
+quest_task_detail, etc.). The canonical term is now `step`:
+
+| Old (still accepted) | New (canonical)      |
+| -------------------- | -------------------- |
+| `QuestTask`          | `QuestStep`          |
+| `TaskStatus`         | `StepStatus`         |
+| `quest.tasks`        | `quest.steps`        |
+| `commit.taskIndex`   | `commit.stepIndex`   |
+| `quest_task_detail`  | `quest_step_detail`  |
+| `taskIndex` (params) | `stepIndex` (params) |
+
+**Compatibility policy:** Every old `task`-named entry point remains accepted forever.
+The wire format carries both fields side-by-side (`quest.tasks` is written as a mirror of
+`quest.steps` on every save), so older pi-quest releases can still read quest files.
+`quest_task_detail` and `taskIndex` params continue to work; new `quest_step_detail` and
+`stepIndex` params are preferred aliases. This rename does NOT bump `CONTRACT_VERSION` —
+it is not a breaking storage change.
+
+### What changed internally
+
+- `extensions/quest/types.ts`: `QuestStep`, `StepStatus` are canonical; `QuestTask`,
+  `TaskStatus` are `@deprecated` aliases.
+- `Quest.steps` is canonical; `Quest.tasks` is a legacy mirror persisted on save.
+- `commit.stepIndex` is canonical; `commit.taskIndex` is a legacy mirror.
+- `quest.stepsSincePause`, `quest.lastFiredStepIndex`, `quest.sameStepCount` are
+  canonical; their `task`-named counterparts are legacy mirrors.
+- `extensions/quest/storage.ts`: `loadQuest` normalizes both `tasks` and `steps` into
+  `steps` on read; `saveQuest` writes the `tasks` mirror back.
+
+### Public API compatibility aliases added
+
+- `quest_step_detail` tool — alias for `quest_task_detail`
+- `stepIndex` parameter on `quest_commit` and `quest_assign_model` — alias for `taskIndex`
+
+New code should use the `step`-named forms; old integrations continue to work unchanged.
+
 ## Order
 
 Migrate **pi-memory** and **pi-todo** first (they are leaf producers of the shared

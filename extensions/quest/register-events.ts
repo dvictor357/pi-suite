@@ -236,10 +236,10 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 					if (ctx.hasUI) {
 						const action = await ctx.ui.select(
 							`${failedTasks.length} step(s) failed. What would you like to do?`,
-							["Retry failed tasks", "Skip all failed", "Pause and review"],
+							["Retry failed steps", "Skip all failed", "Pause and review"],
 						);
 
-						if (action === "Retry failed tasks") {
+						if (action === "Retry failed steps") {
 							for (const t of failedTasks) {
 								t.status = "pending";
 								t.attempts = 0;
@@ -321,10 +321,10 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 					if (ctx.hasUI) {
 						const action = await ctx.ui.select(
 							`Step "${next.task.content}" stalled after ${quest.sameStepCount} attempts. What now?`,
-							["Skip this task", "Mark as failed", "Pause quest"],
+							["Skip this step", "Mark as failed", "Pause quest"],
 						);
 
-						if (action === "Skip this task") {
+						if (action === "Skip this step") {
 							next.task.status = "skipped";
 							next.task.result = `Skipped by user after stalling (${quest.sameStepCount} attempts).`;
 							next.task.completedAt = Date.now();
@@ -354,7 +354,7 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 					persist(ctx, quest);
 
 					if (ctx.hasUI) {
-						ctx.ui.notify(`Quest paused: stalled task. /quest resume to continue.`, "warning");
+						ctx.ui.notify(`Quest paused: stalled step. /quest resume to continue.`, "warning");
 					} else {
 						rt.setAutoPilotLocked(true);
 						try {
@@ -389,7 +389,7 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 					const cont = await ctx.ui.confirm(
 						"Quest Checkpoint",
 						[
-							`**${quest.stepsSincePause} tasks** completed in this burst.`,
+							`**${quest.stepsSincePause} steps** completed in this burst.`,
 							``,
 							`Progress: **${done}/${total}** done`,
 							`Next: **${next.task.content}** [${next.task.agent}]`,
