@@ -1,7 +1,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { MAX_BURST, MAX_RETRIES } from "./constants";
 import { archiveQuest, loadQuest, saveQuest, syncConventionsToMemory } from "./storage";
-import { buildSteeringMessage, nextPendingTask, formatQuestStatus } from "./steering";
+import {
+	buildSteeringMessage,
+	nextPendingTask,
+	formatQuestStatus,
+	wasTurnAborted,
+} from "./steering";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { syncQuestToTodo } from "./todo-sync";
 import { resolveSandboxProfile } from "./sandbox";
@@ -11,11 +16,40 @@ import type { QuestRuntime } from "./runtime";
 export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 	const { getQuest, persist } = rt;
 
-	pi.on("agent_end", async (_event, ctx) => {
+	pi.on("agent_end", async (event, ctx) => {
 		if (rt.isAutoPilotLocked()) return;
 		try {
 			const quest = getQuest(ctx.cwd);
 			if (!quest || quest.status !== "active") return;
+
+			// User interrupt (Esc). `agent_end` fires for an aborted turn just like a
+			// completed one, so without this guard the handler would steer in the
+			// *next* task on every abort — forcing repeated Escapes to stop the quest,
+			// and orphaning each fired task in `running` (nextPendingTask skips those).
+			// Treat one interrupt as "halt the auto-pilot": roll the in-flight task(s)
+			// back to pending and pause so a single Esc stops, and /quest resume picks
+			// up cleanly where it left off.
+			if (wasTurnAborted(event.messages)) {
+				for (const t of quest.tasks) {
+					if (t.status === "running") {
+						t.status = "pending";
+						t.startedAt = null;
+						if (t.attempts > 0) t.attempts--; // the aborted attempt didn't run
+					}
+				}
+				quest.status = "paused";
+				quest.pauseReason = "Interrupted (Esc). /quest resume to continue.";
+				quest.lastFiredTaskIndex = -1;
+				quest.sameTaskCount = 0;
+				persist(ctx, quest);
+				if (ctx.hasUI) {
+					ctx.ui.notify(
+						`Quest "${quest.name}" paused — interrupted. /quest resume to continue.`,
+						"warning",
+					);
+				}
+				return;
+			}
 
 			const next = nextPendingTask(quest);
 			if (!next) {

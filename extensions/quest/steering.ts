@@ -3,6 +3,23 @@ import { MAX_BURST, MAX_RETRIES, ICON, FORMAT_DIRECTIVE } from "./constants";
 import { compactAwarenessBlock } from "./todo-sync";
 import { loadAgentModels } from "./storage";
 
+/**
+ * Whether the just-ended turn was aborted by the user (Esc), as opposed to
+ * finishing on its own. pi-ai closes an interrupted turn with a final assistant
+ * message whose `stopReason` is `"aborted"`; a normal turn ends with `"stop"`
+ * or `"toolUse"`. The `agent_end` event fires either way and carries no abort
+ * flag of its own, so this is the only reliable signal. Typed structurally so it
+ * needs no SDK import (cf. `delegate.ts`'s `FinalTurnMessages`).
+ */
+export function wasTurnAborted(messages: ReadonlyArray<unknown> | undefined): boolean {
+	if (!messages) return false;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const m = messages[i] as { role?: string; stopReason?: string } | null;
+		if (m?.role === "assistant") return m.stopReason === "aborted";
+	}
+	return false;
+}
+
 export function nextPendingTask(quest: Quest): { task: QuestTask; index: number } | null {
 	for (let i = 0; i < quest.tasks.length; i++) {
 		const t = quest.tasks[i];
