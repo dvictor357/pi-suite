@@ -52,6 +52,19 @@ export interface CodebaseGraphExpansionConfig {
 	perSeed: number;
 }
 
+export interface CodebaseSemanticConfig {
+	/** When true, expand the query with terms that co-occur with query terms in the corpus. */
+	enabled: boolean;
+	/** Weight applied to each expansion term's BM25 contribution (< 1 = softer than a real hit). */
+	expansionWeight: number;
+	/** Max expansion terms contributed per original query term. */
+	perTermExpansions: number;
+	/** Overall cap on expansion terms across the whole query. */
+	maxExpansions: number;
+	/** A co-occurring term must appear in at least this many files to be considered (drops noise). */
+	minCoTermDf: number;
+}
+
 export interface CodebaseRankingConfig {
 	/** BM25 term-frequency saturation. Higher = tf matters more before saturating. */
 	k1: number;
@@ -63,6 +76,8 @@ export interface CodebaseRankingConfig {
 	exactMatchBonus: number;
 	/** Dependency-graph expansion of the top lexical hits. */
 	graphExpansion: CodebaseGraphExpansionConfig;
+	/** Corpus co-occurrence query expansion (a dependency-free, offline semantic layer). */
+	semantic: CodebaseSemanticConfig;
 }
 
 /**
@@ -82,6 +97,19 @@ export const CODEBASE_RANKING: CodebaseRankingConfig = {
 	boosts: { symbol: 2, export: 2, name: 2.5, path: 1.5, import: 0 },
 	exactMatchBonus: 3,
 	graphExpansion: { enabled: true, decay: 0.35, perSeed: 3 },
+	// Corpus co-occurrence query expansion. Kept as a tunable seam but DEFAULT OFF:
+	// measured against pi-suite's own index it *regressed* recall@1 (0.60 → 0.35),
+	// because quest's cache is identifier-only (symbol/export/path names, no file
+	// content) so co-occurrence is dominated by generic utility tokens rather than
+	// real synonymy. Closing the lexical-vocabulary gap needs content-based
+	// embeddings (a model), not corpus co-occurrence — see docs/architecture.md.
+	semantic: {
+		enabled: false,
+		expansionWeight: 0.3,
+		perTermExpansions: 3,
+		maxExpansions: 6,
+		minCoTermDf: 2,
+	},
 };
 
 export { AGENT_DIR };

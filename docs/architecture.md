@@ -107,8 +107,20 @@ file. Full length-normalisation (`b=1`) plus higher tf saturation (`k1=1.6`), wi
 field/exact boosts, roughly **doubled recall@1 (0.30 → 0.60)** and lifted **MRR (0.57 →
 0.73)** versus the untuned starting point — mainly by stopping large files from dominating
 on raw token count and letting idf discriminate. The residual misses are the inherent
-ceiling of lexical retrieval when the query omits the discriminating term; a semantic
-embedding layer (not a knob) would be the next lever.
+ceiling of lexical retrieval when the query omits the discriminating term.
+
+**Semantic expansion — tried, measured, kept off.** A dependency-free "semantic" layer
+(`expandQuery`) was built to close that vocabulary gap: expand the query with terms that
+distinctively co-occur (PMI proxy) with query terms across the corpus, then score them at a
+soft weight. Measured on the same ground truth it **regressed** recall@1 (0.60 → 0.35) at
+every expansion weight. Root cause: quest's cache is **identifier-only** (symbol/export/path
+names, no file content), so co-occurrence is dominated by generic utility tokens
+(`ensure`, `available`, `stamp`, …) rather than real synonymy. The machinery is retained as a
+tested, configurable seam (`CODEBASE_RANKING.semantic`, default `enabled: false`) that a
+future content-based embedding provider can build on — but corpus co-occurrence over
+identifier-only documents is not the lever. Genuinely closing the gap needs content-based
+embeddings, which require a model (network provider or a bundled local model) and a decision
+about the suite's offline/no-dependency posture; that decision is deferred, not taken.
 
 ## Context budgeting (small-model / low-context efficiency)
 

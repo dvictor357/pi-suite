@@ -9,6 +9,7 @@ import {
 	CODEBASE_CACHE_PATH,
 	type CodebaseIndexV1,
 	corpusFor,
+	expandQuery,
 	enrichPlanningContext,
 	hasCodebaseCache,
 	hasCodebaseTool,
@@ -299,4 +300,49 @@ test("ranking: the corpus is memoized per index (built once, reused)", () => {
 	assert.equal(corpusFor(index), corpusFor(index));
 	// A different config forces a rebuild (distinct reference).
 	assert.notEqual(corpusFor(index), corpusFor(index, NO_EXPANSION));
+});
+
+// ── Semantic co-occurrence expansion (opt-in; default OFF) ────────────────────
+
+const SEMANTIC_ON = {
+	...CODEBASE_RANKING,
+	graphExpansion: { ...CODEBASE_RANKING.graphExpansion, enabled: false }, // isolate the semantic effect
+	semantic: { ...CODEBASE_RANKING.semantic, enabled: true },
+};
+
+// A corpus where "billing" and "payment" co-occur strongly enough for a positive
+// PMI, plus a payment-only file the lexical query never names, and an unrelated
+// file to give the co-occurrence discriminating power (raises N).
+const SEM_INDEX = makeIndex({
+	"src/pay/charge.ts": { symbols: ["charge", "payment", "billing"] },
+	"src/pay/cycle.ts": { symbols: ["cycle", "payment", "billing"] },
+	"src/pay/refund.ts": { symbols: ["refund", "payment"] },
+	"src/ui/button.ts": { symbols: ["render", "button"] },
+});
+
+test("semantic: expandQuery surfaces a distinctively co-occurring term", () => {
+	const corpus = corpusFor(SEM_INDEX, SEMANTIC_ON);
+	const expansions = [...expandQuery(corpus, ["billing"], SEMANTIC_ON).keys()];
+	assert.ok(expansions.includes("payment"), `expected "payment", got: ${expansions.join(", ")}`);
+});
+
+test("semantic: expansion reaches a file the lexical query never names", () => {
+	// "billing" lexically matches only the two files that contain it.
+	const lexical = rankFilesForQuery(SEM_INDEX, "billing", 10, NO_EXPANSION).map(
+		(f) => f.relativePath,
+	);
+	assert.ok(!lexical.includes("src/pay/refund.ts"));
+	// With semantic expansion, "payment" is added, surfacing the payment-only file.
+	const semantic = rankFilesForQuery(SEM_INDEX, "billing", 10, SEMANTIC_ON).map(
+		(f) => f.relativePath,
+	);
+	assert.ok(semantic.includes("src/pay/refund.ts"));
+});
+
+test("semantic: is inert when disabled (the shipped default)", () => {
+	const withDefault = rankFilesForQuery(SEM_INDEX, "billing", 10).map((f) => f.relativePath);
+	const explicitOff = rankFilesForQuery(SEM_INDEX, "billing", 10, NO_EXPANSION).map(
+		(f) => f.relativePath,
+	);
+	assert.deepEqual(withDefault, explicitOff);
 });
