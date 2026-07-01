@@ -187,12 +187,61 @@ export function nextVerifyAttempt(verifyRetries: number): {
 }
 
 /**
- * Parse the outcome from the verifier's raw text output. The verifier is
- * instructed to start with **PASS** or **FAIL** — this extracts it.
+ * Parse the outcome from the verifier's raw text output.
+ *
+ * The verifier is instructed to *start* its reply with PASS or FAIL, but smaller
+ * models rarely comply exactly — they wrap it in markdown (`**PASS**`), a heading
+ * (`## FAIL`), a label (`Verdict: PASS`), an emoji (`✅ PASS`), or bury the verdict
+ * on the final line. This parser stays deterministic but tolerant, in confidence
+ * order, so the quality gate isn't silently lost to formatting:
+ *
+ *   1. First line leads with the verdict (highest confidence).
+ *   2. An explicitly labelled verdict anywhere (`Verdict:/Result:/Outcome: …`).
+ *   3. The last non-empty line is a standalone verdict (models often conclude).
+ *
+ * It deliberately does NOT scan for a bare "fail" anywhere — that would misread
+ * prose like "make sure tests don't fail". Ambiguous input stays "inconclusive".
  */
 export function parseVerifyOutcome(rawOutput: string): VerifyOutcome {
-	const upper = rawOutput.trim().toUpperCase();
-	if (upper.startsWith("PASS")) return "pass";
-	if (upper.startsWith("FAIL")) return "fail";
+	const text = (rawOutput ?? "").trim();
+	if (!text) return "inconclusive";
+
+	const lines = text
+		.split(/\r?\n/)
+		.map((l) => l.trim())
+		.filter(Boolean);
+
+	// Drop leading markdown decoration (bold/italic/heading/quote/list markers)
+	// so a decorated verdict word still reads as the first token.
+	const leadingVerdict = (line: string): VerifyOutcome | null => {
+		const stripped = line
+			.replace(/^[*_`#>~\s-]+/, "")
+			.trim()
+			.toUpperCase();
+		if (/^PASS(ED)?\b/.test(stripped)) return "pass";
+		if (/^FAIL(ED|URE)?\b/.test(stripped)) return "fail";
+		// Emoji verdict, but only when the verdict word follows (avoids treating a
+		// checklist line like "✅ requirement met" as the overall outcome).
+		if (/^✅/.test(line) && /\bPASS/.test(stripped)) return "pass";
+		if (/^(❌|🚫)/.test(line) && /\bFAIL/.test(stripped)) return "fail";
+		return null;
+	};
+
+	// Tier 1: first line leads with a verdict.
+	const first = leadingVerdict(lines[0]);
+	if (first) return first;
+
+	// Tier 2: an explicitly labelled verdict anywhere. The gap between label and
+	// verdict is kept tight (punctuation/markdown only) so "Result: the tests do
+	// not fail" doesn't match.
+	const labelled = text.match(
+		/\b(?:verdict|result|outcome|conclusion|status|assessment|decision)\b\s*[:\-–—]*\s*[*_`]*\s*(pass(?:ed)?|fail(?:ed|ure)?)\b/i,
+	);
+	if (labelled) return /^pass/i.test(labelled[1]) ? "pass" : "fail";
+
+	// Tier 3: the last non-empty line is a standalone verdict.
+	const last = leadingVerdict(lines[lines.length - 1]);
+	if (last) return last;
+
 	return "inconclusive";
 }

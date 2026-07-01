@@ -65,12 +65,22 @@ export interface CodebaseRankingConfig {
 	graphExpansion: CodebaseGraphExpansionConfig;
 }
 
-/** Default codebase ranking configuration. Callers may override per query. */
+/**
+ * Default codebase ranking configuration. Callers may override per query.
+ *
+ * Values tuned by grid search against pi-suite's own 45-file index (see the
+ * evaluation notes in docs/architecture.md): full length-normalisation (`b=1`)
+ * plus higher tf saturation (`k1=1.6`) roughly doubled recall@1 (0.30 → 0.60,
+ * MRR 0.57 → 0.73) versus the untuned starting point, by stopping large files
+ * from dominating on raw token count and letting idf discriminate. `symbol`/
+ * `export`/`exact` were pulled down because strong boosts over-rewarded broad
+ * matches; the ranking plateau was insensitive to `name`/`path` once `b=1`.
+ */
 export const CODEBASE_RANKING: CodebaseRankingConfig = {
-	k1: 1.2,
-	b: 0.75,
-	boosts: { symbol: 3, export: 3, name: 2.5, path: 1.5, import: 0 },
-	exactMatchBonus: 5,
+	k1: 1.6,
+	b: 1.0,
+	boosts: { symbol: 2, export: 2, name: 2.5, path: 1.5, import: 0 },
+	exactMatchBonus: 3,
 	graphExpansion: { enabled: true, decay: 0.35, perSeed: 3 },
 };
 

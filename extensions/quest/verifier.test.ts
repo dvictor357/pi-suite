@@ -71,6 +71,40 @@ describe("parseVerifyOutcome", () => {
 		assert.equal(parseVerifyOutcome("pass"), "pass");
 		assert.equal(parseVerifyOutcome("fail"), "fail");
 	});
+
+	test("tolerates markdown / heading / emoji decoration on the verdict", () => {
+		assert.equal(parseVerifyOutcome("**PASS** — everything checks out"), "pass");
+		assert.equal(parseVerifyOutcome("## FAIL\nformatting is broken"), "fail");
+		assert.equal(parseVerifyOutcome("`PASSED`"), "pass");
+		assert.equal(parseVerifyOutcome("- FAILED: missing tests"), "fail");
+		assert.equal(parseVerifyOutcome("✅ PASS, looks correct"), "pass");
+		assert.equal(parseVerifyOutcome("❌ FAIL, needs work"), "fail");
+	});
+
+	test("reads a labelled verdict when the reply doesn't lead with it", () => {
+		assert.equal(
+			parseVerifyOutcome("I reviewed the code and ran the tests.\nVerdict: PASS"),
+			"pass",
+		);
+		assert.equal(parseVerifyOutcome("Some analysis here.\n\nResult — FAIL"), "fail");
+		assert.equal(parseVerifyOutcome("Outcome: passed all checks"), "pass");
+	});
+
+	test("reads a verdict on the final line", () => {
+		assert.equal(parseVerifyOutcome("Checked the diff.\nRan lint and tests.\nPASS"), "pass");
+		assert.equal(parseVerifyOutcome("The formatter was not run.\nFAIL"), "fail");
+	});
+
+	test("does not misread prose that merely mentions failing", () => {
+		assert.equal(
+			parseVerifyOutcome("Make sure the tests do not fail before shipping."),
+			"inconclusive",
+		);
+		assert.equal(
+			parseVerifyOutcome("This could pass review later, but I'm not sure yet."),
+			"inconclusive",
+		);
+	});
 });
 
 // ── buildSandboxComplianceChecks ────────────────────────────────────────────

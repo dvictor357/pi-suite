@@ -4,7 +4,7 @@ import { Type } from "typebox";
 import type { StepStatus } from "./types";
 import { FORMAT_DIRECTIVE, MAX_DEPENDENCY_DEPTH, MAX_VERIFY_RETRIES } from "./constants";
 import { loadTeams } from "./teams";
-import { buildSandboxComplianceChecks } from "./verifier";
+import { buildSandboxComplianceChecks, parseVerifyOutcome } from "./verifier";
 import { buildVerificationImpactContext, enrichPlanningContext } from "./codebase";
 import { detectDependencyCycle, getMaxDependencyDepth } from "./graph";
 import { nextPendingStep } from "./steering";
@@ -410,7 +410,25 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			const task = quest.steps[params.index];
 
 			// ── Verification outcome ──────────────────────────────────────────
-			if (params.verifyOutcome) {
+			// The explicit verifyOutcome flag wins. Otherwise, when the step is
+			// already awaiting verification, infer the verdict deterministically
+			// from the reported result text (parseVerifyOutcome tolerates markdown,
+			// labels, emoji, and trailing verdicts). This keeps the quality gate
+			// working when a smaller orchestrator states the verdict in prose but
+			// omits the structured flag — without it, such a call would bounce the
+			// step back into verification instead of resolving it.
+			let effectiveOutcome: "PASS" | "FAIL" | undefined = params.verifyOutcome;
+			if (!effectiveOutcome && task.status === "verifying") {
+				const parsed = parseVerifyOutcome(params.result ?? "");
+				if (parsed === "pass") effectiveOutcome = "PASS";
+				else if (parsed === "fail") effectiveOutcome = "FAIL";
+			}
+			const inferredOutcome = !params.verifyOutcome && effectiveOutcome !== undefined;
+			// When inferred from prose, use the result text itself as the evidence.
+			const effectiveEvidence =
+				params.verifyEvidence ?? (inferredOutcome ? params.result : undefined);
+
+			if (effectiveOutcome) {
 				if (task.status !== "verifying") {
 					return {
 						content: [
@@ -423,10 +441,10 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					};
 				}
 
-				task.verifyResult = `[${params.verifyOutcome}] ${params.verifyEvidence || ""}`.trim();
+				task.verifyResult = `[${effectiveOutcome}] ${effectiveEvidence || ""}`.trim();
 				task.verified = true;
 
-				if (params.verifyOutcome === "PASS") {
+				if (effectiveOutcome === "PASS") {
 					task.status = "done";
 					task.completedAt = Date.now();
 
@@ -436,12 +454,9 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 						taskContent: task.content,
 						agent: "verifier",
 						timestamp: Date.now(),
-						evidence: params.verifyEvidence,
+						evidence: effectiveEvidence,
 					});
-					recordEval(
-						ctx.cwd,
-						makeEval(quest, task, params.index, "done", true, params.verifyEvidence),
-					);
+					recordEval(ctx.cwd, makeEval(quest, task, params.index, "done", true, effectiveEvidence));
 
 					quest.lastFiredStepIndex = -1;
 					quest.sameStepCount = 0;
@@ -462,7 +477,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 								type: "text",
 								text: [
 									`✅ Step #${params.index + 1} **VERIFIED PASS**: ${task.content}`,
-									params.verifyEvidence ? `  Evidence: ${params.verifyEvidence}` : "",
+									effectiveEvidence ? `  Evidence: ${effectiveEvidence}` : "",
 									``,
 									`Step marked done. Progress: ${done}/${quest.steps.length} done`,
 									next
@@ -491,8 +506,8 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					task.status = "pending";
 					task.attempts = 0;
 					task.startedAt = null;
-					task.result = `Verification FAIL #${task.verifyRetries}: ${params.verifyEvidence || "no details"}. Fix and retry (${retriesLeft} retries left).`;
-					task.context = `${task.context}\n\n[Verification FAIL #${task.verifyRetries}]: ${params.verifyEvidence || "see above"}. Fix the issues and try again.`;
+					task.result = `Verification FAIL #${task.verifyRetries}: ${effectiveEvidence || "no details"}. Fix and retry (${retriesLeft} retries left).`;
+					task.context = `${task.context}\n\n[Verification FAIL #${task.verifyRetries}]: ${effectiveEvidence || "see above"}. Fix the issues and try again.`;
 					task.completedAt = null;
 
 					recordRun(ctx.cwd, {
@@ -501,7 +516,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 						taskContent: task.content,
 						agent: "verifier",
 						timestamp: Date.now(),
-						evidence: params.verifyEvidence,
+						evidence: effectiveEvidence,
 						verifyRetriesLeft: retriesLeft,
 					});
 					quest.lastFiredStepIndex = -1;
@@ -514,7 +529,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 								type: "text",
 								text: [
 									`❌ Step #${params.index + 1} **VERIFICATION FAIL**: ${task.content}`,
-									params.verifyEvidence ? `  Evidence: ${params.verifyEvidence}` : "",
+									effectiveEvidence ? `  Evidence: ${effectiveEvidence}` : "",
 									``,
 									`Retry ${task.verifyRetries}/${MAX_VERIFY_RETRIES}. Step reset to pending with fix context.`,
 									`${retriesLeft} verification retries remaining before auto-fail.`,
@@ -528,7 +543,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				// No retries left: auto-fail
 				task.status = "failed";
 				task.completedAt = Date.now();
-				task.result = `Verification FAIL after ${MAX_VERIFY_RETRIES} retries: ${params.verifyEvidence || "no details"}`;
+				task.result = `Verification FAIL after ${MAX_VERIFY_RETRIES} retries: ${effectiveEvidence || "no details"}`;
 
 				recordRun(ctx.cwd, {
 					kind: "verify_fail",
@@ -536,12 +551,12 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					taskContent: task.content,
 					agent: "verifier",
 					timestamp: Date.now(),
-					evidence: params.verifyEvidence,
+					evidence: effectiveEvidence,
 					verifyRetriesLeft: 0,
 				});
 				recordEval(
 					ctx.cwd,
-					makeEval(quest, task, params.index, "failed", false, params.verifyEvidence),
+					makeEval(quest, task, params.index, "failed", false, effectiveEvidence),
 				);
 
 				quest.lastFiredStepIndex = -1;
@@ -554,7 +569,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 							type: "text",
 							text: [
 								`❌ Step #${params.index + 1} **AUTO-FAILED** (${MAX_VERIFY_RETRIES} verification retries exhausted): ${task.content}`,
-								params.verifyEvidence ? `  Last evidence: ${params.verifyEvidence}` : "",
+								effectiveEvidence ? `  Last evidence: ${effectiveEvidence}` : "",
 							].join("\n"),
 						},
 					],

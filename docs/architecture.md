@@ -89,6 +89,27 @@ rules, provides query/map/impact functions, and registers the `codebase` tool.
 This keeps scanner/cache/query/tool ownership in `pi-minions` while letting `pi-quest`
 use the stable cache/tool contract for orchestration decisions.
 
+### Retrieval ranking (read-side, owned by pi-quest)
+
+How `pi-quest` _ranks_ the cache it reads is its own concern (the cache shape stays
+`pi-minions`'). The ranker (`extensions/quest/codebase.ts`) scores files with **BM25 over a
+field-weighted token bag** built from the same read-only fields (path, name, symbols,
+exports, imports): token-boundary matching (so `app` no longer matches `mapper`), idf
+weighting (a term in every file stops counting as much as a rare, discriminating one),
+combined multi-term evidence, an exact-identifier bonus, and optional 1-hop
+dependency-graph expansion of the top hits. The corpus is memoized per index object so a
+whole planning pass builds it once. All knobs live in `CODEBASE_RANKING` (`constants.ts`)
+and can be overridden per query.
+
+**Tuning.** Defaults were grid-searched against pi-suite's own 45-file index using
+task-like prose queries (deliberately not naming the target file) mapped to their true home
+file. Full length-normalisation (`b=1`) plus higher tf saturation (`k1=1.6`), with reduced
+field/exact boosts, roughly **doubled recall@1 (0.30 → 0.60)** and lifted **MRR (0.57 →
+0.73)** versus the untuned starting point — mainly by stopping large files from dominating
+on raw token count and letting idf discriminate. The residual misses are the inherent
+ceiling of lexical retrieval when the query omits the discriminating term; a semantic
+embedding layer (not a knob) would be the next lever.
+
 ## Task → Step rename (completed)
 
 Quest originally used `task` as its unit-of-work term. In v1 the canonical term was
