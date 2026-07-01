@@ -110,6 +110,28 @@ on raw token count and letting idf discriminate. The residual misses are the inh
 ceiling of lexical retrieval when the query omits the discriminating term; a semantic
 embedding layer (not a knob) would be the next lever.
 
+## Context budgeting (small-model / low-context efficiency)
+
+Both pi-quest (the steering/awareness block that leads a sub-agent turn) and pi-memory
+(the profile block appended to the system prompt) inject context into agent prompts. Two
+shared concerns live in `core/context-budget.ts` so both extensions size and trim context
+identically:
+
+- **`budgetForModel(model)`** derives a character budget from the model's real fields —
+  primarily `contextWindow` (a low window shrinks the budget, directly serving the
+  low-context goal) plus a small, configurable "small-model" marker list. It only ever
+  _reduces_ the base budget, so large ample-context models are never starved. All
+  thresholds are surfaced in `CONTEXT_BUDGET` and overridable per call.
+- **`clampToBudget(text, budget)`** trims by dropping whole trailing lines and appending a
+  marker, never cutting a line mid-way. This replaced raw `slice(0, n)` cuts in the live
+  awareness path (`todo-sync.ts`), the memory injection, and the composable context-broker —
+  a mid-line cut emits malformed markdown exactly when a small model can least afford it.
+
+The model is passed structurally (`BudgetModelInfo`), so `core/` keeps no pi-ai dependency.
+The steering path uses the delegated step's assigned model id; the create/command/memory
+paths use `ctx.model`. Memory only tightens its block when the model actually triggers a
+downscale, preserving existing behaviour on large models.
+
 ## Task → Step rename (completed)
 
 Quest originally used `task` as its unit-of-work term. In v1 the canonical term was

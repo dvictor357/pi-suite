@@ -38,6 +38,9 @@ import {
 	writeJSON,
 	updateJSON,
 	writeSessionMeta,
+	CONTEXT_BUDGET,
+	budgetForModel,
+	clampToBudget,
 } from "../../core";
 import type {
 	ProjectMemory as ProjectProfile,
@@ -926,8 +929,14 @@ export default function (pi: ExtensionAPI) {
 			renderMemoryStatus(ctx, project);
 			writeMemorySessionMeta(ctx.cwd, project);
 
+			// Only tighten the injected profile for small/low-context models; large
+			// models keep the full block (structure-safe trim, never a mid-line cut).
+			const budget = budgetForModel(ctx.model);
+			const budgeted =
+				budget < CONTEXT_BUDGET.awarenessBudget ? clampToBudget(block, budget) : block;
+
 			return {
-				systemPrompt: `${event.systemPrompt}\n\n${block}`,
+				systemPrompt: `${event.systemPrompt}\n\n${budgeted}`,
 			};
 		} catch {
 			/* best-effort; return event unchanged */

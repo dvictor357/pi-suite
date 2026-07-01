@@ -1,6 +1,12 @@
 import { basename } from "node:path";
 import { readJSON, writeJSON, updateJSON, loadProjectMemory } from "./utils";
-import { SESSION_META_PATH, todoListPath as todoPath } from "../../core";
+import {
+	SESSION_META_PATH,
+	todoListPath as todoPath,
+	budgetForModel,
+	clampToBudget,
+	type BudgetModelInfo,
+} from "../../core";
 import type { Quest, QuestStep, SyncedTodoItem, SyncedTodoList } from "./types";
 
 export { todoPath };
@@ -93,7 +99,7 @@ export function clearQuestFromTodo(cwd: string): void {
 	}
 }
 
-export function compactAwarenessBlock(cwd: string): string {
+export function compactAwarenessBlock(cwd: string, model?: BudgetModelInfo): string {
 	try {
 		const memory = loadProjectMemory(cwd);
 		const todo = readJSON<SyncedTodoList | null>(todoPath(cwd), null);
@@ -160,7 +166,9 @@ export function compactAwarenessBlock(cwd: string): string {
 		}
 
 		const block = lines.length ? `\n\n## Project Awareness\n${lines.join("\n")}` : "";
-		return block.length > 1200 ? `${block.slice(0, 1197)}...` : block;
+		// Model-aware, structure-safe: trim whole lines to the model's budget
+		// (tighter on small/low-context models) instead of a raw mid-line cut.
+		return block ? clampToBudget(block, budgetForModel(model)) : "";
 	} catch (e) {
 		console.error("[pi-quest] compactAwarenessBlock:", e);
 		return "";

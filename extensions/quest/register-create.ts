@@ -149,7 +149,7 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 				params.planningMode === "approve"
 					? `\n⚠ **Approval mode** — after the plan is created, it must be approved with **quest_approve** before execution begins.`
 					: "";
-			const awareness = compactAwarenessBlock(ctx.cwd);
+			const awareness = compactAwarenessBlock(ctx.cwd, ctx.model);
 			const codebaseAvailable = codebaseToolAvailable();
 			const codebaseCache = loadCodebaseIndex(ctx.cwd);
 			const codebaseGuidance = [

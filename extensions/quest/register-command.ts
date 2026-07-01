@@ -64,7 +64,7 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 							[
 								`## New Quest: ${name}`,
 								goal ? `**Goal:** ${goal}` : "",
-								compactAwarenessBlock(ctx.cwd),
+								compactAwarenessBlock(ctx.cwd, ctx.model),
 								``,
 								`Plan this quest. Use subagent(agent="scout") to explore the codebase,`,
 								`then subagent(agent="planner") to create a step breakdown.`,

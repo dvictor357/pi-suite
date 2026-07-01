@@ -25,7 +25,7 @@ import type { ProjectMemory, TodoList } from "../../core";
 import { FORMAT_DIRECTIVE } from "./constants";
 import { loadProjectMemory } from "./utils";
 import { todoPath } from "./todo-sync";
-import { readJSON } from "../../core";
+import { readJSON, clampToBudget } from "../../core";
 import { loadCodebaseIndex, codebaseStatusSummary, type CodebaseLoadResult } from "./codebase";
 
 // ── Slots ────────────────────────────────────────────────────────────────────
@@ -182,9 +182,7 @@ export function buildContext(
 		}
 	}
 
-	let block = lines.join("\n");
-	if (block.length > budget) {
-		block = block.slice(0, budget - 4) + "\n…";
-	}
-	return block;
+	// Structure-safe trim to budget: drop whole trailing lines rather than
+	// cutting one in half (shared with the live awareness/memory paths).
+	return clampToBudget(lines.join("\n"), budget);
 }

@@ -37,6 +37,8 @@ export type { RunEvent, RunEventKind } from "./run-ledger";
 export { EvalLog, evalLogPath } from "./eval-logging";
 export type { EvalEntry } from "./eval-logging";
 export { asRecord, strArray, boolOr, numOr, strOr, optStr, optNum, oneOf } from "./coerce";
+export { CONTEXT_BUDGET, budgetForModel, isSmallModel, clampToBudget } from "./context-budget";
+export type { BudgetModelInfo, ContextBudgetConfig } from "./context-budget";
 
 import { join } from "node:path";
 import { appendLine, setErrorSink } from "./fs";

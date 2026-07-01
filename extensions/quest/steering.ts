@@ -199,7 +199,7 @@ export function buildSteeringMessage(
 		deps ? `**Depends on:** ${deps}` : "",
 		sandboxBlock,
 		modelLine,
-		compactAwarenessBlock(cwd),
+		compactAwarenessBlock(cwd, assignedModel ? { id: assignedModel } : undefined),
 		``,
 		FORMAT_DIRECTIVE,
 		``,
