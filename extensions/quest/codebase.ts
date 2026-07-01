@@ -2,6 +2,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { QuestStep } from "./types";
+import {
+	CODEBASE_RANKING,
+	type CodebaseFieldBoosts,
+	type CodebaseRankingConfig,
+} from "./constants";
 
 export const CODEBASE_CACHE_PATH = ".pi/codebase-index.json";
 
@@ -159,32 +164,225 @@ function fileToQueryResult(file: CodebaseFileEntry): CodebaseQueryResult {
 	};
 }
 
+// ── Retrieval ranking (BM25 over a field-weighted token bag) ──────────────────
+//
+// The old ranker scored files by raw `includes()` substring hits with hand-tuned
+// integer weights. That conflated unrelated tokens ("app" matched "mapper"),
+// ignored corpus statistics (a term in every file counted as much as a rare,
+// discriminating one), and couldn't combine evidence across query terms. This
+// replaces it with token-boundary BM25 over a per-file weighted term bag built
+// from the same read-only cache fields, plus an exact-identifier bonus and
+// optional dependency-graph expansion. Tuning lives in CODEBASE_RANKING.
+
+interface FileDoc {
+	file: CodebaseFileEntry;
+	/** Field-weighted term frequency for this file. */
+	tf: Map<string, number>;
+	/** Weighted document length (sum of tf values). */
+	length: number;
+	/** Lowercased untokenized symbol/export/base names, for the exact-match bonus. */
+	exactNames: Set<string>;
+}
+
+export interface Corpus {
+	docs: FileDoc[];
+	/** Document frequency per term (docs whose weighted tf > 0). */
+	df: Map<string, number>;
+	/** Number of files in the corpus. */
+	N: number;
+	/** Average weighted document length. */
+	avgdl: number;
+}
+
+/**
+ * Split text into normalized lexical tokens: break on camelCase, snake_case,
+ * kebab, and any non-alphanumeric boundary, lowercase, drop tokens shorter than
+ * two chars and common filler words. Symmetric across query and document sides
+ * so corpus statistics stay consistent.
+ */
+function tokenizeText(text: string): string[] {
+	return text
+		.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+		.replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+		.split(/[^A-Za-z0-9]+/)
+		.map((t) => t.toLowerCase())
+		.filter((t) => t.length >= 2 && !COMMON_WORDS.has(t));
+}
+
+/**
+ * Raw (un-split) query identifiers for the exact-match bonus: whole words and
+ * file base names as the author wrote them, so a task naming `fooFn` or
+ * `foo.ts` can reward a file that declares exactly that identifier.
+ */
+function rawQueryTerms(text: string): string[] {
+	const words =
+		text
+			.match(/[A-Za-z][A-Za-z0-9_-]{2,}/g)
+			?.map((w) => w.toLowerCase())
+			.filter((w) => !COMMON_WORDS.has(w)) ?? [];
+	const bases = extractFilePaths(text).map((p) =>
+		(p.split("/").pop() || p).replace(/\.[cm]?[jt]sx?$/, "").toLowerCase(),
+	);
+	return [...new Set([...words, ...bases])];
+}
+
+/** The field → raw strings a file contributes, before tokenization. */
+function fileFieldStrings(file: CodebaseFileEntry): Record<keyof CodebaseFieldBoosts, string[]> {
+	return {
+		path: [file.relativePath],
+		name: [file.name || file.relativePath.split("/").pop() || ""],
+		symbol: (file.symbols || []).map((s) => s.name || ""),
+		export: (file.exports || []).map((e) => e.name || ""),
+		import: (file.imports || []).map((i) => i.source || ""),
+	};
+}
+
+function exactNamesFor(file: CodebaseFileEntry): Set<string> {
+	const set = new Set<string>();
+	for (const s of file.symbols || []) if (s.name) set.add(s.name.toLowerCase());
+	for (const e of file.exports || []) if (e.name) set.add(e.name.toLowerCase());
+	const base = (file.name || file.relativePath.split("/").pop() || "")
+		.replace(/\.[^.]+$/, "")
+		.toLowerCase();
+	if (base) set.add(base);
+	return set;
+}
+
+function buildCorpus(index: CodebaseIndexV1, config: CodebaseRankingConfig): Corpus {
+	const docs: FileDoc[] = [];
+	const df = new Map<string, number>();
+
+	for (const file of Object.values(index.files)) {
+		const tf = new Map<string, number>();
+		const fields = fileFieldStrings(file);
+		for (const field of Object.keys(fields) as (keyof CodebaseFieldBoosts)[]) {
+			const boost = config.boosts[field];
+			if (boost <= 0) continue; // a zero/negative boost removes the field from lexical matching
+			for (const raw of fields[field]) {
+				for (const tok of tokenizeText(raw)) tf.set(tok, (tf.get(tok) ?? 0) + boost);
+			}
+		}
+		let length = 0;
+		for (const v of tf.values()) length += v;
+		for (const term of tf.keys()) df.set(term, (df.get(term) ?? 0) + 1);
+		docs.push({ file, tf, length, exactNames: exactNamesFor(file) });
+	}
+
+	const N = docs.length;
+	const avgdl = N ? docs.reduce((sum, d) => sum + d.length, 0) / N : 0;
+	return { docs, df, N, avgdl };
+}
+
+// Memoize the corpus per index object so a whole planning pass (many steps)
+// builds it once. Keyed on the config too, since custom boosts change the bag.
+const corpusCache = new WeakMap<
+	CodebaseIndexV1,
+	{ config: CodebaseRankingConfig; corpus: Corpus }
+>();
+
+/**
+ * Return the (memoized) BM25 corpus for an index. Exposed so callers/tests can
+ * observe that repeated queries reuse one corpus rather than rebuilding it.
+ */
+export function corpusFor(
+	index: CodebaseIndexV1,
+	config: CodebaseRankingConfig = CODEBASE_RANKING,
+): Corpus {
+	const cached = corpusCache.get(index);
+	if (cached && cached.config === config) return cached.corpus;
+	const corpus = buildCorpus(index, config);
+	corpusCache.set(index, { config, corpus });
+	return corpus;
+}
+
+function scoreFiles(
+	index: CodebaseIndexV1,
+	text: string,
+	config: CodebaseRankingConfig,
+): { file: CodebaseFileEntry; score: number }[] {
+	const corpus = corpusFor(index, config);
+	if (!corpus.N) return [];
+
+	const queryTerms = [...new Set(tokenizeText(text))];
+	const rawTerms = new Set(rawQueryTerms(text));
+	const { df, N, avgdl } = corpus;
+
+	return corpus.docs
+		.map((doc) => {
+			let score = 0;
+			for (const term of queryTerms) {
+				const f = doc.tf.get(term);
+				if (!f) continue;
+				const n = df.get(term) ?? 0;
+				const idf = Math.log(1 + (N - n + 0.5) / (n + 0.5));
+				const denom = f + config.k1 * (1 - config.b + config.b * (avgdl ? doc.length / avgdl : 0));
+				score += (idf * (f * (config.k1 + 1))) / (denom || 1);
+			}
+			for (const rt of rawTerms) {
+				if (doc.exactNames.has(rt)) score += config.exactMatchBonus;
+			}
+			return { file: doc.file, score };
+		})
+		.filter((entry) => entry.score > 0)
+		.sort((a, b) => b.score - a.score || a.file.relativePath.localeCompare(b.file.relativePath));
+}
+
+/**
+ * Rank files by lexical relevance to a single pattern. Backward-compatible entry
+ * point (same signature/return as before); pure lexical scoring, no graph
+ * expansion — it answers "which files match this text".
+ */
 export function queryCodebaseIndex(
 	index: CodebaseIndexV1,
 	pattern: string,
 	limit = 8,
+	config: CodebaseRankingConfig = CODEBASE_RANKING,
 ): CodebaseQueryResult[] {
-	const needle = pattern.trim().toLowerCase();
-	if (!needle) return [];
+	if (!pattern.trim()) return [];
+	return scoreFiles(index, pattern, config)
+		.slice(0, limit)
+		.map((entry) => fileToQueryResult(entry.file));
+}
 
-	const scored = Object.values(index.files)
-		.map((file) => {
-			const rel = file.relativePath.toLowerCase();
-			const name = (file.name || "").toLowerCase();
-			const symbols = (file.symbols || []).map((s) => (s.name || "").toLowerCase());
-			const exports = (file.exports || []).map((e) => (e.name || "").toLowerCase());
-			let score = 0;
-			if (rel === needle || name === needle) score += 100;
-			if (rel.includes(needle)) score += 40;
-			if (name.includes(needle)) score += 30;
-			if (symbols.some((s) => s.includes(needle))) score += 20;
-			if (exports.some((e) => e.includes(needle))) score += 20;
-			return { file, score };
-		})
-		.filter((entry) => entry.score > 0)
-		.sort((a, b) => b.score - a.score || a.file.relativePath.localeCompare(b.file.relativePath));
+/**
+ * Rank files for a full free-text query (a whole task's content/context/goal),
+ * scoring combined term evidence at once, then — when enabled — folding in the
+ * dependency-graph neighbours of the top hits at a decayed score. This is the
+ * richer entry point used by planning enrichment; neighbours surface files a
+ * change is likely to touch even when the task text doesn't name them.
+ */
+export function rankFilesForQuery(
+	index: CodebaseIndexV1,
+	text: string,
+	limit = 8,
+	config: CodebaseRankingConfig = CODEBASE_RANKING,
+): CodebaseQueryResult[] {
+	const scored = scoreFiles(index, text, config);
+	if (!scored.length) return [];
 
-	return scored.slice(0, limit).map((entry) => fileToQueryResult(entry.file));
+	const results = scored.map((e) => ({ file: e.file, path: e.file.relativePath, score: e.score }));
+
+	if (config.graphExpansion.enabled) {
+		const seen = new Set(results.map((r) => r.path));
+		const seeds = scored.slice(0, limit);
+		for (const seed of seeds) {
+			const rel = seed.file.relativePath;
+			const neighbors = [
+				...(index.dependencies[rel] || []),
+				...(index.reverseDependencies[rel] || []),
+			].slice(0, config.graphExpansion.perSeed);
+			for (const nb of neighbors) {
+				if (seen.has(nb)) continue;
+				const nbFile = index.files[nb];
+				if (!nbFile) continue;
+				seen.add(nb);
+				results.push({ file: nbFile, path: nb, score: seed.score * config.graphExpansion.decay });
+			}
+		}
+		results.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
+	}
+
+	return results.slice(0, limit).map((r) => fileToQueryResult(r.file));
 }
 
 export function mapCodebaseFile(index: CodebaseIndexV1, file: string): CodebaseMapResult | null {
@@ -241,10 +439,7 @@ export function enrichPlanningContext(
 	}
 
 	const enrichedTasks = steps.map((task) => {
-		const patterns = deriveCodebasePatterns(`${task.content}\n${task.context}\n${goal}`, 4);
-		const relevant = uniqueByPath(
-			patterns.flatMap((pattern) => queryCodebaseIndex(cache.index, pattern, 3)),
-		).slice(0, 5);
+		const relevant = rankFilesForQuery(cache.index, `${task.content}\n${task.context}\n${goal}`, 5);
 		if (!relevant.length) return task;
 
 		const maps = relevant
@@ -327,13 +522,4 @@ function formatPlanningBlock(relevant: CodebaseQueryResult[], maps: CodebaseMapR
 
 function normalizeRelativePath(file: string): string {
 	return file.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+/, "");
-}
-
-function uniqueByPath(files: CodebaseQueryResult[]): CodebaseQueryResult[] {
-	const seen = new Set<string>();
-	return files.filter((file) => {
-		if (seen.has(file.relativePath)) return false;
-		seen.add(file.relativePath);
-		return true;
-	});
 }

@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import {
 	buildVerificationImpactContext,
 	CODEBASE_CACHE_PATH,
+	type CodebaseIndexV1,
+	corpusFor,
 	enrichPlanningContext,
 	hasCodebaseCache,
 	hasCodebaseTool,
@@ -14,8 +16,43 @@ import {
 	loadCodebaseIndex,
 	mapCodebaseFile,
 	queryCodebaseIndex,
+	rankFilesForQuery,
 } from "./codebase";
+import { CODEBASE_RANKING } from "./constants";
 import type { QuestStep } from "./types";
+
+/**
+ * Build an in-memory index for ranking tests, so we can control the corpus
+ * precisely without touching disk. Files carry symbols/exports; deps/reverseDeps
+ * are supplied verbatim.
+ */
+function makeIndex(
+	files: Record<string, { symbols?: string[]; exports?: string[]; imports?: string[] }>,
+	graph: {
+		dependencies?: Record<string, string[]>;
+		reverseDependencies?: Record<string, string[]>;
+	} = {},
+): CodebaseIndexV1 {
+	const fileEntries: CodebaseIndexV1["files"] = {};
+	for (const [rel, spec] of Object.entries(files)) {
+		fileEntries[rel] = {
+			relativePath: rel,
+			name: rel.split("/").pop() || rel,
+			imports: (spec.imports || []).map((source) => ({ source })),
+			exports: (spec.exports || []).map((name) => ({ name, kind: "named" })),
+			symbols: (spec.symbols || []).map((name) => ({ name, kind: "function" })),
+		};
+	}
+	return {
+		contractVersion: 1,
+		rootDir: "/repo",
+		scannedAt: 1719000000000,
+		fileCount: Object.keys(files).length,
+		files: fileEntries,
+		dependencies: graph.dependencies || {},
+		reverseDependencies: graph.reverseDependencies || {},
+	};
+}
 
 function tempRepo(): string {
 	const cwd = mkdtempSync(join(tmpdir(), "pi-suite-codebase-"));
@@ -183,4 +220,83 @@ test("verification impact checks use transitive reverse dependencies", () => {
 	const context = buildVerificationImpactContext(cwd, "Changed src/bar.ts while fixing imports");
 	assert.match(context, /codebase\(operation="impact"/);
 	assert.match(context, /src\/bar\.ts: src\/foo\.ts, src\/baz\.ts/);
+});
+
+// ── Ranking: BM25 + idf + tokenization + exact-match + graph expansion ─────────
+
+const NO_EXPANSION = {
+	...CODEBASE_RANKING,
+	graphExpansion: { ...CODEBASE_RANKING.graphExpansion, enabled: false },
+};
+
+test("ranking: a rare (high-idf) term outranks common-term-only matches", () => {
+	// "render" is in every file (low idf); "widget" is unique (high idf).
+	const index = makeIndex({
+		"src/widget.ts": { symbols: ["renderWidget"], exports: ["renderWidget"] },
+		"src/render-a.ts": { symbols: ["renderA"] },
+		"src/render-b.ts": { symbols: ["renderB"] },
+		"src/render-c.ts": { symbols: ["renderC"] },
+	});
+	// Combined evidence: widget.ts matches both "render" and the rare "widget".
+	const ranked = queryCodebaseIndex(index, "render widget").map((f) => f.relativePath);
+	assert.equal(ranked[0], "src/widget.ts");
+	// The unique term alone resolves to exactly the one file.
+	assert.deepEqual(
+		queryCodebaseIndex(index, "widget").map((f) => f.relativePath),
+		["src/widget.ts"],
+	);
+});
+
+test("ranking: tokenization respects word boundaries (no substring bleed)", () => {
+	const index = makeIndex({
+		"src/mapper.ts": { symbols: ["mapper"] },
+		"src/foo.ts": { symbols: ["fooFn"] },
+	});
+	// "app" must NOT match "mapper" (old substring ranker did).
+	assert.deepEqual(queryCodebaseIndex(index, "app"), []);
+	// camelCase symbol "fooFn" is tokenized, so "foo" matches it.
+	assert.deepEqual(
+		queryCodebaseIndex(index, "foo").map((f) => f.relativePath),
+		["src/foo.ts"],
+	);
+});
+
+test("ranking: exact identifier match wins over higher raw term frequency", () => {
+	const index = makeIndex({
+		// base name is exactly "config" → earns the exact-match bonus.
+		"src/config.ts": { symbols: ["loadConfig"], exports: ["loadConfig"] },
+		// has the token "config" twice, but no exact "config" identifier/base name.
+		"src/config-helpers.ts": { symbols: ["configHelperA", "configHelperB"] },
+	});
+	const ranked = queryCodebaseIndex(index, "config").map((f) => f.relativePath);
+	assert.equal(ranked[0], "src/config.ts");
+});
+
+test("ranking: graph expansion surfaces neighbours the query never names", () => {
+	const index = makeIndex(
+		{
+			"src/core.ts": { symbols: ["coreThing"] },
+			"src/consumer.ts": { symbols: ["unrelatedName"] },
+		},
+		{ reverseDependencies: { "src/core.ts": ["src/consumer.ts"] } },
+	);
+	// Lexically, only core.ts matches "core"; consumer.ts shares no tokens.
+	assert.deepEqual(
+		queryCodebaseIndex(index, "core").map((f) => f.relativePath),
+		["src/core.ts"],
+	);
+	// With expansion on (default), the dependent is folded in as a decayed hit.
+	const expanded = rankFilesForQuery(index, "core").map((f) => f.relativePath);
+	assert.deepEqual(expanded, ["src/core.ts", "src/consumer.ts"]);
+	// With expansion off, it is not.
+	const lexicalOnly = rankFilesForQuery(index, "core", 8, NO_EXPANSION).map((f) => f.relativePath);
+	assert.deepEqual(lexicalOnly, ["src/core.ts"]);
+});
+
+test("ranking: the corpus is memoized per index (built once, reused)", () => {
+	const index = makeIndex({ "src/a.ts": { symbols: ["alpha"] } });
+	// Same config → same corpus object reference (no rebuild).
+	assert.equal(corpusFor(index), corpusFor(index));
+	// A different config forces a rebuild (distinct reference).
+	assert.notEqual(corpusFor(index), corpusFor(index, NO_EXPANSION));
 });

@@ -23,6 +23,57 @@ export const FORMAT_DIRECTIVE = [
 	"or tool, and do NOT impose a style the project doesn't already use; adapt to this codebase.",
 ].join(" ");
 
+// ── Codebase retrieval ranking ───────────────────────────────────────────────
+/**
+ * Tunable knobs for the BM25-based codebase retrieval ranker (see
+ * `codebase.ts`). Surfaced here so ranking behaviour is configured in one place
+ * rather than scattered as magic numbers inside the scorer. Callers may pass a
+ * custom `CodebaseRankingConfig` to override any of these per query.
+ */
+export interface CodebaseFieldBoosts {
+	/** Term weight for tokens found in a file's declared symbols. */
+	symbol: number;
+	/** Term weight for tokens found in a file's exported names. */
+	export: number;
+	/** Term weight for tokens found in the file's base name. */
+	name: number;
+	/** Term weight for tokens found in the file's path segments. */
+	path: number;
+	/** Term weight for tokens from import sources. 0 = ignore imports for lexical matching. */
+	import: number;
+}
+
+export interface CodebaseGraphExpansionConfig {
+	/** When true, fold dependency-graph neighbours of top hits into results. */
+	enabled: boolean;
+	/** Score multiplier applied to a neighbour pulled in via the graph (0–1). */
+	decay: number;
+	/** Max neighbours to fold in per seed hit. */
+	perSeed: number;
+}
+
+export interface CodebaseRankingConfig {
+	/** BM25 term-frequency saturation. Higher = tf matters more before saturating. */
+	k1: number;
+	/** BM25 length normalisation (0 = none, 1 = full). */
+	b: number;
+	/** Per-field term-frequency boosts. */
+	boosts: CodebaseFieldBoosts;
+	/** Flat bonus added when a raw query identifier exactly equals a symbol/export/base name. */
+	exactMatchBonus: number;
+	/** Dependency-graph expansion of the top lexical hits. */
+	graphExpansion: CodebaseGraphExpansionConfig;
+}
+
+/** Default codebase ranking configuration. Callers may override per query. */
+export const CODEBASE_RANKING: CodebaseRankingConfig = {
+	k1: 1.2,
+	b: 0.75,
+	boosts: { symbol: 3, export: 3, name: 2.5, path: 1.5, import: 0 },
+	exactMatchBonus: 5,
+	graphExpansion: { enabled: true, decay: 0.35, perSeed: 3 },
+};
+
 export { AGENT_DIR };
 export const ACTIVE_PATH = join(AGENT_DIR, "quests", "active.json");
 export const ARCHIVE_DIR = join(AGENT_DIR, "quests", "archive");
