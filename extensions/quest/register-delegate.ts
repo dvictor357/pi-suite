@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { FORMAT_DIRECTIVE } from "./constants";
+import { formatDirectiveFor } from "./constants";
 import { archiveQuest, loadAgentModels, rememberAgentModel } from "./storage";
 import { resolveTaskModel, buildSubAgentPrompt } from "./delegate";
 import { clearQuestFromTodo } from "./todo-sync";
@@ -210,7 +210,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				context: task.context,
 				persona: resolvePersona(quest.team, role),
 				dependencyResults,
-				formatDirective: FORMAT_DIRECTIVE,
+				formatDirective: formatDirectiveFor(modelId ? { id: modelId } : undefined),
 				sandboxProfile,
 			});
 

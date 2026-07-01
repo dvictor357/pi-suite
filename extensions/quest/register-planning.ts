@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import type { StepStatus } from "./types";
-import { FORMAT_DIRECTIVE, MAX_DEPENDENCY_DEPTH, MAX_VERIFY_RETRIES } from "./constants";
+import { formatDirectiveFor, MAX_DEPENDENCY_DEPTH, MAX_VERIFY_RETRIES } from "./constants";
 import { loadTeams } from "./teams";
 import { buildSandboxComplianceChecks, parseVerifyOutcome } from "./verifier";
 import { buildVerificationImpactContext, enrichPlanningContext } from "./codebase";
@@ -615,7 +615,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 									`1. Does the result match the step requirements?`,
 									`2. Is the implementation correct and complete?`,
 									`3. Are there any issues or missing pieces?`,
-									`4. Is the code formatted and lint-clean per the project's own conventions? ${FORMAT_DIRECTIVE} If the project's formatter/linter was not run or leaves the tree dirty/inconsistent, this is a FAIL.`,
+									`4. Is the code formatted and lint-clean per the project's own conventions? ${formatDirectiveFor(ctx.model)} If the project's formatter/linter was not run or leaves the tree dirty/inconsistent, this is a FAIL.`,
 									`5. Review dependency impact for changed files before PASS.`,
 									...(sandboxChecks.length > 0 ? [``, ...sandboxChecks] : []),
 									``,

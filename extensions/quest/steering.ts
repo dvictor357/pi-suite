@@ -1,5 +1,5 @@
 import type { Quest, QuestStep } from "./types";
-import { MAX_BURST, MAX_RETRIES, ICON, FORMAT_DIRECTIVE } from "./constants";
+import { MAX_BURST, MAX_RETRIES, ICON, formatDirectiveFor } from "./constants";
 import { compactAwarenessBlock } from "./todo-sync";
 import { loadAgentModels } from "./storage";
 
@@ -201,7 +201,7 @@ export function buildSteeringMessage(
 		modelLine,
 		compactAwarenessBlock(cwd, assignedModel ? { id: assignedModel } : undefined),
 		``,
-		FORMAT_DIRECTIVE,
+		formatDirectiveFor(assignedModel ? { id: assignedModel } : undefined),
 		``,
 		`When complete, call **quest_update** with step index ${index} to mark it done.`,
 		`If you hit a blocker you can't resolve, call quest_update with status "failed" and explain why.`,

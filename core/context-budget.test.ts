@@ -1,7 +1,14 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { CONTEXT_BUDGET, budgetForModel, isSmallModel, clampToBudget } from "./context-budget";
+import {
+	CONTEXT_BUDGET,
+	budgetForModel,
+	isSmallModel,
+	isConstrainedModel,
+	verbosityForModel,
+	clampToBudget,
+} from "./context-budget";
 
 describe("budgetForModel", () => {
 	test("unknown model gets the full base budget", () => {
@@ -45,6 +52,31 @@ describe("isSmallModel", () => {
 		assert.equal(isSmallModel({ id: "gpt-4o-mini" }), true);
 		assert.equal(isSmallModel({ id: "claude-opus-4-8" }), false);
 		assert.equal(isSmallModel(undefined), false);
+	});
+});
+
+describe("verbosityForModel / isConstrainedModel", () => {
+	test("large ample-context model is full / unconstrained", () => {
+		const m = { id: "claude-opus-4-8", contextWindow: 200000 };
+		assert.equal(isConstrainedModel(m), false);
+		assert.equal(verbosityForModel(m), "full");
+	});
+
+	test("small model is constrained → compact, even with a large window", () => {
+		const m = { id: "claude-haiku-4-5", contextWindow: 200000 };
+		assert.equal(isConstrainedModel(m), true);
+		assert.equal(verbosityForModel(m), "compact");
+	});
+
+	test("low-context window alone → compact", () => {
+		const m = { id: "some-local-model", contextWindow: 8192 };
+		assert.equal(isConstrainedModel(m), true);
+		assert.equal(verbosityForModel(m), "compact");
+	});
+
+	test("unknown model defaults to full", () => {
+		assert.equal(verbosityForModel(undefined), "full");
+		assert.equal(isConstrainedModel({}), false);
 	});
 });
 

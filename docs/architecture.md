@@ -144,6 +144,28 @@ The steering path uses the delegated step's assigned model id; the create/comman
 paths use `ctx.model`. Memory only tightens its block when the model actually triggers a
 downscale, preserving existing behaviour on large models.
 
+### Verbosity scaling (directive length, not just trimming)
+
+Budgeting trims context that varies per turn; a second lever handles the _fixed_ prose the
+harness injects on every sub-agent turn. The `FORMAT_DIRECTIVE` (the "before you're done,
+run the formatter/linter" instruction) is ~486 chars and rides along with every
+steering / delegate / verification prompt. On a small or low-context model that fixed cost
+crowds out the actual task context.
+
+- **`verbosityForModel(model)`** returns `"compact"` for a _constrained_ model (small **or**
+  low-context, via `isConstrainedModel`) and `"full"` otherwise — the same signal
+  `budgetForModel` keys off, exposed as a discrete choice. Lives in `core/context-budget.ts`.
+- **`formatDirectiveFor(model)`** (in `extensions/quest/constants.ts`) picks between the full
+  directive and `FORMAT_DIRECTIVE_COMPACT` (~136 chars, same intent, ~72% shorter). Every
+  live injection site routes through it: `steering.ts` (delegated step's model),
+  `register-delegate.ts` (delegate model id), `register-planning.ts` verification prompt
+  (`ctx.model`).
+
+Large and unknown models are unchanged (they get the full directive); only a model that
+actually trips the constrained check pays the shorter form. The compact/full split is
+content-preserving — both state the same requirement — so intelligence is not traded away
+for the token savings.
+
 ## Task → Step rename (completed)
 
 Quest originally used `task` as its unit-of-work term. In v1 the canonical term was

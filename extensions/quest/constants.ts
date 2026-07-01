@@ -5,6 +5,8 @@ import {
 	MAX_RETRIES,
 	MAX_VERIFY_RETRIES,
 	MAX_DEPENDENCY_DEPTH,
+	verbosityForModel,
+	type BudgetModelInfo,
 } from "../../core";
 import type { StepStatus, TeamConfig } from "./types";
 
@@ -22,6 +24,22 @@ export const FORMAT_DIRECTIVE = [
 	"then run it and confirm the working tree is clean and consistent. Do NOT assume a specific language",
 	"or tool, and do NOT impose a style the project doesn't already use; adapt to this codebase.",
 ].join(" ");
+
+/**
+ * Compact variant of {@link FORMAT_DIRECTIVE} for constrained (small / low-context)
+ * models, where the full five-sentence version crowds out the actual task. Same
+ * intent — run the project's own tooling, match its existing style — in one line.
+ */
+export const FORMAT_DIRECTIVE_COMPACT =
+	"**Before done:** run the project's own formatter/linter and confirm the tree is clean; match the existing style, don't impose a new one.";
+
+/**
+ * Pick the format directive appropriate to a model: constrained models get the
+ * compact one-liner, larger models get the full explanatory directive.
+ */
+export function formatDirectiveFor(model?: BudgetModelInfo): string {
+	return verbosityForModel(model) === "compact" ? FORMAT_DIRECTIVE_COMPACT : FORMAT_DIRECTIVE;
+}
 
 // ── Codebase retrieval ranking ───────────────────────────────────────────────
 /**

@@ -64,6 +64,34 @@ export function isSmallModel(model: BudgetModelInfo | undefined, cfg = CONTEXT_B
 	return !!id && cfg.smallModelMarkers.some((m) => id.includes(m));
 }
 
+/** Whether a model is constrained (small OR low-context) and should get leaner prompts. */
+export function isConstrainedModel(
+	model: BudgetModelInfo | undefined,
+	cfg = CONTEXT_BUDGET,
+): boolean {
+	if (isSmallModel(model, cfg)) return true;
+	return (
+		typeof model?.contextWindow === "number" &&
+		model.contextWindow > 0 &&
+		model.contextWindow <= cfg.lowContextWindow
+	);
+}
+
+/** Prompt verbosity level. */
+export type Verbosity = "full" | "compact";
+
+/**
+ * Which directive/verbosity a model should receive: constrained models (small
+ * or low-context) get the `compact` variant so fixed boilerplate doesn't crowd
+ * out the actual task, larger models get the `full` explanatory text.
+ */
+export function verbosityForModel(
+	model: BudgetModelInfo | undefined,
+	cfg = CONTEXT_BUDGET,
+): Verbosity {
+	return isConstrainedModel(model, cfg) ? "compact" : "full";
+}
+
 /**
  * The character budget a context block should fit within for this model. Starts
  * from the base and applies (multiplicatively) a low-context-window discount and
