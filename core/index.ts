@@ -38,6 +38,8 @@ export { RunLedger, runLedgerPath, runsDir } from "./run-ledger";
 export type { RunEvent, RunEventKind } from "./run-ledger";
 export { EvalLog, evalLogPath, evalsDir } from "./eval-logging";
 export type { EvalEntry } from "./eval-logging";
+export { readAllEvalEntries, computeEvalStats, statsFor, statsKey } from "./eval-stats";
+export type { RoleModelStats, EvalStatsIndex } from "./eval-stats";
 export { asRecord, strArray, boolOr, numOr, strOr, optStr, optNum, oneOf } from "./coerce";
 export {
 	CONTEXT_BUDGET,
