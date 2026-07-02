@@ -123,3 +123,74 @@ test("loadQuest migrates legacy tasks to steps and saveQuest writes a legacy tas
 	assert.equal(saved.sameTaskCount, saved.sameStepCount);
 	assert.equal(saved.commits[0].taskIndex, saved.commits[0].stepIndex);
 });
+
+test("loadQuest defaults ladder fields on legacy steps and round-trips populated ones", () => {
+	const cwd = tempCwd();
+	const quest = emptyQuest("Ladder fields", "round-trip", undefined, "auto", true);
+	quest.steps = [
+		{
+			content: "Legacy step",
+			status: "pending",
+			agent: "worker",
+			context: "",
+			dependencies: [],
+			result: null,
+			attempts: 0,
+			startedAt: null,
+			completedAt: null,
+			verified: false,
+			verifyResult: null,
+			verifyRetries: 0,
+			commitHash: null,
+			branchName: null,
+		},
+		{
+			content: "Laddered step",
+			status: "running",
+			agent: "worker",
+			context: "",
+			dependencies: [],
+			result: null,
+			attempts: 0,
+			startedAt: null,
+			completedAt: null,
+			verified: false,
+			verifyResult: null,
+			verifyRetries: 0,
+			commitHash: null,
+			branchName: null,
+			rung: 1,
+			escalations: 1,
+			lastModel: "ornith-1.0",
+			failureBriefs: [
+				{
+					attempt: 1,
+					model: "ornith-1.0",
+					rung: 0,
+					evidence: "tests fail",
+					attempted: "edited foo.ts",
+					inferred: true,
+					timestamp: 42,
+				},
+				// Garbage entry a hand-edit could introduce — must be dropped, not crash.
+				{ attempted: "no evidence" } as never,
+			],
+		},
+	];
+	saveQuest(quest, cwd);
+
+	const loaded = loadQuest(cwd);
+	const legacy = loaded!.steps[0];
+	assert.equal(legacy.rung, undefined, "legacy step stays un-laddered");
+	assert.equal(legacy.escalations, 0);
+	assert.deepEqual(legacy.failureBriefs, []);
+	assert.equal(legacy.lastModel, undefined);
+
+	const laddered = loaded!.steps[1];
+	assert.equal(laddered.rung, 1);
+	assert.equal(laddered.escalations, 1);
+	assert.equal(laddered.lastModel, "ornith-1.0");
+	assert.equal(laddered.failureBriefs?.length, 1, "malformed brief dropped");
+	assert.equal(laddered.failureBriefs?.[0].evidence, "tests fail");
+	assert.equal(laddered.failureBriefs?.[0].inferred, true);
+});

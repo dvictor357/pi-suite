@@ -1,3 +1,5 @@
+import type { FailureBrief } from "./ladder";
+
 export type QuestStatus = "planning" | "active" | "paused" | "done" | "idle";
 export type StepStatus = "pending" | "running" | "verifying" | "done" | "failed" | "skipped";
 
@@ -22,6 +24,25 @@ export interface QuestStep {
 	verifyRetries: number;
 	commitHash: string | null;
 	branchName: string | null;
+	/**
+	 * Current model-ladder rung index (see ladder.ts). Undefined means the ladder
+	 * does not govern this step — legacy steps, explicit model assignments, or
+	 * projects with no approved ladder.
+	 */
+	rung?: number;
+	/** How many rung escalations this step has consumed. */
+	escalations?: number;
+	/**
+	 * Distilled verified-failure records, newest last; rendered into retry
+	 * prompts instead of appending evidence onto {@link context} unboundedly.
+	 */
+	failureBriefs?: FailureBrief[];
+	/**
+	 * Model id the last delegation actually ran with, whichever source resolved
+	 * it (explicit, ladder, remembered, or harness default). Stamped so eval
+	 * entries always know the model — {@link model} is only the explicit override.
+	 */
+	lastModel?: string;
 	/**
 	 * Per-step sandbox overrides. When present, these tighten (but never loosen)
 	 * the quest-level {@link SandboxPolicy}. Absent/undefined means "inherit

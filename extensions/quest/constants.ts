@@ -9,8 +9,29 @@ import {
 	type BudgetModelInfo,
 } from "../../core";
 import type { StepStatus, TeamConfig } from "./types";
+import { DEFAULT_LADDER_ROLES, type LadderConfig } from "./ladder";
 
 export { MAX_BURST, MAX_RETRIES, MAX_VERIFY_RETRIES, MAX_DEPENDENCY_DEPTH };
+export { MAX_ESCALATIONS } from "../../core";
+
+// ── Model escalation ladder ──────────────────────────────────────────────────
+/**
+ * Tunable knobs for the verified escalation ladder (see ladder.ts). No default
+ * rung list ships here — a hardcoded model catalog would rot; the ladder stays
+ * inert until the user approves one per project via `quest_assign_ladder`.
+ */
+export const LADDER: LadderConfig = {
+	roles: [...DEFAULT_LADDER_ROLES],
+	// A rung needs this many recorded outcomes for a role before its pass rate
+	// can disqualify it as a starting point.
+	minSamples: 5,
+	// Verified-pass rate below which a proven rung is skipped at start.
+	passRateFloor: 0.55,
+	// Character budget for the rendered failure-brief block, scaled per model
+	// at the injection site via budgetForModel.
+	briefBudget: 700,
+	maxBriefs: 3,
+};
 
 /**
  * Language-agnostic code-hygiene directive injected into steering and verification.

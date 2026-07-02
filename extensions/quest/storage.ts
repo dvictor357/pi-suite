@@ -10,6 +10,7 @@ import type {
 	SandboxOverrides,
 	WorktreeConfig,
 } from "./types";
+import { coerceFailureBrief } from "./ladder";
 import {
 	readJSON,
 	writeJSON,
@@ -198,6 +199,12 @@ export function loadQuest(cwd: string): Quest | null {
 				branchName: t.branchName || null,
 				startedAt: typeof t.startedAt === "number" ? t.startedAt : null,
 				model: typeof t.model === "string" && t.model.trim() ? t.model : undefined,
+				rung: typeof t.rung === "number" ? t.rung : undefined,
+				escalations: typeof t.escalations === "number" ? t.escalations : 0,
+				failureBriefs: Array.isArray(t.failureBriefs)
+					? t.failureBriefs.map(coerceFailureBrief).filter((b: unknown) => b !== null)
+					: [],
+				lastModel: typeof t.lastModel === "string" && t.lastModel.trim() ? t.lastModel : undefined,
 				sandbox:
 					t.sandbox && typeof t.sandbox === "object"
 						? normalizeSandboxOverrides(t.sandbox)
