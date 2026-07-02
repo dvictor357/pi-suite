@@ -1,7 +1,8 @@
 import type { Quest, QuestStep } from "./types";
-import { MAX_BURST, MAX_RETRIES, ICON, formatDirectiveFor } from "./constants";
+import { MAX_BURST, MAX_RETRIES, ICON, LADDER, formatDirectiveFor } from "./constants";
 import { compactAwarenessBlock } from "./todo-sync";
 import { loadAgentModels } from "./storage";
+import { briefBudgetForModel, renderFailureBriefs } from "./ladder";
 
 /**
  * Whether the just-ended turn was aborted by the user (Esc), as opposed to
@@ -190,6 +191,14 @@ export function buildSteeringMessage(
 		? `**Model:** \`${assignedModel}\` — delegate with quest_delegate(index=${index}).`
 		: `**Model:** none assigned for role \`${task.agent}\`. Propose one via quest_assign_model(role="${task.agent}", proposed="…", stepIndex=${index}), then quest_delegate(index=${index}).`;
 
+	// Distilled prior verified failures: the orchestrator writing the next
+	// quest_delegate/quest_update calls needs to know why this step is retrying.
+	const briefBlock = renderFailureBriefs(
+		task.failureBriefs,
+		briefBudgetForModel(assignedModel ? { id: assignedModel } : undefined, LADDER),
+		LADDER.maxBriefs,
+	);
+
 	return [
 		`## Quest: ${quest.name} (${done}/${total} done)`,
 		``,
@@ -199,6 +208,7 @@ export function buildSteeringMessage(
 		deps ? `**Depends on:** ${deps}` : "",
 		sandboxBlock,
 		modelLine,
+		briefBlock,
 		compactAwarenessBlock(cwd, assignedModel ? { id: assignedModel } : undefined),
 		``,
 		formatDirectiveFor(assignedModel ? { id: assignedModel } : undefined),

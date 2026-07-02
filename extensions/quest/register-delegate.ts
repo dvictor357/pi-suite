@@ -1,8 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { formatDirectiveFor } from "./constants";
+import { formatDirectiveFor, LADDER } from "./constants";
 import { archiveQuest, loadAgentModels, rememberAgentModel } from "./storage";
 import { resolveTaskModel, buildSubAgentPrompt } from "./delegate";
+import { briefBudgetForModel, renderFailureBriefs } from "./ladder";
 import { clearQuestFromTodo } from "./todo-sync";
 import { loadTeams } from "./teams";
 import { matchModel, promptModelAssignment, toModelLike } from "./models";
@@ -204,13 +205,19 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				content: quest.steps[d]?.content ?? "",
 				result: quest.steps[d]?.result ?? null,
 			}));
+			const modelInfo = modelId ? { id: modelId } : undefined;
 			const prompt = buildSubAgentPrompt({
 				role,
 				content: task.content,
 				context: task.context,
 				persona: resolvePersona(quest.team, role),
 				dependencyResults,
-				formatDirective: formatDirectiveFor(modelId ? { id: modelId } : undefined),
+				failureBriefBlock: renderFailureBriefs(
+					task.failureBriefs,
+					briefBudgetForModel(modelInfo, LADDER),
+					LADDER.maxBriefs,
+				),
+				formatDirective: formatDirectiveFor(modelInfo),
 				sandboxProfile,
 			});
 

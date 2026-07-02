@@ -22,7 +22,8 @@
  */
 import { basename } from "node:path";
 import type { ProjectMemory, TodoList } from "../../core";
-import { FORMAT_DIRECTIVE } from "./constants";
+import { FORMAT_DIRECTIVE, LADDER } from "./constants";
+import { renderFailureBriefs, type FailureBrief } from "./ladder";
 import { loadProjectMemory } from "./utils";
 import { todoPath } from "./todo-sync";
 import { readJSON, clampToBudget } from "../../core";
@@ -135,6 +136,20 @@ export function formatSlot(mode: "planning" | "verification" | "completion"): Co
 	};
 }
 
+/**
+ * Failure slot: distilled prior verified failures for the step being retried.
+ * Only rendered when briefs exist, so it costs nothing on first attempts.
+ */
+export function failureSlot(briefs: readonly FailureBrief[] | undefined): ContextSource {
+	return {
+		label: "Prior failures",
+		render: () => {
+			const block = renderFailureBriefs(briefs, LADDER.briefBudget, LADDER.maxBriefs);
+			return block ? block.split("\n") : [];
+		},
+	};
+}
+
 // ── Builder ──────────────────────────────────────────────────────────────────
 
 export type ContextMode = "planning" | "verification" | "completion";
@@ -148,6 +163,8 @@ export interface ContextBuildOptions {
 		todo?: ContextSource;
 		codebase?: ContextSource;
 		format?: ContextSource;
+		/** Included only when provided — see {@link failureSlot}. */
+		failure?: ContextSource;
 	};
 }
 
@@ -168,6 +185,7 @@ export function buildContext(
 		opts.slots?.memory ?? memorySlot(),
 		opts.slots?.todo ?? todoSlot(),
 		opts.slots?.codebase ?? codebaseSlot(mode),
+		...(opts.slots?.failure ? [opts.slots.failure] : []),
 		opts.slots?.format ?? formatSlot(mode),
 	];
 

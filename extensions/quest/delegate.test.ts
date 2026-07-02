@@ -197,6 +197,30 @@ test("buildSubAgentPrompt omits empty optional sections", () => {
 	const prompt = buildSubAgentPrompt({ role: "worker", content: "Do it" });
 	assert.doesNotMatch(prompt, /## Context/);
 	assert.doesNotMatch(prompt, /Prior results/);
+	assert.doesNotMatch(prompt, /Prior failed attempts/);
+});
+
+test("buildSubAgentPrompt places the failure-brief block after dependency results", () => {
+	const prompt = buildSubAgentPrompt({
+		role: "worker",
+		content: "Fix the flaky test",
+		dependencyResults: [{ content: "Locate the test", result: "found in foo.test.ts" }],
+		failureBriefBlock:
+			"**Prior failed attempts — address these specifically:**\n- Attempt 1: timeout",
+		formatDirective: "Run the formatter.",
+	});
+	const deps = prompt.indexOf("Prior results you can build on");
+	const briefs = prompt.indexOf("Prior failed attempts");
+	const directive = prompt.indexOf("Run the formatter.");
+	assert.ok(deps >= 0 && briefs > deps, "briefs come after dependency results");
+	assert.ok(briefs < directive, "briefs come before the format directive");
+	assert.equal(
+		buildSubAgentPrompt({ role: "worker", content: "x", failureBriefBlock: "  " }).includes(
+			"Prior failed",
+		),
+		false,
+		"blank block is omitted",
+	);
 });
 
 // ── buildSandboxConstraintBlock ────────────────────────────────────────────

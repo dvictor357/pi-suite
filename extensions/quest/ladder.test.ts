@@ -7,6 +7,7 @@ import {
 	type ModelLadderConfig,
 } from "../../core";
 import {
+	briefBudgetForModel,
 	buildFailureBrief,
 	coerceFailureBrief,
 	decideVerifyFailAction,
@@ -183,6 +184,15 @@ describe("decideVerifyFailAction", () => {
 			}).action,
 			"fail",
 		);
+	});
+});
+
+describe("briefBudgetForModel", () => {
+	it("gives large models the full budget and scales constrained models down", () => {
+		assert.equal(briefBudgetForModel({ id: "mythos-5" }, CFG), CFG.briefBudget);
+		const small = briefBudgetForModel({ id: "ornith-mini" }, CFG);
+		assert.ok(small < CFG.briefBudget, "small models get a leaner brief block");
+		assert.ok(small > 0);
 	});
 });
 

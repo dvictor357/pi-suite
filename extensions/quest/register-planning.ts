@@ -5,6 +5,7 @@ import type { StepStatus } from "./types";
 import { formatDirectiveFor, MAX_DEPENDENCY_DEPTH, MAX_VERIFY_RETRIES } from "./constants";
 import { loadTeams } from "./teams";
 import { buildSandboxComplianceChecks, parseVerifyOutcome } from "./verifier";
+import { buildFailureBrief } from "./ladder";
 import { buildVerificationImpactContext, enrichPlanningContext } from "./codebase";
 import { detectDependencyCycle, getMaxDependencyDepth } from "./graph";
 import { nextPendingStep } from "./steering";
@@ -502,12 +503,26 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				task.verifyRetries++;
 				const retriesLeft = MAX_VERIFY_RETRIES - task.verifyRetries;
 
+				// Distill this failure into a brief before task.result is overwritten.
+				// Briefs are rendered into the retry prompts at delegation time —
+				// replacing the old unbounded evidence append onto task.context.
+				task.failureBriefs = [
+					...(task.failureBriefs ?? []),
+					buildFailureBrief({
+						attempt: task.verifyRetries + (task.escalations ?? 0) * MAX_VERIFY_RETRIES,
+						model: task.lastModel ?? task.model,
+						rung: task.rung,
+						evidence: effectiveEvidence ?? "",
+						attempted: task.result,
+						inferred: inferredOutcome,
+					}),
+				];
+
 				if (retriesLeft > 0) {
 					task.status = "pending";
 					task.attempts = 0;
 					task.startedAt = null;
 					task.result = `Verification FAIL #${task.verifyRetries}: ${effectiveEvidence || "no details"}. Fix and retry (${retriesLeft} retries left).`;
-					task.context = `${task.context}\n\n[Verification FAIL #${task.verifyRetries}]: ${effectiveEvidence || "see above"}. Fix the issues and try again.`;
 					task.completedAt = null;
 
 					recordRun(ctx.cwd, {

@@ -165,6 +165,8 @@ export function buildSubAgentPrompt(opts: {
 	context?: string;
 	persona?: string;
 	dependencyResults?: ReadonlyArray<{ content: string; result: string | null }>;
+	/** Rendered failure-brief block (see ladder.ts) — what earlier attempts got wrong. */
+	failureBriefBlock?: string;
 	formatDirective?: string;
 	sandboxProfile?: SandboxProfile;
 }): string {
@@ -185,6 +187,9 @@ export function buildSubAgentPrompt(opts: {
 		lines.push(``, `## Prior results you can build on`);
 		for (const d of deps) lines.push(`- ${d.content}: ${d.result}`);
 	}
+
+	// A retry must lead with what failed before, ahead of generic constraints.
+	if (opts.failureBriefBlock?.trim()) lines.push(``, opts.failureBriefBlock.trim());
 
 	// Inject sandbox constraints when active
 	const sandboxBlock = buildSandboxConstraintBlock(opts.sandboxProfile);

@@ -13,9 +13,12 @@
  * No SDK imports (mirrors delegate.ts) so every decision here is unit-testable.
  */
 import {
+	budgetForModel,
 	clampToBudget,
 	statsFor,
+	CONTEXT_BUDGET,
 	DEFAULT_RETRY_POLICY,
+	type BudgetModelInfo,
 	type EvalStatsIndex,
 	type ModelLadderConfig,
 	type RetryPolicy,
@@ -174,6 +177,16 @@ export function buildFailureBrief(opts: {
 		inferred: opts.inferred,
 		timestamp: Date.now(),
 	};
+}
+
+/**
+ * The failure-brief character budget for a model: the configured budget scaled
+ * by the same small/low-context factors as the awareness budget, so constrained
+ * models get proportionally leaner briefs.
+ */
+export function briefBudgetForModel(model: BudgetModelInfo | undefined, cfg: LadderConfig): number {
+	const scale = budgetForModel(model) / CONTEXT_BUDGET.awarenessBudget;
+	return Math.round(cfg.briefBudget * Math.min(scale, 1));
 }
 
 /**
