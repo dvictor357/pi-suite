@@ -42,15 +42,24 @@ export interface EvalEntry {
 	tokensOut: number;
 	/** How many sub-agent attempts were made (0 means first try succeeded). */
 	attempts: number;
+	/** Model-ladder rung the task finished on, when laddered. */
+	rung?: number;
+	/** How many rung escalations the task consumed, when laddered. */
+	escalations?: number;
 	/** Epoch-ms timestamp. */
 	timestamp: number;
 }
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
+/** Base dir for eval logs: ~/.pi/agent/quests/<cwdHash>/evals/. */
+export function evalsDir(cwd: string): string {
+	return join(runsDir(cwd), "..", "evals");
+}
+
 /** Full path to the eval JSONL file for a quest. */
 export function evalLogPath(cwd: string, questSlug: string): string {
-	return join(runsDir(cwd), "..", "evals", questSlug, "evals.jsonl");
+	return join(evalsDir(cwd), questSlug, "evals.jsonl");
 }
 
 // ── Factory ───────────────────────────────────────────────────────────────────

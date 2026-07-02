@@ -22,7 +22,8 @@ export type RunEventKind =
 	| "task_fail"
 	| "verify_start"
 	| "verify_pass"
-	| "verify_fail";
+	| "verify_fail"
+	| "escalate";
 
 export interface RunEvent {
 	/** Discriminator — the event "shape" in the union below. */
@@ -55,6 +56,12 @@ export interface RunEvent {
 	evidence?: string;
 	/** verify_fail: how many retries remain after this failure. */
 	verifyRetriesLeft?: number;
+	/** "escalate": model the failing attempts ran with. */
+	fromModel?: string;
+	/** "escalate": model the task escalates to. */
+	toModel?: string;
+	/** "escalate": ladder rung index the task moves to. */
+	rung?: number;
 }
 
 // ── Paths ────────────────────────────────────────────────────────────────────

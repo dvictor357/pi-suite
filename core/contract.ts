@@ -135,6 +135,29 @@ export interface ProjectMemory {
 	agentModels?: Record<string, AgentModelChoice>;
 	/** Written by pi-quest when merging quest conventions back into memory. */
 	lastModified?: number;
+	/**
+	 * User-approved model escalation ladder for sub-agent delegation. Written by
+	 * pi-quest's `quest_assign_ladder`; pi-memory preserves it across rescans
+	 * like the other quest-owned fields above. When set, ladder-eligible roles
+	 * start on the cheapest rung and escalate only on verified failure.
+	 */
+	modelLadder?: ModelLadderConfig;
+}
+
+/**
+ * An ordered cheap→frontier model ladder approved by the user for a project;
+ * see ProjectMemory.modelLadder. Approving the ladder approves every rung, so
+ * rung transitions never re-prompt.
+ */
+export interface ModelLadderConfig {
+	/** Ordered model ids, rung 0 = cheapest. Length 1 = "always this model". */
+	rungs: string[];
+	/** Roles the ladder applies to; defaults to quest's execution roles. */
+	roles?: string[];
+	/** Epoch ms the user approved this ladder. */
+	approvedAt: number;
+	/** Short rationale recorded at approval time. */
+	reason?: string;
 }
 
 /** A user-approved model assignment for a sub-agent role; see ProjectMemory.agentModels. */

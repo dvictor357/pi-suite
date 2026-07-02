@@ -16,6 +16,7 @@ export type {
 	MemoryFact,
 	ProjectMemory,
 	AgentModelChoice,
+	ModelLadderConfig,
 	ProjectResearchFinding,
 	UserMemory,
 } from "./contract";
@@ -29,12 +30,13 @@ export {
 	MAX_BURST,
 	MAX_VERIFY_RETRIES,
 	MAX_DEPENDENCY_DEPTH,
+	MAX_ESCALATIONS,
 	DEFAULT_RETRY_POLICY,
 } from "./retry-policy";
 export type { RetryPolicy } from "./retry-policy";
 export { RunLedger, runLedgerPath, runsDir } from "./run-ledger";
 export type { RunEvent, RunEventKind } from "./run-ledger";
-export { EvalLog, evalLogPath } from "./eval-logging";
+export { EvalLog, evalLogPath, evalsDir } from "./eval-logging";
 export type { EvalEntry } from "./eval-logging";
 export { asRecord, strArray, boolOr, numOr, strOr, optStr, optNum, oneOf } from "./coerce";
 export {

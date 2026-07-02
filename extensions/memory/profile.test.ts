@@ -99,3 +99,17 @@ test("withForeignFromDisk falls back to the profile's foreign fields when disk h
 	assert.deepEqual(merged.research, profile.research, "no on-disk research → keep what we have");
 	assert.equal(merged.lastModified, profile.lastModified);
 });
+
+test("withForeignFromDisk preserves quest's modelLadder (stale-snapshot guard)", () => {
+	const profile = stored();
+	const onDisk: Partial<ProjectMemory> = {
+		modelLadder: { rungs: ["ornith-1.0", "mythos-5"], approvedAt: 12345 },
+	};
+	const merged = withForeignFromDisk(profile, onDisk);
+	assert.deepEqual(merged.modelLadder, onDisk.modelLadder, "on-disk ladder wins");
+	assert.equal(
+		withForeignFromDisk(profile, {}).modelLadder,
+		profile.modelLadder,
+		"no on-disk ladder → keep what we have",
+	);
+});

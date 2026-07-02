@@ -16,6 +16,13 @@ export interface RetryPolicy {
 	maxVerifyRetries: number;
 	/** Maximum dependency chain depth for quest task graphs. */
 	maxDependencyDepth: number;
+	/**
+	 * Max model-ladder escalations per task before auto-failing (excludes the
+	 * starting rung). Retry budgets are per-rung: escalating to a new model
+	 * resets `maxVerifyRetries`/`maxRetries`, so the worst case per task is
+	 * `maxVerifyRetries × (1 + min(maxEscalations, rungs − 1))` verified attempts.
+	 */
+	maxEscalations: number;
 }
 
 /**
@@ -26,10 +33,12 @@ export const MAX_RETRIES = 2;
 export const MAX_BURST = 6;
 export const MAX_VERIFY_RETRIES = 2;
 export const MAX_DEPENDENCY_DEPTH = 3;
+export const MAX_ESCALATIONS = 2;
 
 export const DEFAULT_RETRY_POLICY: RetryPolicy = {
 	maxRetries: MAX_RETRIES,
 	maxBurst: MAX_BURST,
 	maxVerifyRetries: MAX_VERIFY_RETRIES,
 	maxDependencyDepth: MAX_DEPENDENCY_DEPTH,
+	maxEscalations: MAX_ESCALATIONS,
 };
