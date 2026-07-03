@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
-import type { AgentModelChoice } from "../../core";
+import type { AgentModelChoice, ModelLadderConfig } from "../../core";
 import { asRecord, strArray, boolOr, strOr, oneOf, numOr, optStr, optNum } from "../../core";
 import type {
 	GitIntegration,
@@ -48,6 +48,45 @@ export function rememberAgentModel(cwd: string, role: string, choice: AgentModel
 			const agentModels = { ...(memory.agentModels ?? {}) };
 			agentModels[role] = choice;
 			return { ...memory, agentModels, contractVersion: CONTRACT_VERSION };
+		},
+		{},
+	);
+}
+
+/**
+ * Read the project's user-approved model escalation ladder (written by
+ * `quest_assign_ladder`). Null when no ladder is approved, the memory file is
+ * absent/malformed, or it was written by a newer contract.
+ */
+export function loadModelLadder(cwd: string): ModelLadderConfig | null {
+	const memory = loadProjectMemory(cwd);
+	const raw = asRecord(memory?.modelLadder);
+	const rungs = strArray(raw.rungs)
+		.map((r) => r.trim())
+		.filter(Boolean);
+	if (rungs.length === 0) return null;
+	const roles = strArray(raw.roles)
+		.map((r) => r.trim())
+		.filter(Boolean);
+	return {
+		rungs,
+		roles: roles.length > 0 ? roles : undefined,
+		approvedAt: numOr(raw.approvedAt, 0),
+		reason: optStr(raw.reason),
+	};
+}
+
+/**
+ * Persist a user-approved model ladder onto the shared project-memory file.
+ * Read-merge-write so a concurrent pi-memory save isn't clobbered, and skip if
+ * pi-memory wrote a newer contract (mirrors rememberAgentModel).
+ */
+export function rememberModelLadder(cwd: string, config: ModelLadderConfig): void {
+	updateJSON<Record<string, any>>(
+		projectMemoryPath(cwd),
+		(memory) => {
+			if (isFutureContract(memory)) return memory;
+			return { ...memory, modelLadder: config, contractVersion: CONTRACT_VERSION };
 		},
 		{},
 	);

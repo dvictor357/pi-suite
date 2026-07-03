@@ -49,6 +49,10 @@ describe("ladderApplies", () => {
 
 	it("applies to default execution roles without an explicit model", () => {
 		assert.equal(ladderApplies(l, "worker", undefined, CFG), true);
+		assert.equal(
+			ladderApplies(l, "quick-worker", undefined, { ...CFG, roles: ["worker", "quick-worker"] }),
+			true,
+		);
 	});
 
 	it("explicit step model bypasses the ladder", () => {
@@ -62,10 +66,11 @@ describe("ladderApplies", () => {
 		}
 	});
 
-	it("a ladder's own roles override the config default", () => {
-		const custom = ladder(["a", "b"], ["writer"]);
+	it("a ladder's own roles override the config default without allowing judge roles", () => {
+		const custom = ladder(["a", "b"], ["writer", "verifier"]);
 		assert.equal(ladderApplies(custom, "writer", undefined, CFG), true);
 		assert.equal(ladderApplies(custom, "worker", undefined, CFG), false);
+		assert.equal(ladderApplies(custom, "verifier", undefined, CFG), false);
 	});
 
 	it("no ladder or empty rungs never applies", () => {

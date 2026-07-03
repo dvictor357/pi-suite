@@ -115,23 +115,35 @@ test("toolsForRole returns a fresh array (no shared mutable state)", () => {
 	assert.ok(!toolsForRole("worker").includes("danger"));
 });
 
-test("resolveTaskModel precedence: step model wins", () => {
-	assert.deepEqual(resolveTaskModel({ taskModel: "gpt-5", rememberedModel: "claude-opus-4-5" }), {
-		model: "gpt-5",
-		needsPrompt: false,
-	});
+test("resolveTaskModel precedence: step model wins over ladder and memory", () => {
+	assert.deepEqual(
+		resolveTaskModel({
+			taskModel: "gpt-5",
+			ladderModel: "ornith-1.0",
+			rememberedModel: "claude-opus-4-5",
+		}),
+		{ model: "gpt-5", needsPrompt: false, source: "task" },
+	);
 });
 
-test("resolveTaskModel precedence: remembered model when step has none", () => {
+test("resolveTaskModel precedence: ladder rung wins over the remembered model", () => {
+	assert.deepEqual(
+		resolveTaskModel({ ladderModel: "ornith-1.0", rememberedModel: "claude-opus-4-5" }),
+		{ model: "ornith-1.0", needsPrompt: false, source: "ladder" },
+	);
+});
+
+test("resolveTaskModel precedence: remembered model when step and ladder have none", () => {
 	assert.deepEqual(resolveTaskModel({ rememberedModel: "claude-opus-4-5" }), {
 		model: "claude-opus-4-5",
 		needsPrompt: false,
+		source: "memory",
 	});
 });
 
 test("resolveTaskModel needs a prompt when nothing is known", () => {
 	assert.deepEqual(resolveTaskModel({}), { needsPrompt: true });
-	assert.deepEqual(resolveTaskModel({ taskModel: "  ", rememberedModel: "" }), {
+	assert.deepEqual(resolveTaskModel({ taskModel: "  ", ladderModel: "", rememberedModel: "" }), {
 		needsPrompt: true,
 	});
 });

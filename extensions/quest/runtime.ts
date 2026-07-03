@@ -20,8 +20,8 @@ import { existsSync, readFileSync } from "node:fs";
 import type { Quest, QuestStep } from "./types";
 import { loadQuest, saveQuest } from "./storage";
 import { buildSteeringMessage, nextPendingStep } from "./steering";
-import { RunLedger, EvalLog } from "../../core";
-import type { RunEvent, EvalEntry } from "../../core";
+import { RunLedger, EvalLog, computeEvalStats, readAllEvalEntries } from "../../core";
+import type { RunEvent, EvalEntry, EvalStatsIndex } from "../../core";
 import { loadTeams, ensureBuiltInTeams } from "./teams";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { syncQuestToTodo } from "./todo-sync";
@@ -81,6 +81,12 @@ export interface QuestRuntime {
 		verified: boolean,
 		evidence: string | null | undefined,
 	): EvalEntry;
+	/**
+	 * Per-(role, model) verified-pass rates aggregated from this project's eval
+	 * logs, memoized per cwd for the session. Best-effort: an unreadable history
+	 * yields an empty index (the ladder then starts every role at rung 0).
+	 */
+	getEvalStats(cwd: string): EvalStatsIndex;
 
 	// ── Misc helpers ─────────────────────────────────────────────────────────────
 	/** Plain-text tool result with empty details. */
@@ -108,6 +114,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 	let questCache: Quest | null = null;
 	let autoPilotLocked = false;
 	const ledgerCache = new Map<string, { ledger: RunLedger; evalLog: EvalLog }>();
+	const evalStatsCache = new Map<string, EvalStatsIndex>();
 
 	function getQuest(cwd?: string): Quest | null {
 		if (!questCache && cwd) questCache = loadQuest(cwd);
@@ -149,9 +156,23 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 	function recordEval(cwd: string, entry: EvalEntry): void {
 		try {
 			getLedgers(cwd).evalLog.record(entry);
+			evalStatsCache.delete(cwd);
 		} catch {
 			/* best-effort observability */
 		}
+	}
+
+	function getEvalStats(cwd: string): EvalStatsIndex {
+		let stats = evalStatsCache.get(cwd);
+		if (!stats) {
+			try {
+				stats = computeEvalStats(readAllEvalEntries(cwd));
+			} catch {
+				stats = new Map();
+			}
+			evalStatsCache.set(cwd, stats);
+		}
+		return stats;
 	}
 
 	function makeEval(
@@ -168,7 +189,12 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 			taskIndex: index,
 			taskContent: step.content,
 			agent: step.agent,
-			model: step.model,
+			// lastModel records what the delegation actually ran with, whatever
+			// source resolved it — step.model alone is blind to memory-resolved
+			// and ladder-resolved models, which would starve the stats router.
+			model: step.lastModel ?? step.model,
+			rung: step.rung,
+			escalations: step.escalations ?? 0,
 			status,
 			verified,
 			verifyEvidence: evidence ?? null,
@@ -377,6 +403,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		recordRun,
 		recordEval,
 		makeEval,
+		getEvalStats,
 		textResult,
 		codebaseToolAvailable,
 		stampTaskModel,

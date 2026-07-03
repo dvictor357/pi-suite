@@ -32,7 +32,15 @@ import { asRecord, boolOr, numOr, optNum, optStr, strOr } from "../../core";
  * which the verification gate then judges. Judge/exploration roles keep their
  * explicit `agentModels` assignment untouched.
  */
-export const DEFAULT_LADDER_ROLES = ["worker"];
+export const DEFAULT_LADDER_ROLES = ["worker", "quick-worker"];
+
+/** Roles that inspect, plan, or judge work; never governed by the execution ladder. */
+export const NEVER_LADDER_ROLES = ["scout", "verifier", "reviewer", "planner"];
+
+export function isNeverLadderRole(role: string): boolean {
+	const wanted = role.trim().toLowerCase();
+	return NEVER_LADDER_ROLES.some((r) => r === wanted);
+}
 
 /** Tunable ladder knobs; the shipped values live in constants.ts (`LADDER`). */
 export interface LadderConfig {
@@ -62,6 +70,7 @@ export function ladderApplies(
 ): boolean {
 	if (!ladder || ladder.rungs.length === 0) return false;
 	if (explicitStepModel?.trim()) return false;
+	if (isNeverLadderRole(agent)) return false;
 	const roles = ladder.roles && ladder.roles.length > 0 ? ladder.roles : cfg.roles;
 	const wanted = agent.trim().toLowerCase();
 	return roles.some((r) => r.trim().toLowerCase() === wanted);

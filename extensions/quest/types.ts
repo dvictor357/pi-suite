@@ -131,6 +131,14 @@ export interface TeamConfig {
 	 * gets the final say via `quest_assign_model`.
 	 */
 	modelHints?: Record<string, string>;
+	/**
+	 * Optional ordered cheap→frontier model ladder the team recommends for its
+	 * execution roles. Advisory only, exactly like {@link modelHints}: it seeds
+	 * the orchestrator's `quest_assign_ladder` proposal but activates nothing
+	 * until the user approves — teams load from user-writable JSON and must not
+	 * silently choose models.
+	 */
+	modelLadder?: string[];
 }
 
 // ── Sandbox ──────────────────────────────────────────────────────────────────

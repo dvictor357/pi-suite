@@ -28,21 +28,31 @@ export function toolsForRole(role: string): string[] {
 
 /**
  * Decide which model id a task's sub-agent should use, in precedence order:
- *   1. a model already assigned to the task,
- *   2. the project's remembered model for this role (asked once per role),
- *   3. otherwise the orchestrator must propose one and the user must approve.
+ *   1. a model already assigned to the task (most specific user intent),
+ *   2. the current rung of the project's approved model ladder, when the
+ *      ladder governs this role (approving the ladder approved every rung,
+ *      so this never re-prompts),
+ *   3. the project's remembered model for this role (asked once per role),
+ *   4. otherwise the orchestrator must propose one and the user must approve.
  *
- * Returns the resolved model id, or `needsPrompt: true` when neither source has
- * a model yet.
+ * Returns the resolved model id and its source, or `needsPrompt: true` when no
+ * source has a model yet.
  */
-export function resolveTaskModel(opts: { taskModel?: string; rememberedModel?: string }): {
+export function resolveTaskModel(opts: {
+	taskModel?: string;
+	ladderModel?: string;
+	rememberedModel?: string;
+}): {
 	model?: string;
 	needsPrompt: boolean;
+	source?: "task" | "ladder" | "memory";
 } {
 	const fromTask = opts.taskModel?.trim();
-	if (fromTask) return { model: fromTask, needsPrompt: false };
+	if (fromTask) return { model: fromTask, needsPrompt: false, source: "task" };
+	const fromLadder = opts.ladderModel?.trim();
+	if (fromLadder) return { model: fromLadder, needsPrompt: false, source: "ladder" };
 	const fromMemory = opts.rememberedModel?.trim();
-	if (fromMemory) return { model: fromMemory, needsPrompt: false };
+	if (fromMemory) return { model: fromMemory, needsPrompt: false, source: "memory" };
 	return { needsPrompt: true };
 }
 

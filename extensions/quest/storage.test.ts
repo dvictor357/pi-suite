@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyQuest, loadQuest, saveQuest } from "./storage";
+import { emptyQuest, loadModelLadder, loadQuest, rememberModelLadder, saveQuest } from "./storage";
 import type { SandboxPolicy } from "./types";
-import { questActivePath, writeJSON } from "./utils";
+import { projectMemoryPath, questActivePath, readJSON, writeJSON } from "./utils";
 
 const tempCwd = (): string => mkdtempSync(join(tmpdir(), "pi-suite-quest-storage-"));
 
@@ -193,4 +193,43 @@ test("loadQuest defaults ladder fields on legacy steps and round-trips populated
 	assert.equal(laddered.failureBriefs?.length, 1, "malformed brief dropped");
 	assert.equal(laddered.failureBriefs?.[0].evidence, "tests fail");
 	assert.equal(laddered.failureBriefs?.[0].inferred, true);
+});
+
+test("rememberModelLadder round-trips via loadModelLadder and preserves other memory fields", () => {
+	const cwd = tempCwd();
+	writeJSON(projectMemoryPath(cwd), {
+		name: "proj",
+		conventions: ["use tabs"],
+		agentModels: { scout: { model: "flash", timestamp: 1 } },
+	});
+
+	assert.equal(loadModelLadder(cwd), null, "no ladder approved yet");
+
+	rememberModelLadder(cwd, {
+		rungs: ["ornith-1.0", "mythos-5"],
+		roles: ["worker"],
+		approvedAt: 123,
+		reason: "cheap first",
+	});
+
+	const ladder = loadModelLadder(cwd);
+	assert.deepEqual(ladder?.rungs, ["ornith-1.0", "mythos-5"]);
+	assert.deepEqual(ladder?.roles, ["worker"]);
+	assert.equal(ladder?.approvedAt, 123);
+
+	const onDisk = readJSON<Record<string, unknown>>(projectMemoryPath(cwd), {});
+	assert.deepEqual(onDisk.conventions, ["use tabs"], "read-merge-write keeps memory's fields");
+	assert.ok(onDisk.agentModels, "agentModels untouched");
+});
+
+test("loadModelLadder rejects malformed ladders and a future contract", () => {
+	const cwd = tempCwd();
+	writeJSON(projectMemoryPath(cwd), { modelLadder: { rungs: ["  ", 42], approvedAt: 1 } });
+	assert.equal(loadModelLadder(cwd), null, "no usable rungs → no ladder");
+
+	writeJSON(projectMemoryPath(cwd), {
+		contractVersion: 999,
+		modelLadder: { rungs: ["ornith-1.0"], approvedAt: 1 },
+	});
+	assert.equal(loadModelLadder(cwd), null, "future contract is refused, not misread");
 });

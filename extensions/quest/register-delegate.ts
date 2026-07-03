@@ -1,9 +1,23 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import type { ModelLadderConfig } from "../../core";
 import { formatDirectiveFor, LADDER } from "./constants";
-import { archiveQuest, loadAgentModels, rememberAgentModel } from "./storage";
+import {
+	archiveQuest,
+	loadAgentModels,
+	loadModelLadder,
+	rememberAgentModel,
+	rememberModelLadder,
+} from "./storage";
 import { resolveTaskModel, buildSubAgentPrompt } from "./delegate";
-import { briefBudgetForModel, renderFailureBriefs } from "./ladder";
+import {
+	briefBudgetForModel,
+	isNeverLadderRole,
+	ladderApplies,
+	pickStartRung,
+	renderFailureBriefs,
+	rungModel,
+} from "./ladder";
 import { clearQuestFromTodo } from "./todo-sync";
 import { loadTeams } from "./teams";
 import { matchModel, promptModelAssignment, toModelLike } from "./models";
@@ -14,7 +28,7 @@ import { runSubAgent } from "./subagent";
 import type { QuestRuntime } from "./runtime";
 
 export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
-	const { getQuest, textResult, resolvePersona, stampTaskModel } = rt;
+	const { getQuest, textResult, resolvePersona, stampTaskModel, persist } = rt;
 
 	pi.registerTool({
 		name: "quest_assign_model",
@@ -132,6 +146,108 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 	});
 
 	pi.registerTool({
+		name: "quest_assign_ladder",
+		label: "Quest Assign Ladder",
+		description: [
+			"Propose an ordered cheap→frontier model ladder for this project's execution roles.",
+			"Steps start on the cheapest rung and escalate to the next one only after verified",
+			"failure exhausts the per-rung retries. The user approves the whole ladder once;",
+			"rung transitions never re-prompt. Judge roles (verifier/reviewer/scout/planner)",
+			"are never laddered. Re-run this tool to change the ladder (re-approval).",
+		].join(" "),
+		parameters: Type.Object({
+			rungs: Type.Array(Type.String(), {
+				description: "Ordered model ids, cheapest first (e.g. ['ornith-1.0', 'claude-opus-4-8'])",
+			}),
+			roles: Type.Optional(
+				Type.Array(Type.String(), {
+					description: "Agent roles the ladder governs; defaults to the execution roles",
+				}),
+			),
+			reason: Type.Optional(
+				Type.String({ description: "Short rationale for proposing this ladder" }),
+			),
+		}),
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const proposed = params.rungs.map((r) => r.trim()).filter(Boolean);
+			if (proposed.length === 0) {
+				return textResult("A ladder needs at least one rung (model id).");
+			}
+
+			// Validate every rung up front: an unresolvable rung would strand
+			// escalation mid-climb, so the whole ladder is rejected instead.
+			const available = ctx.modelRegistry.getAvailable().map(toModelLike);
+			const rungs: string[] = [];
+			for (const rung of proposed) {
+				const matched = matchModel(available, rung);
+				if (!matched) {
+					return textResult(
+						`"${rung}" isn't an available model — ladder rejected. Every rung must resolve so escalation can't strand mid-climb.`,
+					);
+				}
+				if (!rungs.includes(matched.id)) rungs.push(matched.id);
+			}
+
+			const rejectedRoles = params.roles
+				?.map((r) => r.trim())
+				.filter((r) => r && isNeverLadderRole(r));
+			const roles = params.roles?.map((r) => r.trim()).filter((r) => r && !isNeverLadderRole(r));
+			if (params.roles && (!roles || roles.length === 0)) {
+				return textResult(
+					`No ladder-eligible roles provided. Judge/exploration roles (${rejectedRoles?.join(", ")}) are never laddered.`,
+				);
+			}
+			const config: ModelLadderConfig = {
+				rungs,
+				roles: roles && roles.length > 0 ? roles : undefined,
+				approvedAt: Date.now(),
+				reason: params.reason,
+			};
+
+			const rungLines = rungs.map((r, i) => `  ${i}. ${r}${i === 0 ? "  (start)" : ""}`);
+			if (ctx.hasUI) {
+				const approved = await ctx.ui.confirm(
+					"Approve Model Ladder",
+					[
+						`Steps for ${config.roles?.join(", ") ?? LADDER.roles.join(", ")} start on the cheapest rung and escalate only on verified failure:`,
+						``,
+						...rungLines,
+						``,
+						params.reason ? `Why: ${params.reason}` : "",
+						rejectedRoles && rejectedRoles.length > 0
+							? `Ignored non-laddered judge/exploration roles: ${rejectedRoles.join(", ")}.`
+							: "",
+						`Approving the ladder approves every rung — escalations won't re-prompt.`,
+					]
+						.filter(Boolean)
+						.join("\n"),
+				);
+				if (!approved) {
+					return {
+						content: [{ type: "text", text: "Model ladder not approved — nothing changed." }],
+						details: { outcome: "cancelled" },
+					};
+				}
+			}
+
+			rememberModelLadder(ctx.cwd, config);
+			return {
+				content: [
+					{
+						type: "text",
+						text: [
+							`${ctx.hasUI ? "" : "(headless) "}Model ladder approved and remembered for this project:`,
+							...rungLines,
+							`Ladder-eligible roles: ${config.roles?.join(", ") ?? LADDER.roles.join(", ")}.`,
+						].join("\n"),
+					},
+				],
+				details: { rungs, roles: config.roles ?? LADDER.roles, outcome: "assigned" },
+			};
+		},
+	});
+
+	pi.registerTool({
 		name: "quest_delegate",
 		label: "Quest Delegate",
 		description: [
@@ -159,7 +275,26 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			const role = task.agent;
 
 			const remembered = loadAgentModels(ctx.cwd)[role]?.model;
-			const resolved = resolveTaskModel({ taskModel: task.model, rememberedModel: remembered });
+
+			// Approved ladder: initialize the step's rung from project history on
+			// first delegation, then resolve the rung's model. Every rung was
+			// approved with the ladder, so this path never re-prompts.
+			const ladder = loadModelLadder(ctx.cwd);
+			let ladderModel: string | undefined;
+			let rungInitialized = false;
+			if (ladder && ladderApplies(ladder, role, task.model, LADDER)) {
+				if (task.rung === undefined) {
+					task.rung = pickStartRung(ladder, role, rt.getEvalStats(ctx.cwd), LADDER);
+					rungInitialized = true;
+				}
+				ladderModel = rungModel(ladder, task.rung);
+			}
+
+			const resolved = resolveTaskModel({
+				taskModel: task.model,
+				ladderModel,
+				rememberedModel: remembered,
+			});
 			let modelId = resolved.model;
 
 			if (resolved.needsPrompt) {
@@ -196,6 +331,14 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				return textResult(
 					`Could not resolve a model to run "${role}" (assigned "${modelId ?? "none"}"). Assign one with quest_assign_model.`,
 				);
+			}
+
+			// Record what this delegation actually runs with (and the freshly
+			// initialized rung, when laddered) so evals and failure briefs always
+			// know the model — step.model alone only covers explicit overrides.
+			if (task.lastModel !== model.id || rungInitialized) {
+				task.lastModel = model.id;
+				persist(ctx, quest);
 			}
 
 			const sandboxProfile = resolveSandboxProfile(quest.sandbox, task.sandbox);
