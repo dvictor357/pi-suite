@@ -95,6 +95,27 @@ it is not a breaking storage change.
 
 New code should use the `step`-named forms; old integrations continue to work unchanged.
 
+## Verified escalation ladder — RESOLVED
+
+Quest now supports an additive project-memory field, `ProjectMemory.modelLadder`, for a
+user-approved ordered cheap→frontier model ladder. No `CONTRACT_VERSION` bump is required:
+legacy readers ignore the field, and new readers treat absence as "no ladder".
+
+Storage and preservation rules:
+
+- `core/contract.ts` defines `ModelLadderConfig` (`rungs`, `roles?`, `approvedAt`,
+  `reason?`) and `ProjectMemory.modelLadder?`.
+- `extensions/quest/storage.ts` owns `loadModelLadder` / `rememberModelLadder` and uses
+  read-merge-write with `isFutureContract` protection.
+- `extensions/memory/profile.ts` preserves `modelLadder` in `withForeignFromDisk`, so a
+  memory rescan cannot clobber a ladder approved during a quest.
+- `QuestStep` gained additive ladder fields: `rung?`, `escalations?`, `failureBriefs?`,
+  and `lastModel?`; legacy quest loads default them safely.
+
+Operationally, `quest_assign_ladder` validates and approves the rung list once per project.
+Ladder transitions never re-prompt, judge roles are excluded, and explicit step models
+bypass the ladder.
+
 ## Order
 
 Migrate **pi-memory** and **pi-todo** first (they are leaf producers of the shared

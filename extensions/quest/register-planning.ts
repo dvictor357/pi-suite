@@ -2,10 +2,17 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import type { StepStatus } from "./types";
-import { formatDirectiveFor, MAX_DEPENDENCY_DEPTH, MAX_VERIFY_RETRIES } from "./constants";
+import { formatDirectiveFor, LADDER, MAX_DEPENDENCY_DEPTH, MAX_VERIFY_RETRIES } from "./constants";
+import { loadModelLadder } from "./storage";
 import { loadTeams } from "./teams";
 import { buildSandboxComplianceChecks, parseVerifyOutcome } from "./verifier";
-import { buildFailureBrief } from "./ladder";
+import {
+	briefBudgetForModel,
+	buildFailureBrief,
+	decideVerifyFailAction,
+	renderFailureBriefs,
+	rungModel,
+} from "./ladder";
 import { buildVerificationImpactContext, enrichPlanningContext } from "./codebase";
 import { detectDependencyCycle, getMaxDependencyDepth } from "./graph";
 import { nextPendingStep } from "./steering";
@@ -218,6 +225,10 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				verifyRetries: 0,
 				commitHash: null,
 				branchName: null,
+				rung: undefined,
+				escalations: 0,
+				failureBriefs: [],
+				lastModel: undefined,
 				sandbox:
 					t.sandbox && typeof t.sandbox === "object" && Object.keys(t.sandbox).length > 0
 						? (t.sandbox as import("./types").SandboxOverrides)
@@ -501,7 +512,6 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 
 				// FAIL
 				task.verifyRetries++;
-				const retriesLeft = MAX_VERIFY_RETRIES - task.verifyRetries;
 
 				// Distill this failure into a brief before task.result is overwritten.
 				// Briefs are rendered into the retry prompts at delegation time —
@@ -509,7 +519,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				task.failureBriefs = [
 					...(task.failureBriefs ?? []),
 					buildFailureBrief({
-						attempt: task.verifyRetries + (task.escalations ?? 0) * MAX_VERIFY_RETRIES,
+						attempt: (task.failureBriefs?.length ?? 0) + 1,
 						model: task.lastModel ?? task.model,
 						rung: task.rung,
 						evidence: effectiveEvidence ?? "",
@@ -518,7 +528,16 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					}),
 				];
 
-				if (retriesLeft > 0) {
+				const ladder = task.rung !== undefined ? loadModelLadder(ctx.cwd) : null;
+				const decision = decideVerifyFailAction({
+					verifyRetries: task.verifyRetries,
+					rung: task.rung,
+					escalations: task.escalations ?? 0,
+					ladderLength: ladder?.rungs.length ?? 0,
+				});
+				const retriesLeft = decision.retriesLeft;
+
+				if (decision.action === "retry") {
 					task.status = "pending";
 					task.attempts = 0;
 					task.startedAt = null;
@@ -555,10 +574,93 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					};
 				}
 
-				// No retries left: auto-fail
+				if (decision.action === "escalate" && decision.nextRung !== undefined && ladder) {
+					const fromRung = task.rung;
+					const fromModel =
+						task.lastModel ??
+						task.model ??
+						(fromRung !== undefined ? rungModel(ladder, fromRung) : undefined);
+					const toModel = rungModel(ladder, decision.nextRung);
+
+					task.status = "pending";
+					task.attempts = 0;
+					task.verifyRetries = 0;
+					task.rung = decision.nextRung;
+					task.escalations = (task.escalations ?? 0) + 1;
+					task.startedAt = null;
+					task.completedAt = null;
+					task.result = `Verification FAIL on ${fromModel ?? "previous model"}: ${effectiveEvidence || "no details"}. Escalating to rung ${decision.nextRung} (${toModel}).`;
+
+					recordRun(ctx.cwd, {
+						kind: "verify_fail",
+						taskIndex: params.index,
+						taskContent: task.content,
+						agent: "verifier",
+						timestamp: Date.now(),
+						evidence: effectiveEvidence,
+						verifyRetriesLeft: 0,
+					});
+					recordRun(ctx.cwd, {
+						kind: "escalate",
+						taskIndex: params.index,
+						taskContent: task.content,
+						agent: task.agent,
+						model: fromModel,
+						fromModel,
+						toModel,
+						rung: decision.nextRung,
+						timestamp: Date.now(),
+						evidence: effectiveEvidence,
+					});
+
+					quest.lastFiredStepIndex = -1;
+					quest.sameStepCount = 0;
+					persist(ctx, quest);
+
+					return {
+						content: [
+							{
+								type: "text",
+								text: [
+									`⬆️ Step #${params.index + 1} **VERIFICATION FAIL — ESCALATING**: ${task.content}`,
+									effectiveEvidence ? `  Evidence: ${effectiveEvidence}` : "",
+									``,
+									`Rung ${fromRung ?? "?"} (${fromModel ?? "unknown"}) exhausted. Next delegation will use rung ${decision.nextRung}/${ladder.rungs.length - 1} (${toModel}).`,
+									`Per-rung verification retry budget reset; failure briefs will be included in the next prompt.`,
+								].join("\n"),
+							},
+						],
+						details: {
+							task,
+							verified: false,
+							outcome: "FAIL",
+							escalated: true,
+							fromRung,
+							nextRung: decision.nextRung,
+							fromModel,
+							toModel,
+							escalations: task.escalations,
+						},
+					};
+				}
+
+				// No retries/escalations left: auto-fail
+				const failureTrail = renderFailureBriefs(
+					task.failureBriefs,
+					briefBudgetForModel(
+						task.lastModel || task.model ? { id: task.lastModel ?? task.model } : undefined,
+						LADDER,
+					),
+					LADDER.maxBriefs,
+				);
 				task.status = "failed";
 				task.completedAt = Date.now();
-				task.result = `Verification FAIL after ${MAX_VERIFY_RETRIES} retries: ${effectiveEvidence || "no details"}`;
+				task.result = [
+					`Verification FAIL after ${MAX_VERIFY_RETRIES} retries${task.escalations ? ` and ${task.escalations} escalation(s)` : ""}: ${effectiveEvidence || "no details"}`,
+					failureTrail,
+				]
+					.filter(Boolean)
+					.join("\n\n");
 
 				recordRun(ctx.cwd, {
 					kind: "verify_fail",
@@ -569,10 +671,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					evidence: effectiveEvidence,
 					verifyRetriesLeft: 0,
 				});
-				recordEval(
-					ctx.cwd,
-					makeEval(quest, task, params.index, "failed", false, effectiveEvidence),
-				);
+				recordEval(ctx.cwd, makeEval(quest, task, params.index, "failed", false, task.result));
 
 				quest.lastFiredStepIndex = -1;
 				quest.sameStepCount = 0;
@@ -585,7 +684,10 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 							text: [
 								`❌ Step #${params.index + 1} **AUTO-FAILED** (${MAX_VERIFY_RETRIES} verification retries exhausted): ${task.content}`,
 								effectiveEvidence ? `  Last evidence: ${effectiveEvidence}` : "",
-							].join("\n"),
+								failureTrail,
+							]
+								.filter(Boolean)
+								.join("\n"),
 						},
 					],
 					details: { task, verified: false, outcome: "FAIL", exhausted: true },
@@ -600,7 +702,8 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				if (hasVerifier) {
 					task.status = "verifying";
 					if (params.result) task.result = params.result;
-					task.verifyRetries = 0;
+					// Preserve verifyRetries across same-rung retry attempts. Escalation
+					// resets it explicitly, so the budget stays per-rung.
 					task.verified = false;
 					task.verifyResult = null;
 

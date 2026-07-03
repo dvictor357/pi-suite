@@ -1,6 +1,14 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_RETRY_POLICY } from "../../core";
 import { MAX_BURST, MAX_RETRIES } from "./constants";
-import { archiveQuest, loadQuest, saveQuest, syncConventionsToMemory } from "./storage";
+import {
+	archiveQuest,
+	loadModelLadder,
+	loadQuest,
+	saveQuest,
+	syncConventionsToMemory,
+} from "./storage";
+import { buildFailureBrief, decideVerifyFailAction, rungModel } from "./ladder";
 import { nextPendingStep, formatQuestStatus, wasTurnAborted } from "./steering";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { syncQuestToTodo } from "./todo-sync";
@@ -373,12 +381,67 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 			}
 
 			if (next.task.attempts > MAX_RETRIES) {
-				next.task.status = "failed";
-				next.task.result = `Auto-failed after ${MAX_RETRIES + 1} attempts.`;
-				quest.lastFiredStepIndex = -1;
-				quest.sameStepCount = 0;
-				persist(ctx, quest);
-				return;
+				const ladder = next.task.rung !== undefined ? loadModelLadder(ctx.cwd) : null;
+				const decision = decideVerifyFailAction({
+					// Attempts are already exhausted here; use the shared decision tree
+					// only for escalation-vs-fail, not another same-rung retry.
+					verifyRetries: DEFAULT_RETRY_POLICY.maxVerifyRetries,
+					rung: next.task.rung,
+					escalations: next.task.escalations ?? 0,
+					ladderLength: ladder?.rungs.length ?? 0,
+				});
+
+				if (decision.action === "escalate" && decision.nextRung !== undefined && ladder) {
+					const fromRung = next.task.rung;
+					const fromModel =
+						next.task.lastModel ??
+						next.task.model ??
+						(fromRung !== undefined ? rungModel(ladder, fromRung) : undefined);
+					const toModel = rungModel(ladder, decision.nextRung);
+					const evidence = `Task attempt budget exhausted after ${MAX_RETRIES + 1} attempts.`;
+
+					next.task.failureBriefs = [
+						...(next.task.failureBriefs ?? []),
+						buildFailureBrief({
+							attempt: (next.task.failureBriefs?.length ?? 0) + 1,
+							model: fromModel,
+							rung: fromRung,
+							evidence,
+							attempted: next.task.result,
+							inferred: false,
+						}),
+					];
+					next.task.status = "pending";
+					next.task.attempts = 0;
+					next.task.verifyRetries = 0;
+					next.task.rung = decision.nextRung;
+					next.task.escalations = (next.task.escalations ?? 0) + 1;
+					next.task.startedAt = null;
+					next.task.completedAt = null;
+					next.task.result = `${evidence} Escalating from ${fromModel ?? "previous model"} to rung ${decision.nextRung} (${toModel}).`;
+					quest.lastFiredStepIndex = -1;
+					quest.sameStepCount = 0;
+					persist(ctx, quest);
+					rt.recordRun(ctx.cwd, {
+						kind: "escalate",
+						taskIndex: next.index,
+						taskContent: next.task.content,
+						agent: next.task.agent,
+						model: fromModel,
+						fromModel,
+						toModel,
+						rung: decision.nextRung,
+						timestamp: Date.now(),
+						evidence,
+					});
+				} else {
+					next.task.status = "failed";
+					next.task.result = `Auto-failed after ${MAX_RETRIES + 1} attempts.`;
+					quest.lastFiredStepIndex = -1;
+					quest.sameStepCount = 0;
+					persist(ctx, quest);
+					return;
+				}
 			}
 
 			if (quest.stepsSincePause >= MAX_BURST) {

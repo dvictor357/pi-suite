@@ -166,6 +166,40 @@ actually trips the constrained check pays the shorter form. The compact/full spl
 content-preserving — both state the same requirement — so intelligence is not traded away
 for the token savings.
 
+## Verified escalation ladder
+
+Quest can spend cheap tokens first without lowering the quality bar. The user approves an
+ordered cheap→frontier model ladder once per project (`quest_assign_ladder` →
+`ProjectMemory.modelLadder`). Ladder-eligible execution steps start on the cheapest viable
+rung; the existing verifier remains the gate. A verified failure retries on the same rung
+with a compact failure brief, then escalates to the next rung only after that rung's retry
+budget is exhausted.
+
+Key boundaries:
+
+- **Approval:** every rung must resolve against the model registry before the ladder is
+  saved. Re-running `quest_assign_ladder` replaces the ladder and requires re-approval.
+  Rung transitions inside an approved ladder never re-prompt.
+- **Eligibility:** default roles are `worker` and `quick-worker`. Judge/exploration roles
+  (`scout`, `verifier`, `reviewer`, `planner`) are never laddered, even if a stored ladder
+  names them; explicit per-step `model` assignments also bypass the ladder.
+- **Adaptive start rung:** `core/eval-stats.ts` reads prior eval JSONL and computes
+  per-(role, model) verified pass rates. `pickStartRung` skips a rung only after at least
+  `LADDER.minSamples` samples prove its pass rate is below `LADDER.passRateFloor`; with no
+  history, the cheapest rung is trusted.
+- **Failure briefs:** verified failures are stored as `FailureBrief` records and rendered
+  newest-first into steering/delegate prompts, clamped by the same model-aware budgeting
+  rules. The old unbounded append to `step.context` is not used.
+- **Escalation:** `decideVerifyFailAction` centralizes retry → escalate → fail. Retry
+  budgets are per-rung; escalation resets `verifyRetries`/`attempts`, increments
+  `step.escalations`, records an `escalate` run event, and preserves the brief trail.
+- **Eval feedback:** terminal eval rows now record `lastModel` (the actual delegated model),
+  plus `rung` and `escalations`, so memory-resolved and ladder-resolved models contribute
+  to future routing.
+
+No default rung list ships in the repo; hard-coded model catalogs rot. The feature is inert
+until a project approves a ladder.
+
 ## Task → Step rename (completed)
 
 Quest originally used `task` as its unit-of-work term. In v1 the canonical term was

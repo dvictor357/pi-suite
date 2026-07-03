@@ -1,8 +1,8 @@
 import type { Quest, QuestStep } from "./types";
 import { MAX_BURST, MAX_RETRIES, ICON, LADDER, formatDirectiveFor } from "./constants";
 import { compactAwarenessBlock } from "./todo-sync";
-import { loadAgentModels } from "./storage";
-import { briefBudgetForModel, renderFailureBriefs } from "./ladder";
+import { loadAgentModels, loadModelLadder } from "./storage";
+import { briefBudgetForModel, renderFailureBriefs, rungModel } from "./ladder";
 
 /**
  * Whether the just-ended turn was aborted by the user (Esc), as opposed to
@@ -183,12 +183,16 @@ export function buildSteeringMessage(
 		: "";
 
 	// Surface the model to run this sub-agent with: the task's own assignment
-	// wins, else the project's remembered choice for this role. When neither
-	// exists, nudge the orchestrator to propose one via quest_assign_model.
+	// wins, else the current approved ladder rung, else the project's remembered
+	// choice for this role. When none exists, nudge the orchestrator to propose.
 	const remembered = loadAgentModels(cwd)[task.agent]?.model;
-	const assignedModel = task.model?.trim() || remembered?.trim();
+	const ladder = task.rung !== undefined ? loadModelLadder(cwd) : null;
+	const ladderModel = ladder && !task.model?.trim() ? rungModel(ladder, task.rung ?? 0) : undefined;
+	const assignedModel = task.model?.trim() || ladderModel?.trim() || remembered?.trim();
 	const modelLine = assignedModel
-		? `**Model:** \`${assignedModel}\` — delegate with quest_delegate(index=${index}).`
+		? ladderModel
+			? `**Model:** rung ${task.rung! + 1}/${ladder!.rungs.length} — \`${assignedModel}\` (ladder); delegate with quest_delegate(index=${index}).`
+			: `**Model:** \`${assignedModel}\` — delegate with quest_delegate(index=${index}).`
 		: `**Model:** none assigned for role \`${task.agent}\`. Propose one via quest_assign_model(role="${task.agent}", proposed="…", stepIndex=${index}), then quest_delegate(index=${index}).`;
 
 	// Distilled prior verified failures: the orchestrator writing the next
