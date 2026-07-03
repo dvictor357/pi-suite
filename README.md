@@ -15,6 +15,17 @@ shared [`core/`](core/README.md) module owns the storage contract, so the three 
 longer drift apart silently. The standalone `pi-quest`, `pi-todo`, and `pi-memory` repos
 are now deprecated in favor of this suite.
 
+## Demo
+
+![pi-suite quest kanban demo](docs/assets/quest-demo.gif)
+
+```text
+/quest create  →  plan steps  →  delegate agents  →  verify  →  recap
+```
+
+When a quest finishes, `pi-quest` now posts a compact recap with the scorecard, step
+results, git commits, saved conventions, and next action.
+
 ## Layout
 
 ```

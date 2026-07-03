@@ -14,6 +14,7 @@ import { renderStatus, writeQuestSessionMeta } from "./status";
 import { syncQuestToTodo } from "./todo-sync";
 import { resolveSandboxProfile } from "./sandbox";
 import { evaluateToolCall } from "./sandbox-guard";
+import { buildQuestRecap } from "./recap";
 import type { QuestRuntime } from "./runtime";
 
 export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
@@ -185,50 +186,9 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 					archiveQuest(quest, ctx.cwd);
 					persist(ctx, quest);
 
-					const git = quest.gitIntegration;
-					const gitSection =
-						quest.commits.length > 0
-							? [
-									``,
-									`## Git Summary`,
-									``,
-									`**${quest.commits.length} commit(s)** recorded.`,
-									quest.commits
-										.slice(0, 5)
-										.map((c) => `- \`${c.hash.slice(0, 8)}\` ${c.message}`)
-										.join("\n"),
-									quest.commits.length > 5 ? `- ... and ${quest.commits.length - 5} more` : "",
-									git?.autoPR
-										? [``, `**🔀 Auto-PR enabled.** Generate a PR with quest_git_summary().`].join(
-												"\n",
-											)
-										: "",
-								]
-									.filter(Boolean)
-									.join("\n")
-							: git?.autoCommit
-								? `\n\n⚠ No commits were recorded for this quest. Use quest_commit to track deliverables.`
-								: "";
-
 					rt.setAutoPilotLocked(true);
 					try {
-						pi.sendUserMessage(
-							[
-								`## Quest Complete: ${quest.name} 🎉`,
-								``,
-								`${quest.steps.filter((t) => t.status === "done").length}/${quest.steps.length} steps done.`,
-								gitSection,
-								``,
-								quest.conventions.length
-									? `Saved ${quest.conventions.length} convention(s) to project memory.`
-									: `No quest conventions to save to project memory.`,
-								``,
-								`Start a new quest with /quest create, or review with quest_history.`,
-							]
-								.filter(Boolean)
-								.join("\n"),
-							{ deliverAs: "steer" },
-						);
+						pi.sendUserMessage(buildQuestRecap(quest), { deliverAs: "steer" });
 					} finally {
 						rt.setAutoPilotLocked(false);
 					}
