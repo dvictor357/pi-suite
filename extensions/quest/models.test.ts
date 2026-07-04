@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { setImmediate } from "node:timers/promises";
 import {
+	enqueueUiPrompt,
 	matchModel,
 	formatModelLabel,
 	promptModelAssignment,
@@ -121,4 +122,48 @@ test("promptModelAssignment serializes concurrent prompts", async () => {
 		outcome: "assigned",
 		model: MODELS[1],
 	} satisfies ModelAssignment);
+});
+
+// Regression: quest_assign_ladder's confirm() used to bypass the prompt queue,
+// so when dispatched alongside quest_assign_model in one model response its
+// overlay was orphaned and the turn hung on "Working…". Both prompt kinds must
+// share one queue: the confirm must wait behind the in-flight assignment.
+test("enqueueUiPrompt serializes a confirm behind a model-assignment prompt", async () => {
+	const assignChoice = deferred<string | undefined>();
+	const confirmAnswer = deferred<boolean>();
+	const order: string[] = [];
+
+	const ctx = {
+		hasUI: false,
+		modelRegistry: { getAvailable: () => MODELS.slice(0, 2) },
+		ui: {
+			notify: () => {},
+			select: async () => {
+				order.push("assign:start");
+				return assignChoice.promise;
+			},
+			confirm: async () => {
+				order.push("confirm:start");
+				return confirmAnswer.promise;
+			},
+		},
+	} as unknown as ExtensionContext;
+
+	const assign = promptModelAssignment(ctx, { role: "worker", proposed: "deepseek-v4-flash" });
+	// Mirrors register-delegate's ladder confirm going through the shared queue.
+	const confirm = enqueueUiPrompt(() =>
+		(ctx.ui as unknown as { confirm: () => Promise<boolean> }).confirm(),
+	);
+
+	await setImmediate();
+	// The confirm must not have opened while the assignment is still in flight.
+	assert.deepEqual(order, ["assign:start"]);
+
+	assignChoice.resolve(`${formatModelLabel(MODELS[0])}  ← orchestrator's pick`);
+	await assign;
+	await setImmediate();
+	assert.deepEqual(order, ["assign:start", "confirm:start"]);
+
+	confirmAnswer.resolve(true);
+	assert.equal(await confirm, true);
 });

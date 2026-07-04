@@ -63,18 +63,23 @@ export function formatModelLabel(m: ModelLike): string {
 
 const KEEP_DEFAULT = "Keep harness default (no override)";
 
-let modelAssignmentPromptQueue: Promise<void> = Promise.resolve();
+let uiPromptQueue: Promise<void> = Promise.resolve();
 
 /**
  * Tool calls from a single model response may execute concurrently. Interactive
- * prompts must still be shown one-at-a-time, otherwise multiple `ctx.ui.custom`
- * overlays compete for focus and later `quest_assign_model` calls can appear to
- * hang behind duplicate tool cards.
+ * prompts must still be shown one-at-a-time, otherwise multiple overlays
+ * (`ctx.ui.custom`, `ctx.ui.confirm`, …) compete for focus and every prompt but
+ * the one that wins the terminal appears to hang behind its tool card.
+ *
+ * Every interactive quest prompt must route through this single queue — a prompt
+ * that bypasses it (e.g. calling `ctx.ui.confirm` directly) can be orphaned
+ * behind a queued overlay and never receive input. See {@link promptModelAssignment}
+ * and the ladder-approval confirm in register-delegate.
  */
-async function enqueueModelAssignmentPrompt<T>(fn: () => Promise<T>): Promise<T> {
-	const previous = modelAssignmentPromptQueue;
+export async function enqueueUiPrompt<T>(fn: () => Promise<T>): Promise<T> {
+	const previous = uiPromptQueue;
 	let release!: () => void;
-	modelAssignmentPromptQueue = new Promise<void>((resolve) => {
+	uiPromptQueue = new Promise<void>((resolve) => {
 		release = resolve;
 	});
 
@@ -112,7 +117,7 @@ export async function promptModelAssignment(
 	ctx: ExtensionContext,
 	opts: { role: string; proposed: string; reason?: string },
 ): Promise<ModelAssignment> {
-	return enqueueModelAssignmentPrompt(async () => {
+	return enqueueUiPrompt(async () => {
 		const available = ctx.modelRegistry.getAvailable().map(toModelLike);
 		if (available.length === 0) {
 			ctx.ui.notify(

@@ -20,7 +20,7 @@ import {
 } from "./ladder";
 import { clearQuestFromTodo } from "./todo-sync";
 import { loadTeams } from "./teams";
-import { matchModel, promptModelAssignment, toModelLike } from "./models";
+import { enqueueUiPrompt, matchModel, promptModelAssignment, toModelLike } from "./models";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { resolveSandboxProfile, sandboxToolsForRole } from "./sandbox";
 import { logDeprecatedParam } from "./deprecation";
@@ -206,21 +206,26 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 
 			const rungLines = rungs.map((r, i) => `  ${i}. ${r}${i === 0 ? "  (start)" : ""}`);
 			if (ctx.hasUI) {
-				const approved = await ctx.ui.confirm(
-					"Approve Model Ladder",
-					[
-						`Steps for ${config.roles?.join(", ") ?? LADDER.roles.join(", ")} start on the cheapest rung and escalate only on verified failure:`,
-						``,
-						...rungLines,
-						``,
-						params.reason ? `Why: ${params.reason}` : "",
-						rejectedRoles && rejectedRoles.length > 0
-							? `Ignored non-laddered judge/exploration roles: ${rejectedRoles.join(", ")}.`
-							: "",
-						`Approving the ladder approves every rung — escalations won't re-prompt.`,
-					]
-						.filter(Boolean)
-						.join("\n"),
+				// Route through the shared prompt queue so a concurrent
+				// quest_assign_model overlay (dispatched in the same model
+				// response) can't orphan this confirm and hang the turn.
+				const approved = await enqueueUiPrompt(() =>
+					ctx.ui.confirm(
+						"Approve Model Ladder",
+						[
+							`Steps for ${config.roles?.join(", ") ?? LADDER.roles.join(", ")} start on the cheapest rung and escalate only on verified failure:`,
+							``,
+							...rungLines,
+							``,
+							params.reason ? `Why: ${params.reason}` : "",
+							rejectedRoles && rejectedRoles.length > 0
+								? `Ignored non-laddered judge/exploration roles: ${rejectedRoles.join(", ")}.`
+								: "",
+							`Approving the ladder approves every rung — escalations won't re-prompt.`,
+						]
+							.filter(Boolean)
+							.join("\n"),
+					),
 				);
 				if (!approved) {
 					return {
