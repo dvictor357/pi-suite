@@ -15,6 +15,7 @@
  *   memory_status   — show both profiles (what pi knows)
  *   memory_user     — view / set user-level preferences, conventions & facts
  *   memory_project  — view / set project-level conventions & facts
+ *   memory_graph    — manage a project knowledge graph (nodes + edges)
  *
  * Commands
  * --------
@@ -46,6 +47,9 @@ import type {
 	ProjectMemory as ProjectProfile,
 	MemoryFact,
 	UserMemory as UserProfile,
+	NodeKind,
+	EdgeKind,
+	MemoryGraph,
 } from "../../core";
 import { withForeignFromDisk } from "./profile";
 
@@ -813,6 +817,176 @@ export default function (pi: ExtensionAPI) {
 			return {
 				content: [{ type: "text", text: lines.join("\n") }],
 				details: { issues, totalCounts },
+			};
+		},
+	});
+
+	// ── memory_graph ───────────────────────────────────────────────────────
+
+	pi.registerTool({
+		name: "memory_graph",
+		label: "Memory Graph",
+		description: [
+			"Manage a project knowledge graph with nodes and typed edges.",
+			"Pass `action` to choose the operation.",
+			"- `list`: show the full graph (nodes + edges).",
+			"- `add`: create or update a node. Pass `id`, `kind`, `label`, and optionally `detail`.",
+			"- `link`: create or update a directed edge. Pass `from` (source node id), `to` (target node id), `edgeKind`, and optionally `label`.",
+			"- `remove`: delete a node and its incident edges (pass `id`), or delete a specific edge (pass `from`+`to`).",
+		].join(" "),
+		parameters: Type.Object({
+			action: StringEnum(["list", "add", "link", "remove"], {
+				description: "Operation to perform",
+			}),
+			id: Type.Optional(Type.String({ description: "Node id (for add, remove-node)" })),
+			kind: Type.Optional(
+				StringEnum(
+					[
+						"loop-pattern",
+						"sandbox-log",
+						"artifact-set",
+						"design-decision",
+						"knowledge",
+						"eval-result",
+					],
+					{ description: "Node kind (for add)" },
+				),
+			),
+			label: Type.Optional(
+				Type.String({ description: "Short title for node (add) or edge annotation (link)" }),
+			),
+			detail: Type.Optional(
+				Type.String({ description: "Longer detail / notes for the node (add)" }),
+			),
+			from: Type.Optional(Type.String({ description: "Source node id (for link, remove-edge)" })),
+			to: Type.Optional(Type.String({ description: "Target node id (for link, remove-edge)" })),
+			edgeKind: Type.Optional(
+				StringEnum(["supports", "produced", "derived-from", "supersedes", "relates-to"], {
+					description: "Edge relationship kind (for link)",
+				}),
+			),
+		}),
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const project = getProject(ctx.cwd);
+			const graph: MemoryGraph = project.graph ?? { nodes: [], edges: [] };
+			const now = Date.now();
+
+			let msg = "";
+
+			switch (params.action) {
+				case "list": {
+					const lines: string[] = [];
+					if (graph.nodes.length === 0 && graph.edges.length === 0) {
+						lines.push("Graph is empty.");
+					} else {
+						lines.push(`**Nodes (${graph.nodes.length})**`);
+						for (const n of graph.nodes) {
+							const detail =
+								n.detail && n.detail.length > 120 ? n.detail.slice(0, 119) + "…" : n.detail;
+							lines.push(`  [${n.kind}] \`${n.id}\` — ${n.label}${detail ? ` (${detail})` : ""}`);
+						}
+						lines.push("");
+						lines.push(`**Edges (${graph.edges.length})**`);
+						for (const e of graph.edges) {
+							lines.push(
+								`  \`${e.from}\` →[${e.kind}]→ \`${e.to}\`${e.label ? ` (${e.label})` : ""}`,
+							);
+						}
+					}
+					msg = lines.join("\n");
+					break;
+				}
+				case "add": {
+					if (!params.id || !params.kind || !params.label) {
+						return {
+							content: [{ type: "text", text: "`add` requires `id`, `kind`, and `label`." }],
+							details: {},
+						};
+					}
+					const existing = graph.nodes.findIndex((n) => n.id === params.id);
+					const node = {
+						id: params.id,
+						kind: params.kind as NodeKind,
+						label: params.label,
+						detail: params.detail,
+						createdAt: now,
+						updatedAt: now,
+					};
+					if (existing >= 0) {
+						node.createdAt = graph.nodes[existing].createdAt;
+						graph.nodes[existing] = node;
+						msg = `Updated node \`${params.id}\`.`;
+					} else {
+						graph.nodes.push(node);
+						msg = `Added node \`${params.id}\` (${params.kind}).`;
+					}
+					break;
+				}
+				case "link": {
+					if (!params.from || !params.to || !params.edgeKind) {
+						return {
+							content: [{ type: "text", text: "`link` requires `from`, `to`, and `edgeKind`." }],
+							details: {},
+						};
+					}
+					// ponytail: duplicate-edge check is O(n) over edges; fine for a memory graph
+					const dup = graph.edges.findIndex(
+						(e) => e.from === params.from && e.to === params.to && e.kind === params.edgeKind,
+					);
+					if (dup >= 0) {
+						graph.edges[dup].label = params.label;
+						msg = `Updated edge \`${params.from}\` → \`${params.to}\`.`;
+					} else {
+						graph.edges.push({
+							from: params.from,
+							to: params.to,
+							kind: params.edgeKind as EdgeKind,
+							label: params.label,
+						});
+						msg = `Linked \`${params.from}\` →[${params.edgeKind}]→ \`${params.to}\`.`;
+					}
+					break;
+				}
+				case "remove": {
+					if (params.id) {
+						const before = graph.nodes.length;
+						const eBefore = graph.edges.length;
+						graph.nodes = graph.nodes.filter((n) => n.id !== params.id);
+						graph.edges = graph.edges.filter((e) => e.from !== params.id && e.to !== params.id);
+						const nRemoved = before - graph.nodes.length;
+						const eRemoved = eBefore - graph.edges.length;
+						msg =
+							nRemoved > 0
+								? `Removed node \`${params.id}\` and ${eRemoved} incident edge(s).`
+								: `Node \`${params.id}\` not found.`;
+					} else if (params.from && params.to) {
+						const before = graph.edges.length;
+						graph.edges = graph.edges.filter(
+							(e) => !(e.from === params.from && e.to === params.to),
+						);
+						const removed = before - graph.edges.length;
+						msg =
+							removed > 0
+								? `Removed ${removed} edge(s) \`${params.from}\` → \`${params.to}\`.`
+								: `No edges from \`${params.from}\` to \`${params.to}\`.`;
+					} else {
+						return {
+							content: [
+								{ type: "text", text: "`remove` requires `id` (node) or both `from`+`to` (edge)." },
+							],
+							details: {},
+						};
+					}
+					break;
+				}
+			}
+
+			project.graph = graph;
+			saveProject(ctx.cwd, project);
+
+			return {
+				content: [{ type: "text", text: msg }],
+				details: { graph },
 			};
 		},
 	});

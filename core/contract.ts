@@ -214,7 +214,7 @@ export type NodeKind =
 	| "eval-result";
 
 /** Kinds of directed edges between graph nodes. */
-export type EdgeKind = "depends-on" | "produces" | "refines" | "relates-to";
+export type EdgeKind = "supports" | "produced" | "derived-from" | "supersedes" | "relates-to";
 
 /** One named node in the project memory graph. */
 export interface MemoryNode {
