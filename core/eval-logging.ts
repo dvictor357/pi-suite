@@ -14,8 +14,6 @@ import { join } from "node:path";
 import { appendLine } from "./fs";
 import { runsDir } from "./run-ledger";
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
 export interface EvalEntry {
 	/** Quest name. */
 	quest: string;
@@ -50,7 +48,8 @@ export interface EvalEntry {
 	timestamp: number;
 }
 
-// ── Paths ────────────────────────────────────────────────────────────────────
+/** Append callback for one quest eval log. */
+export type EvalLog = (entry: EvalEntry) => void;
 
 /** Base dir for eval logs: ~/.pi/agent/quests/<cwdHash>/evals/. */
 export function evalsDir(cwd: string): string {
@@ -62,25 +61,17 @@ export function evalLogPath(cwd: string, questSlug: string): string {
 	return join(evalsDir(cwd), questSlug, "evals.jsonl");
 }
 
-// ── Factory ───────────────────────────────────────────────────────────────────
-
-/**
- * Lightweight eval recorder for one quest. Create it at quest start, call
- * `record(entry)` on every terminal task outcome.
- */
-export class EvalLog {
-	private readonly path: string;
-
-	constructor(cwd: string, questSlug: string) {
-		this.path = evalLogPath(cwd, questSlug);
+/** Append one eval entry as JSONL. Best-effort — never throws. */
+export function recordEvalEntry(path: string, entry: EvalEntry): void {
+	try {
+		appendLine(path, JSON.stringify(entry));
+	} catch {
+		/* best-effort observability */
 	}
+}
 
-	/** Append one eval entry as JSONL. Best-effort — never throws. */
-	record(entry: EvalEntry): void {
-		try {
-			appendLine(this.path, JSON.stringify(entry));
-		} catch {
-			/* best-effort observability */
-		}
-	}
+/** Create an append callback for one quest's eval log. */
+export function createEvalLog(cwd: string, questSlug: string): EvalLog {
+	const path = evalLogPath(cwd, questSlug);
+	return (entry) => recordEvalEntry(path, entry);
 }

@@ -51,12 +51,6 @@ export interface QuestStep {
 	sandbox?: SandboxOverrides;
 }
 
-/** @deprecated Use QuestStep. */
-export type QuestTask = QuestStep;
-
-/** @deprecated Use StepStatus. */
-export type TaskStatus = StepStatus;
-
 export interface GitIntegration {
 	autoCommit: boolean;
 	autoBranch: boolean;

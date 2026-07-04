@@ -20,8 +20,8 @@ import { existsSync, readFileSync } from "node:fs";
 import type { Quest, QuestStep } from "./types";
 import { loadQuest, saveQuest } from "./storage";
 import { buildSteeringMessage, nextPendingStep } from "./steering";
-import { RunLedger, EvalLog, computeEvalStats, readAllEvalEntries } from "../../core";
-import type { RunEvent, EvalEntry, EvalStatsIndex } from "../../core";
+import { createRunLedger, createEvalLog, computeEvalStats, readAllEvalEntries } from "../../core";
+import type { RunLedger, EvalLog, RunEvent, EvalEntry, EvalStatsIndex } from "../../core";
 import { loadTeams, ensureBuiltInTeams } from "./teams";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { syncQuestToTodo } from "./todo-sync";
@@ -130,8 +130,8 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		if (!entry) {
 			const q = getQuest(cwd) ?? ({ name: "unknown" } as Quest);
 			entry = {
-				ledger: new RunLedger(cwd, questSlug(q.name)),
-				evalLog: new EvalLog(cwd, questSlug(q.name)),
+				ledger: createRunLedger(cwd, questSlug(q.name)),
+				evalLog: createEvalLog(cwd, questSlug(q.name)),
 			};
 			ledgerCache.set(cwd, entry);
 		}
@@ -140,14 +140,14 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 
 	function ensureLedgers(cwd: string, name: string): void {
 		ledgerCache.set(cwd, {
-			ledger: new RunLedger(cwd, questSlug(name)),
-			evalLog: new EvalLog(cwd, questSlug(name)),
+			ledger: createRunLedger(cwd, questSlug(name)),
+			evalLog: createEvalLog(cwd, questSlug(name)),
 		});
 	}
 
 	function recordRun(cwd: string, event: RunEvent): void {
 		try {
-			getLedgers(cwd).ledger.record(event);
+			getLedgers(cwd).ledger(event);
 		} catch {
 			/* best-effort observability */
 		}
@@ -155,7 +155,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 
 	function recordEval(cwd: string, entry: EvalEntry): void {
 		try {
-			getLedgers(cwd).evalLog.record(entry);
+			getLedgers(cwd).evalLog(entry);
 			evalStatsCache.delete(cwd);
 		} catch {
 			/* best-effort observability */

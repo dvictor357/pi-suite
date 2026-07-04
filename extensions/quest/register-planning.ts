@@ -17,7 +17,6 @@ import { buildVerificationImpactContext, enrichPlanningContext } from "./codebas
 import { detectDependencyCycle, getMaxDependencyDepth } from "./graph";
 import { nextPendingStep } from "./steering";
 import { resolveSandboxProfile } from "./sandbox";
-import { logDeprecatedParam } from "./deprecation";
 import type { QuestRuntime } from "./runtime";
 
 export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void {
@@ -186,10 +185,6 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			}
 
 			const plannedSteps = params.steps ?? params.tasks ?? [];
-			if (params.tasks !== undefined && params.steps === undefined) {
-				logDeprecatedParam("quest_plan", params as Record<string, unknown>, "tasks", "steps");
-			}
-
 			if (plannedSteps.length === 0) {
 				return {
 					content: [{ type: "text", text: "No steps provided." }],

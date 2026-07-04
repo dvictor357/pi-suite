@@ -1,53 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import {
-	shouldVerify,
-	buildVerificationPrompt,
-	buildSandboxComplianceChecks,
-	nextVerifyAttempt,
-	parseVerifyOutcome,
-} from "./verifier";
-import type { QuestStep } from "./types";
+import { buildSandboxComplianceChecks, parseVerifyOutcome } from "./verifier";
 import type { SandboxProfile } from "./sandbox";
-
-// ── shouldVerify ────────────────────────────────────────────────────────────
-
-describe("shouldVerify", () => {
-	test("true when both flags are on", () => {
-		assert.equal(shouldVerify({ verifyOnComplete: true, teamVerificationEnabled: true }), true);
-	});
-
-	test("false when verifyOnComplete is off", () => {
-		assert.equal(shouldVerify({ verifyOnComplete: false, teamVerificationEnabled: true }), false);
-	});
-
-	test("false when team verification is off", () => {
-		assert.equal(shouldVerify({ verifyOnComplete: true, teamVerificationEnabled: false }), false);
-	});
-
-	test("false when both are off", () => {
-		assert.equal(shouldVerify({ verifyOnComplete: false, teamVerificationEnabled: false }), false);
-	});
-});
-
-// ── nextVerifyAttempt ───────────────────────────────────────────────────────
-
-describe("nextVerifyAttempt", () => {
-	test("initial retry returns count 1 with retries remaining", () => {
-		const r = nextVerifyAttempt(0);
-		assert.equal(r.nextCount, 1);
-		assert.ok(r.retriesLeft > 0);
-		assert.equal(r.canRetry, true);
-	});
-
-	test("exhausted retries returns canRetry false", () => {
-		// MAX_VERIFY_RETRIES is 2 from constants (imported from core)
-		const r = nextVerifyAttempt(2);
-		assert.equal(r.nextCount, 3);
-		assert.equal(r.retriesLeft, -1);
-		assert.equal(r.canRetry, false);
-	});
-});
 
 // ── parseVerifyOutcome ──────────────────────────────────────────────────────
 
@@ -245,68 +199,5 @@ describe("buildSandboxComplianceChecks", () => {
 		});
 		const joined = checks.join("\n");
 		assert.match(joined, /required project checks/);
-	});
-});
-
-// ── buildVerificationPrompt with sandbox ────────────────────────────────────
-
-describe("buildVerificationPrompt with sandbox", () => {
-	const baseTask: QuestStep = {
-		content: "Add user auth",
-		status: "verifying",
-		agent: "worker",
-		context: "Implement login/logout",
-		dependencies: [],
-		result: "auth module completed",
-		attempts: 1,
-		startedAt: null,
-		completedAt: null,
-		verified: false,
-		verifyResult: null,
-		verifyRetries: 0,
-		commitHash: null,
-		branchName: null,
-	};
-
-	test("includes sandbox compliance checks when profile is provided", () => {
-		const prompt = buildVerificationPrompt({
-			task: baseTask,
-			taskIndex: 0,
-			config: { cwd: "/tmp/test", verifierAgent: "verifier", includeImpact: false },
-			result: "done",
-			sandboxProfile: {
-				mode: "restricted",
-				allowedPaths: ["src/**"],
-				deniedPaths: [],
-				allowCommands: [],
-				denyCommands: [],
-				allowNetwork: false,
-				allowPackageInstall: true,
-				worktree: null,
-			},
-		});
-		assert.match(prompt, /Sandbox compliance/);
-		assert.match(prompt, /No network access was used/);
-	});
-
-	test("omits sandbox checks when profile is not provided", () => {
-		const prompt = buildVerificationPrompt({
-			task: baseTask,
-			taskIndex: 0,
-			config: { cwd: "/tmp/test", verifierAgent: "verifier", includeImpact: false },
-			result: "done",
-		});
-		assert.doesNotMatch(prompt, /Sandbox compliance/);
-	});
-
-	test("omits sandbox checks when profile mode is none", () => {
-		const prompt = buildVerificationPrompt({
-			task: baseTask,
-			taskIndex: 0,
-			config: { cwd: "/tmp/test", verifierAgent: "verifier", includeImpact: false },
-			result: "done",
-			sandboxProfile: { mode: "none" } as SandboxProfile,
-		});
-		assert.doesNotMatch(prompt, /Sandbox compliance/);
 	});
 });

@@ -23,7 +23,6 @@ import { loadTeams } from "./teams";
 import { enqueueUiPrompt, matchModel, promptModelAssignment, toModelLike } from "./models";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { resolveSandboxProfile, sandboxToolsForRole } from "./sandbox";
-import { logDeprecatedParam } from "./deprecation";
 import { runSubAgent } from "./subagent";
 import type { QuestRuntime } from "./runtime";
 
@@ -68,15 +67,6 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			if (!role) return textResult("Role is required.");
 
 			const index = params.stepIndex ?? params.taskIndex;
-			if (params.taskIndex !== undefined && params.stepIndex === undefined) {
-				logDeprecatedParam(
-					"quest_assign_model",
-					params as Record<string, unknown>,
-					"taskIndex",
-					"stepIndex",
-				);
-			}
-
 			if (!ctx.hasUI) {
 				const available = ctx.modelRegistry.getAvailable().map(toModelLike);
 				const matched = matchModel(available, params.proposed);

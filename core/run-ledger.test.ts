@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { RunLedger, runLedgerPath, runsDir, type RunEvent } from "./run-ledger";
+import { createRunLedger, runLedgerPath, runsDir, type RunEvent } from "./run-ledger";
 import { cwdHash } from "./hash";
 import { setErrorSink } from "./fs";
 
@@ -43,10 +43,10 @@ describe("run-ledger", () => {
 		// kept for documentation — real cwd needs dir to exist
 	});
 
-	it("RunLedger.record appends a JSON line", () => {
+	it("createRunLedger appends JSON lines", () => {
 		// Use tmpdir so we own the output fully.
 		const cwdBase = join(tmp, "test-cwd");
-		const ledger = new RunLedger(cwdBase, "test-quest");
+		const ledger = createRunLedger(cwdBase, "test-quest");
 
 		const event: RunEvent = {
 			kind: "task_start",
@@ -56,8 +56,8 @@ describe("run-ledger", () => {
 			model: "test-model",
 			timestamp: 1700000000000,
 		};
-		ledger.record(event);
-		ledger.record({ ...event, kind: "task_complete", taskIndex: 0, result: "all green" });
+		ledger(event);
+		ledger({ ...event, kind: "task_complete", taskIndex: 0, result: "all green" });
 
 		const path = runLedgerPath(cwdBase, "test-quest");
 		assert.ok(existsSync(path));
@@ -74,9 +74,9 @@ describe("run-ledger", () => {
 		assert.strictEqual(parsed2.result, "all green");
 	});
 
-	it("RunLedger.record never throws on invalid paths", () => {
-		const ledger = new RunLedger("/dev/null/nonexistent", "bad");
+	it("createRunLedger never throws on invalid paths", () => {
+		const ledger = createRunLedger("/dev/null/nonexistent", "bad");
 		// Should not throw
-		ledger.record({ kind: "task_start", taskIndex: 0, taskContent: "x", agent: "x", timestamp: 1 });
+		ledger({ kind: "task_start", taskIndex: 0, taskContent: "x", agent: "x", timestamp: 1 });
 	});
 });

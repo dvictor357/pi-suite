@@ -328,6 +328,19 @@ function buildOutput(list: TodoList, warnings: string[] = []): string {
 	return `${header}${bar}${warningText}\n${items}`;
 }
 
+function formatTodoDetail(item: TodoItem, idx: number): string {
+	return [
+		`[${idx}] ${item.status.toUpperCase()}: ${item.content}`,
+		item.agent ? `  Agent: ${item.agent}` : "",
+		item.context ? `  Context: ${item.context}` : "",
+		item.result ? `  Result: ${item.result}` : "",
+		item.createdAt ? `  Created: ${new Date(item.createdAt).toISOString()}` : "",
+		item.completedAt ? `  Done: ${new Date(item.completedAt).toISOString()}` : "",
+	]
+		.filter(Boolean)
+		.join("\n");
+}
+
 // ── Status badge ─────────────────────────────────────────────────────────────
 
 function renderStatus(ctx: ExtensionContext, list: TodoList) {
@@ -722,17 +735,7 @@ export default function (pi: ExtensionAPI) {
 						ctx.ui.notify(`No item at index ${idx}.`, "error");
 						return;
 					}
-					const detailLines = [
-						`[${idx}] ${item.status.toUpperCase()}: ${item.content}`,
-						item.agent ? `  Agent: ${item.agent}` : "",
-						item.context ? `  Context: ${item.context}` : "",
-						item.result ? `  Result: ${item.result}` : "",
-						item.createdAt ? `  Created: ${new Date(item.createdAt).toISOString()}` : "",
-						item.completedAt ? `  Done: ${new Date(item.completedAt).toISOString()}` : "",
-					]
-						.filter(Boolean)
-						.join("\n");
-					ctx.ui.notify(detailLines, "info");
+					ctx.ui.notify(formatTodoDetail(item, idx), "info");
 					return;
 				}
 				default: {
@@ -745,17 +748,7 @@ export default function (pi: ExtensionAPI) {
 							ctx.ui.notify(`No item at index ${idx}.`, "error");
 							return;
 						}
-						const detailLines = [
-							`[${idx}] ${item.status.toUpperCase()}: ${item.content}`,
-							item.agent ? `  Agent: ${item.agent}` : "",
-							item.context ? `  Context: ${item.context}` : "",
-							item.result ? `  Result: ${item.result}` : "",
-							item.createdAt ? `  Created: ${new Date(item.createdAt).toISOString()}` : "",
-							item.completedAt ? `  Done: ${new Date(item.completedAt).toISOString()}` : "",
-						]
-							.filter(Boolean)
-							.join("\n");
-						ctx.ui.notify(detailLines, "info");
+						ctx.ui.notify(formatTodoDetail(item, idx), "info");
 						return;
 					}
 					ctx.ui.notify(

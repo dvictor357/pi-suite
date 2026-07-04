@@ -295,53 +295,6 @@ export function corpusFor(
 	return corpus;
 }
 
-/**
- * Corpus co-occurrence query expansion — a dependency-free, offline "semantic"
- * layer. For each query term, it finds the terms that most distinctively
- * co-occur with it across the corpus (ranked by a pointwise-mutual-information
- * proxy) and returns them as soft expansion terms. This attacks vocabulary
- * mismatch: a query saying "handoff" can reach a file whose tokens are
- * "session"/"meta"/"status" if those co-occur with "handoff" in the repo — the
- * association is learned from the codebase itself, no model or network.
- */
-export function expandQuery(
-	corpus: Corpus,
-	queryTerms: string[],
-	config: CodebaseRankingConfig,
-): Map<string, number> {
-	const sem = config.semantic;
-	const { docs, df, N } = corpus;
-	const querySet = new Set(queryTerms);
-	const best = new Map<string, number>(); // expansion term → best PMI seen
-
-	for (const qt of queryTerms) {
-		const nqt = df.get(qt) ?? 0;
-		if (!nqt) continue;
-		const co = new Map<string, number>();
-		for (const doc of docs) {
-			if (!doc.tf.has(qt)) continue;
-			for (const ot of doc.tf.keys()) {
-				if (ot === qt || querySet.has(ot)) continue;
-				if ((df.get(ot) ?? 0) < sem.minCoTermDf) continue;
-				co.set(ot, (co.get(ot) ?? 0) + 1);
-			}
-		}
-		[...co.entries()]
-			.map(([ot, c]) => {
-				// PMI proxy: co-occurrence strength normalised by how rare each term is.
-				const pmi = Math.log((c * N) / (nqt * (df.get(ot) ?? 1)));
-				return { ot, pmi };
-			})
-			.filter((e) => e.pmi > 0)
-			.sort((a, b) => b.pmi - a.pmi)
-			.slice(0, sem.perTermExpansions)
-			.forEach(({ ot, pmi }) => best.set(ot, Math.max(best.get(ot) ?? 0, pmi)));
-	}
-
-	const top = [...best.entries()].sort((a, b) => b[1] - a[1]).slice(0, sem.maxExpansions);
-	return new Map(top.map(([term]) => [term, sem.expansionWeight]));
-}
-
 /** Score every file against a set of query terms, each carrying a weight. */
 function scoreFilesWeighted(
 	corpus: Corpus,
@@ -370,30 +323,17 @@ function scoreFilesWeighted(
 		.sort((a, b) => b.score - a.score || a.file.relativePath.localeCompare(b.file.relativePath));
 }
 
-/**
- * Score files against free text. Original query terms carry full weight; when
- * `opts.semantic` is set (and enabled in config) co-occurrence expansion terms
- * are added at a softer weight. Semantic expansion is opt-in per call so the
- * pure-lexical primitive (`queryCodebaseIndex`) stays exact and deterministic.
- */
+/** Score files against free text using lexical BM25 evidence. */
 function scoreFiles(
 	index: CodebaseIndexV1,
 	text: string,
 	config: CodebaseRankingConfig,
-	opts: { semantic?: boolean } = {},
 ): { file: CodebaseFileEntry; score: number }[] {
 	const corpus = corpusFor(index, config);
 	if (!corpus.N) return [];
 
 	const queryTerms = [...new Set(tokenizeText(text))];
 	const weighted = new Map<string, number>(queryTerms.map((t) => [t, 1]));
-
-	if (opts.semantic && config.semantic.enabled) {
-		for (const [term, weight] of expandQuery(corpus, queryTerms, config)) {
-			if (!weighted.has(term)) weighted.set(term, weight);
-		}
-	}
-
 	return scoreFilesWeighted(corpus, weighted, new Set(rawQueryTerms(text)), config);
 }
 
@@ -427,7 +367,7 @@ export function rankFilesForQuery(
 	limit = 8,
 	config: CodebaseRankingConfig = CODEBASE_RANKING,
 ): CodebaseQueryResult[] {
-	const scored = scoreFiles(index, text, config, { semantic: true });
+	const scored = scoreFiles(index, text, config);
 	if (!scored.length) return [];
 
 	const results = scored.map((e) => ({ file: e.file, path: e.file.relativePath, score: e.score }));
@@ -480,22 +420,6 @@ export function impactCodebaseFile(index: CodebaseIndexV1, file: string, limit =
 		}
 	}
 	return [...seen];
-}
-
-export function deriveCodebasePatterns(text: string, limit = 5): string[] {
-	const pathParts = extractFilePaths(text).map(
-		(p) =>
-			p
-				.replace(/\.[cm]?[jt]sx?$/, "")
-				.split("/")
-				.pop() || p,
-	);
-	const words =
-		text
-			.match(/[A-Za-z][A-Za-z0-9_-]{3,}/g)
-			?.map((word) => word.toLowerCase())
-			.filter((word) => !COMMON_WORDS.has(word)) ?? [];
-	return [...new Set([...pathParts, ...words])].slice(0, limit);
 }
 
 export function enrichPlanningContext(

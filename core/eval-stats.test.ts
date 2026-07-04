@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { computeEvalStats, coerceEvalStat, readAllEvalEntries, statsFor } from "./eval-stats";
-import { EvalLog, evalsDir, type EvalEntry } from "./eval-logging";
+import { createEvalLog, evalsDir, type EvalEntry } from "./eval-logging";
 import { setErrorSink } from "./fs";
 
 function entry(overrides: Partial<EvalEntry>): EvalEntry {
@@ -112,8 +112,8 @@ describe("eval-stats", () => {
 		});
 
 		it("reads entries across quests and skips corrupt lines without throwing", () => {
-			new EvalLog(fakeCwd, "quest-a").record(entry({}));
-			new EvalLog(fakeCwd, "quest-b").record(entry({ agent: "scout" }));
+			createEvalLog(fakeCwd, "quest-a")(entry({}));
+			createEvalLog(fakeCwd, "quest-b")(entry({ agent: "scout" }));
 			// Corrupt line injected next to valid ones.
 			const dir = join(evalsDir(fakeCwd), "quest-c");
 			mkdirSync(dir, { recursive: true });

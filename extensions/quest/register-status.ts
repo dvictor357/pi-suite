@@ -5,7 +5,6 @@ import { ensureBuiltInTeams, loadTeams } from "./teams";
 import { formatQuestStatus } from "./steering";
 import { listArchives, saveQuest } from "./storage";
 import { renderStatus, writeQuestSessionMeta } from "./status";
-import { logDeprecatedParam } from "./deprecation";
 import type { QuestRuntime } from "./runtime";
 
 export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
@@ -68,14 +67,6 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			const index = params.stepIndex ?? params.taskIndex;
-			if (params.taskIndex !== undefined && params.stepIndex === undefined) {
-				logDeprecatedParam(
-					"quest_commit",
-					params as Record<string, unknown>,
-					"taskIndex",
-					"stepIndex",
-				);
-			}
 			if (index === undefined) {
 				return {
 					content: [{ type: "text", text: "A step index (stepIndex) is required." }],

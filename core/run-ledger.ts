@@ -14,8 +14,6 @@ import { AGENT_DIR } from "./paths";
 import { cwdHash } from "./hash";
 import { appendLine } from "./fs";
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
 export type RunEventKind =
 	| "task_start"
 	| "task_complete"
@@ -38,8 +36,6 @@ export interface RunEvent {
 	model?: string;
 	/** Epoch-ms timestamp. */
 	timestamp: number;
-
-	// ── kind-specific payloads ───────────────────────────────────────────
 
 	/** "task_complete": final output. */
 	result?: string;
@@ -64,7 +60,8 @@ export interface RunEvent {
 	rung?: number;
 }
 
-// ── Paths ────────────────────────────────────────────────────────────────────
+/** Append callback for one quest run ledger. */
+export type RunLedger = (event: RunEvent) => void;
 
 /** Base dir for run ledgers: ~/.pi/agent/quests/<cwdHash>/runs/. */
 export function runsDir(cwd: string): string {
@@ -76,28 +73,17 @@ export function runLedgerPath(cwd: string, questSlug: string): string {
 	return join(runsDir(cwd), questSlug, "run.jsonl");
 }
 
-// ── Ledger factory ───────────────────────────────────────────────────────────
-
-/**
- * Lightweight ledger for a single quest. Callers create one per active quest
- * and call `record(event)` for each meaningful lifecycle transition.
- *
- * Design note: we use a class rather than a bare function so the `cwd` and
- * `questSlug` are stored once and the caller never spells the path again.
- */
-export class RunLedger {
-	private readonly path: string;
-
-	constructor(cwd: string, questSlug: string) {
-		this.path = runLedgerPath(cwd, questSlug);
+/** Append one event as a JSON line. Best-effort — never throws. */
+export function recordRunEvent(path: string, event: RunEvent): void {
+	try {
+		appendLine(path, JSON.stringify(event));
+	} catch {
+		/* best-effort observability */
 	}
+}
 
-	/** Append one event as a JSON line. Best-effort — never throws. */
-	record(event: RunEvent): void {
-		try {
-			appendLine(this.path, JSON.stringify(event));
-		} catch {
-			/* best-effort observability */
-		}
-	}
+/** Create an append callback for one quest's run ledger. */
+export function createRunLedger(cwd: string, questSlug: string): RunLedger {
+	const path = runLedgerPath(cwd, questSlug);
+	return (event) => recordRunEvent(path, event);
 }

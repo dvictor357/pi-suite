@@ -34,10 +34,10 @@ export {
 	DEFAULT_RETRY_POLICY,
 } from "./retry-policy";
 export type { RetryPolicy } from "./retry-policy";
-export { RunLedger, runLedgerPath, runsDir } from "./run-ledger";
-export type { RunEvent, RunEventKind } from "./run-ledger";
-export { EvalLog, evalLogPath, evalsDir } from "./eval-logging";
-export type { EvalEntry } from "./eval-logging";
+export { createRunLedger, recordRunEvent, runLedgerPath, runsDir } from "./run-ledger";
+export type { RunLedger, RunEvent, RunEventKind } from "./run-ledger";
+export { createEvalLog, recordEvalEntry, evalLogPath, evalsDir } from "./eval-logging";
+export type { EvalLog, EvalEntry } from "./eval-logging";
 export { readAllEvalEntries, computeEvalStats, statsFor, statsKey } from "./eval-stats";
 export type { RoleModelStats, EvalStatsIndex } from "./eval-stats";
 export { asRecord, strArray, boolOr, numOr, strOr, optStr, optNum, oneOf } from "./coerce";
