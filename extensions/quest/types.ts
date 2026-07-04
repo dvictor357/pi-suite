@@ -182,8 +182,10 @@ export interface TeamConfig {
  *   sub-agent runs with guarded tool definitions (see sandbox-guard.ts), plus
  *   read-only role scoping. Prompt constraints and verifier checks are advisory
  *   on top. Not OS-level isolation.
- * - `"isolated"` — restricted mode plus worktree metadata for step isolation;
- *   worktrees are planned/recorded but not created or removed automatically.
+ * - `"isolated"` — restricted mode plus real git worktree isolation: a worktree
+ *   is created per delegation, the sub-agent runs inside it, and the worktree is
+ *   cleaned up after the step completes. Worktree metadata and sandbox artifacts
+ *   are recorded on the step.
  */
 export type SandboxMode = "none" | "restricted" | "isolated";
 
@@ -232,8 +234,7 @@ export interface SandboxPolicy {
 	allowPackageInstall: boolean;
 	/**
 	 * Worktree isolation metadata. Meaningful when mode is "isolated"; ignored
-	 * otherwise. Null means worktree isolation is not configured. Current MVP only
-	 * records/plans worktrees; it does not automatically create or remove them.
+	 * otherwise. Null means worktree isolation is not configured.
 	 */
 	worktree: WorktreeConfig | null;
 }

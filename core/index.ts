@@ -43,8 +43,14 @@ export { createRunLedger, recordRunEvent, runLedgerPath, runsDir } from "./run-l
 export type { RunLedger, RunEvent, RunEventKind } from "./run-ledger";
 export { createEvalLog, recordEvalEntry, evalLogPath, evalsDir } from "./eval-logging";
 export type { EvalLog, EvalEntry } from "./eval-logging";
-export { readAllEvalEntries, computeEvalStats, statsFor, statsKey } from "./eval-stats";
-export type { RoleModelStats, EvalStatsIndex } from "./eval-stats";
+export {
+	readAllEvalEntries,
+	computeEvalStats,
+	statsFor,
+	statsKey,
+	computeEvalTimeSeries,
+} from "./eval-stats";
+export type { RoleModelStats, EvalStatsIndex, EvalTimeBucket, EvalTimeSeries } from "./eval-stats";
 export { asRecord, strArray, boolOr, numOr, strOr, optStr, optNum, oneOf } from "./coerce";
 export {
 	CONTEXT_BUDGET,

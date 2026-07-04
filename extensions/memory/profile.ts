@@ -56,6 +56,5 @@ export function withForeignFromDisk(
 		agentModels: onDisk.agentModels ?? profile.agentModels,
 		lastModified: onDisk.lastModified ?? profile.lastModified,
 		modelLadder: onDisk.modelLadder ?? profile.modelLadder,
-		graph: onDisk.graph ?? profile.graph,
 	};
 }

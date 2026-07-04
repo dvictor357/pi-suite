@@ -110,6 +110,24 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 							default: false,
 						}),
 					),
+					worktree: Type.Optional(
+						Type.Object({
+							baseBranch: Type.String({
+								description: "Branch to base the worktree on (e.g. 'main', 'master')",
+							}),
+							path: Type.String({
+								description:
+									"Worktree path relative to project root (e.g. '.pi/worktrees/<quest-name>')",
+							}),
+							autoCleanup: Type.Optional(
+								Type.Boolean({
+									description:
+										"Whether to prune the worktree after quest completion (default: true)",
+									default: true,
+								}),
+							),
+						}),
+					),
 				}),
 			),
 		}),

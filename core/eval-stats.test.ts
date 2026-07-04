@@ -4,7 +4,13 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { computeEvalStats, coerceEvalStat, readAllEvalEntries, statsFor } from "./eval-stats";
+import {
+	computeEvalStats,
+	computeEvalTimeSeries,
+	coerceEvalStat,
+	readAllEvalEntries,
+	statsFor,
+} from "./eval-stats";
 import { createEvalLog, evalsDir, type EvalEntry } from "./eval-logging";
 import { setErrorSink } from "./fs";
 
@@ -124,6 +130,70 @@ describe("eval-stats", () => {
 			const index = computeEvalStats(all);
 			assert.ok(statsFor(index, "worker", "ornith-1.0"));
 			assert.ok(statsFor(index, "scout", "ornith-1.0"));
+		});
+	});
+
+	describe("computeEvalTimeSeries", () => {
+		const DAY_1 = 1_700_000_000_000; // 2023-11-14 22:13:20 UTC
+		const DAY_2 = DAY_1 + 86_400_000; // 2023-11-15 (+1 day)
+
+		it("returns empty buckets for no entries", () => {
+			const ts = computeEvalTimeSeries([]);
+			assert.deepEqual(ts.buckets, []);
+		});
+
+		it("groups entries by day with pass rate and duration", () => {
+			const ts = computeEvalTimeSeries([
+				entry({ timestamp: DAY_1, status: "done", verified: true, durationMs: 2000 }),
+				entry({ timestamp: DAY_1, status: "done", verified: false, durationMs: 1000 }),
+				entry({ timestamp: DAY_1, status: "failed", verified: false, durationMs: 500 }),
+				entry({ timestamp: DAY_2, status: "done", verified: true, durationMs: 3000 }),
+			]);
+
+			assert.equal(ts.buckets.length, 2);
+			// newest first
+			assert.equal(ts.buckets[0].date, "2023-11-15");
+			assert.equal(ts.buckets[0].samples, 1);
+			assert.equal(ts.buckets[0].passRate, 1);
+			assert.equal(ts.buckets[0].avgDurationMs, 3000);
+
+			assert.equal(ts.buckets[1].date, "2023-11-14");
+			assert.equal(ts.buckets[1].samples, 3);
+			assert.ok(Math.abs(ts.buckets[1].passRate - 1 / 3) < 1e-9);
+			// avgDuration = (2000 + 1000 + 500) / 3 ≈ 1167
+			assert.equal(ts.buckets[1].avgDurationMs, 1167);
+		});
+
+		it("counts escalations", () => {
+			const ts = computeEvalTimeSeries([
+				entry({ timestamp: DAY_1, escalations: 2 }),
+				entry({ timestamp: DAY_1, escalations: 0 }),
+				entry({ timestamp: DAY_1, escalations: 1 }),
+			]);
+			assert.equal(ts.buckets.length, 1);
+			assert.equal(ts.buckets[0].escalations, 3);
+		});
+
+		it("skips entries without model, timestamp, or with skipped status", () => {
+			const ts = computeEvalTimeSeries([
+				entry({ model: undefined, timestamp: DAY_1 }),
+				entry({ status: "skipped", timestamp: DAY_1 }),
+				entry({ timestamp: 0 }), // invalid timestamp
+				entry({ timestamp: DAY_1 }),
+			]);
+			assert.equal(ts.buckets.length, 1);
+			assert.equal(ts.buckets[0].samples, 1);
+		});
+
+		it("handles zero-duration entries (returns 0 avg)", () => {
+			const ts = computeEvalTimeSeries([entry({ timestamp: DAY_1, durationMs: 0 })]);
+			assert.equal(ts.buckets[0].avgDurationMs, 0);
+		});
+
+		it("malformed rows are skipped without throwing", () => {
+			const ts = computeEvalTimeSeries([null, 42, "junk", [], entry({ timestamp: DAY_1 })]);
+			assert.equal(ts.buckets.length, 1);
+			assert.equal(ts.buckets[0].samples, 1);
 		});
 	});
 });

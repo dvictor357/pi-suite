@@ -7,9 +7,9 @@ import type { SandboxPolicy } from "./types";
 function profile(overrides: Partial<SandboxPolicy> = {}) {
 	return resolveSandboxProfile({
 		mode: "restricted",
-		allowedPaths: [],
+		allowedPaths: ["**"],
 		deniedPaths: [],
-		allowCommands: [],
+		allowCommands: ["echo", "curl", "npm", "psql", "rm", "git"],
 		denyCommands: [],
 		allowNetwork: true,
 		allowPackageInstall: true,
@@ -44,9 +44,9 @@ test("blocks writes outside a non-empty allow-list", () => {
 	assert.equal(evaluateToolCall(p, "write", { path: "docs/readme.md" }).block, true);
 });
 
-test("empty allow-list does not block ordinary writes (only denies do)", () => {
+test("empty allow-list blocks ordinary writes in active sandbox", () => {
 	const p = profile({ allowedPaths: [] });
-	assert.equal(evaluateToolCall(p, "write", { path: "anything.ts" }).block, false);
+	assert.equal(evaluateToolCall(p, "write", { path: "anything.ts" }).block, true);
 });
 
 test("blocks destructive bash commands", () => {
@@ -81,6 +81,11 @@ test("allowCommands allow-list blocks commands with no matching prefix", () => {
 	const p = profile({ allowCommands: ["npm test", "ls"] });
 	assert.equal(evaluateToolCall(p, "bash", { command: "npm test --watch" }).block, false);
 	assert.equal(evaluateToolCall(p, "bash", { command: "ls -la" }).block, false);
+	assert.equal(evaluateToolCall(p, "bash", { command: "echo nope" }).block, true);
+});
+
+test("empty command allow-list blocks shell commands in active sandbox", () => {
+	const p = profile({ allowCommands: [] });
 	assert.equal(evaluateToolCall(p, "bash", { command: "echo nope" }).block, true);
 });
 

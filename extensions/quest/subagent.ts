@@ -159,7 +159,15 @@ export async function runSubAgent(
 		let sessionCwd = ctx.cwd;
 		if (sandboxed && req.sandboxProfile!.worktree) {
 			worktreePath = createWorktree(req.sandboxProfile!.worktree, ctx.cwd);
-			if (worktreePath) sessionCwd = worktreePath;
+			if (!worktreePath) {
+				return {
+					ok: false,
+					output: "",
+					error:
+						"Sandbox: isolated mode could not create a git worktree; refusing to run in the main cwd.",
+				};
+			}
+			sessionCwd = worktreePath;
 		}
 
 		const created = await createAgentSession({

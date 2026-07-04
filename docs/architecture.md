@@ -89,6 +89,22 @@ rules, provides query/map/impact functions, and registers the `codebase` tool.
 This keeps scanner/cache/query/tool ownership in `pi-minions` while letting `pi-quest`
 use the stable cache/tool contract for orchestration decisions.
 
+## Eval time-series and memory graph
+
+Two additive observability features built on the shared contract:
+
+- **Eval time-series** (`core/eval-stats.ts`): `computeEvalTimeSeries` reads the append-only
+  eval JSONL trail and produces daily buckets with pass rates, average durations, and
+  model-ladder escalation counts. Exposed via `quest_eval_stats` in the quest extension.
+  Pure Node — no new deps — reusing the existing `coerce` helpers for defensive reading
+  of untrusted eval rows.
+
+- **Memory graph** (`core/contract.ts` `MemoryGraph`): typed nodes (loop-pattern,
+  sandbox-log, artifact-set, design-decision, knowledge, eval-result) and directed edges
+  (supports, produced, derived-from, supersedes, relates-to) stored additively on `ProjectMemory.graph`.
+  Managed via `memory_graph` (`list | add | link | remove`) in pi-memory. Preserved across
+  rescans alongside other quest-owned foreign fields via `withForeignFromDisk`.
+
 ### Retrieval ranking (read-side, owned by pi-quest)
 
 How `pi-quest` _ranks_ the cache it reads is its own concern (the cache shape stays
@@ -198,7 +214,10 @@ Key boundaries:
   to future routing.
 
 No default rung list ships in the repo; hard-coded model catalogs rot. The feature is inert
-until a project approves a ladder.
+until a project approves a ladder. `computeEvalTimeSeries` in `core/eval-stats.ts` provides
+a daily-view companion: per-day pass rates, average durations, and escalation counts —
+exposed via `quest_eval_stats` in the quest extension — so trends can be spotted without
+reading the raw JSONL lines.
 
 ## Task → Step rename (completed)
 

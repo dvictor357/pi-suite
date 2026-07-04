@@ -7,6 +7,9 @@
  * the quest model ladder uses to pick a starting rung ("has this cheap model
  * historically handled this role here?").
  *
+ * It also produces daily time-series summaries (pass rates, durations,
+ * escalations by role/model/day) for trend visibility and diagnostics.
+ *
  * Everything is best-effort: the files are untrusted (older contracts,
  * partial writes, hand edits), so rows are coerced field-by-field and any
  * unreadable file or line is skipped. No function here throws.
@@ -16,7 +19,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { evalsDir } from "./eval-logging";
-import { asRecord, boolOr, optStr, strOr } from "./coerce";
+import { asRecord, boolOr, numOr, optStr, strOr } from "./coerce";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,12 +38,41 @@ export interface RoleModelStats {
 /** Index of stats keyed by (agent, model); see {@link statsKey}. */
 export type EvalStatsIndex = Map<string, RoleModelStats>;
 
+/** One daily aggregation bucket in the eval time series. */
+export interface EvalTimeBucket {
+	/** ISO date string (YYYY-MM-DD). */
+	date: string;
+	/** Terminal (done/failed) outcomes in this bucket. */
+	samples: number;
+	/** Verified passes / samples. */
+	passRate: number;
+	/** Average wall-clock duration in ms. 0 when no timing data. */
+	avgDurationMs: number;
+	/** Total model-ladder escalations across tasks in this bucket. */
+	escalations: number;
+}
+
+/** Daily time-series summary of eval outcomes. */
+export interface EvalTimeSeries {
+	/** Per-day buckets, newest first. */
+	buckets: EvalTimeBucket[];
+}
+
 /** The fields of an eval row that routing actually needs. */
 interface EvalStatSample {
 	agent: string;
 	model: string;
 	status: string;
 	verified: boolean;
+}
+
+/** The fields of an eval row that time-series aggregation needs. */
+interface EvalTimeSample {
+	timestamp: number;
+	status: string;
+	verified: boolean;
+	durationMs: number;
+	escalations: number;
 }
 
 // ── Reading ──────────────────────────────────────────────────────────────────
@@ -91,6 +123,28 @@ export function coerceEvalStat(value: unknown): EvalStatSample | null {
 	return { agent, model, status, verified: boolOr(rec.verified, false) };
 }
 
+/**
+ * Narrow one untrusted eval row to the fields time-series aggregation needs.
+ * Skips rows with missing timestamp, skipped outcomes, and entries without
+ * a model (pre-ladder history), like {@link coerceEvalStat}.
+ */
+function coerceEvalTimeSample(value: unknown): EvalTimeSample | null {
+	const rec = asRecord(value);
+	const status = strOr(rec.status, "");
+	if (status !== "done" && status !== "failed") return null;
+	const model = optStr(rec.model)?.trim() ?? "";
+	if (!model) return null;
+	const timestamp = numOr(rec.timestamp, NaN);
+	if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
+	return {
+		timestamp,
+		status,
+		verified: boolOr(rec.verified, false),
+		durationMs: numOr(rec.durationMs, 0),
+		escalations: numOr(rec.escalations, 0),
+	};
+}
+
 // ── Aggregation ──────────────────────────────────────────────────────────────
 
 /** Index key for one (agent role, model) pair (NUL-joined so it cannot collide). */
@@ -132,4 +186,60 @@ export function statsFor(
 	model: string,
 ): RoleModelStats | undefined {
 	return index.get(statsKey(agent, model));
+}
+
+// ── Time-series aggregation ──────────────────────────────────────────────────
+
+/** Format a timestamp as YYYY-MM-DD (UTC, no external deps). */
+function isoDate(ts: number): string {
+	const d = new Date(ts);
+	const y = d.getUTCFullYear();
+	const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+	const day = String(d.getUTCDate()).padStart(2, "0");
+	return `${y}-${m}-${day}`;
+}
+
+/**
+ * Aggregate raw eval entries into daily time buckets with pass rates, average
+ * duration, and total escalations. Buckets are sorted newest first.
+ *
+ * Like {@link computeEvalStats}, skipped outcomes and entries without a
+ * model are excluded. Entries with no timestamp are skipped.
+ */
+export function computeEvalTimeSeries(entries: unknown[]): EvalTimeSeries {
+	// ponytail: single-pass Map keyed by YYYY-MM-DD, sort at end
+	const days = new Map<
+		string,
+		{ samples: number; passes: number; totalDurationMs: number; escalations: number }
+	>();
+
+	for (const entry of entries) {
+		const s = coerceEvalTimeSample(entry);
+		if (!s) continue;
+
+		const date = isoDate(s.timestamp);
+		let bucket = days.get(date);
+		if (!bucket) {
+			bucket = { samples: 0, passes: 0, totalDurationMs: 0, escalations: 0 };
+			days.set(date, bucket);
+		}
+		bucket.samples++;
+		if (s.status === "done" && s.verified) bucket.passes++;
+		if (s.durationMs > 0) bucket.totalDurationMs += s.durationMs;
+		bucket.escalations += s.escalations;
+	}
+
+	const buckets: EvalTimeBucket[] = [];
+	for (const [date, b] of days) {
+		buckets.push({
+			date,
+			samples: b.samples,
+			passRate: b.samples > 0 ? b.passes / b.samples : 0,
+			avgDurationMs: b.samples > 0 ? Math.round(b.totalDurationMs / b.samples) : 0,
+			escalations: b.escalations,
+		});
+	}
+	buckets.sort((a, b) => b.date.localeCompare(a.date)); // newest first
+
+	return { buckets };
 }

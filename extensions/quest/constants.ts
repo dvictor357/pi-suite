@@ -186,4 +186,19 @@ export const BUILT_IN_TEAMS: Record<string, TeamConfig> = {
 		defaultAgent: "worker",
 		verification: true,
 	},
+	"loop-engineering": {
+		name: "loop-engineering",
+		description:
+			"Five-role loop: architect (planner), research (scout), product + builder (worker), evaluator (verifier/reviewer)",
+		lead: "worker",
+		members: [
+			{ role: "architect", agent: "planner" },
+			{ role: "research", agent: "scout" },
+			{ role: "product", agent: "worker" },
+			{ role: "builder", agent: "worker" },
+			{ role: "evaluator", agent: "verifier" },
+		],
+		defaultAgent: "worker",
+		verification: true,
+	},
 };

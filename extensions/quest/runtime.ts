@@ -20,8 +20,24 @@ import { existsSync, readFileSync } from "node:fs";
 import type { Quest, QuestStep } from "./types";
 import { loadQuest, saveQuest } from "./storage";
 import { buildSteeringMessage, nextPendingStep } from "./steering";
-import { createRunLedger, createEvalLog, computeEvalStats, readAllEvalEntries } from "../../core";
-import type { RunLedger, EvalLog, RunEvent, EvalEntry, EvalStatsIndex } from "../../core";
+import {
+	createRunLedger,
+	createEvalLog,
+	computeEvalStats,
+	readAllEvalEntries,
+	updateJSON,
+	projectMemoryPath,
+	CONTRACT_VERSION,
+	isFutureContract,
+} from "../../core";
+import type {
+	RunLedger,
+	EvalLog,
+	RunEvent,
+	EvalEntry,
+	EvalStatsIndex,
+	MemoryGraph,
+} from "../../core";
 import { loadTeams, ensureBuiltInTeams } from "./teams";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { syncQuestToTodo } from "./todo-sync";
@@ -157,6 +173,50 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		try {
 			getLedgers(cwd).evalLog(entry);
 			evalStatsCache.delete(cwd);
+
+			// Mirror a compact eval-result node to the memory graph for trend visibility.
+			// Best-effort: updateJSON is no-throw, a corrupt file simply skips the write.
+			updateJSON<Record<string, any>>(
+				projectMemoryPath(cwd),
+				(memory) => {
+					if (isFutureContract(memory)) return memory;
+					const graph: MemoryGraph =
+						memory.graph && typeof memory.graph === "object"
+							? (memory.graph as MemoryGraph)
+							: { nodes: [], edges: [] };
+					if (!Array.isArray(graph.nodes)) graph.nodes = [];
+
+					const id = `eval-${entry.questSlug}-${entry.taskIndex}-${entry.timestamp}`;
+					/* ponytail: a few stacked ternary ops is shorter than separate if/else blocks */
+					const glyph = entry.status === "done" ? "✅" : entry.status === "failed" ? "❌" : "⏭️";
+					const label = `${glyph} ${entry.agent}/${entry.model ?? "?"} — ${entry.taskContent}`;
+					const parts: string[] = [`status=${entry.status}`];
+					if (entry.verified) parts.push("verified");
+					else parts.push("unverified");
+					if (entry.durationMs > 0) parts.push(`${Math.round(entry.durationMs / 1000)}s`);
+					if (entry.escalations && entry.escalations > 0)
+						parts.push(`${entry.escalations} escalations`);
+					const detail = parts.join(", ");
+
+					const existing = graph.nodes.findIndex((n) => n.id === id);
+					const node = {
+						id,
+						kind: "eval-result" as const,
+						label,
+						detail,
+						createdAt: existing >= 0 ? graph.nodes[existing].createdAt : entry.timestamp,
+						updatedAt: entry.timestamp,
+					};
+					if (existing >= 0) {
+						graph.nodes[existing] = node;
+					} else {
+						graph.nodes.push(node);
+					}
+
+					return { ...memory, graph, contractVersion: CONTRACT_VERSION };
+				},
+				{},
+			);
 		} catch {
 			/* best-effort observability */
 		}
