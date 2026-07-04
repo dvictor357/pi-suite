@@ -141,6 +141,31 @@ function normalizeWorktreeConfig(input: unknown): WorktreeConfig {
 	};
 }
 
+function normalizeSandboxArtifacts(input: unknown) {
+	const raw = asRecord(input);
+	const calls = Array.isArray(raw.calls)
+		? raw.calls
+				.map((c: unknown) => {
+					const r = asRecord(c);
+					return {
+						tool: strOr(r.tool, ""),
+						input: typeof r.input === "object" && r.input !== null ? r.input : {},
+						blocked: boolOr(r.blocked, false),
+						reason: optStr(r.reason),
+						timestamp: numOr(r.timestamp, 0),
+					};
+				})
+				.filter((c: { tool: string }) => c.tool)
+		: [];
+	return {
+		calls,
+		touchedPaths: strArray(raw.touchedPaths),
+		changedFiles: Array.isArray(raw.changedFiles) ? strArray(raw.changedFiles) : undefined,
+		commitHash: optStr(raw.commitHash),
+		worktreePath: optStr(raw.worktreePath),
+	};
+}
+
 export function syncConventionsToMemory(quest: Quest, cwd: string): void {
 	try {
 		if (!quest.conventions.length) return;
@@ -247,6 +272,10 @@ export function loadQuest(cwd: string): Quest | null {
 				sandbox:
 					t.sandbox && typeof t.sandbox === "object"
 						? normalizeSandboxOverrides(t.sandbox)
+						: undefined,
+				sandboxArtifacts:
+					t.sandboxArtifacts && typeof t.sandboxArtifacts === "object"
+						? normalizeSandboxArtifacts(t.sandboxArtifacts)
 						: undefined,
 			}));
 			// Legacy mirror for downgrade compatibility. New code uses steps.

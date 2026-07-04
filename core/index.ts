@@ -19,6 +19,11 @@ export type {
 	ModelLadderConfig,
 	ProjectResearchFinding,
 	UserMemory,
+	NodeKind,
+	EdgeKind,
+	MemoryNode,
+	MemoryEdge,
+	MemoryGraph,
 } from "./contract";
 
 export { cwdHash } from "./hash";

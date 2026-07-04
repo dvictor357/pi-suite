@@ -83,7 +83,19 @@ export function formatQuestStatus(quest: Quest): string {
 		const fmtDep = (t: QuestStep) =>
 			t.dependencies.length ? ` ← #${t.dependencies.map((d) => d + 1).join(",#")}` : "";
 
-		const sbMark = (t: QuestStep) => (t.sandbox ? " 🔒" : "");
+		const sbMark = (t: QuestStep) => {
+			const parts: string[] = [];
+			if (t.sandbox) parts.push("🔒");
+			if (t.sandboxArtifacts) {
+				const a = t.sandboxArtifacts;
+				if (a.touchedPaths.length) parts.push(`📄${a.touchedPaths.length}`);
+				if (a.changedFiles?.length) parts.push(`Δ${a.changedFiles.length}`);
+				const blocked = a.calls.filter((c) => c.blocked).length;
+				if (blocked) parts.push(`🚫${blocked}`);
+				if (a.worktreePath) parts.push(`🌳`);
+			}
+			return parts.length ? ` ${parts.join(" ")}` : "";
+		};
 
 		// TODO
 		if (todo.length > 0) {

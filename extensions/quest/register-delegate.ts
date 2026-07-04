@@ -377,6 +377,13 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					details: { index: params.index, role, model: model.id, ok: false, error: res.error },
 				};
 			}
+
+			// Store sandbox artifacts on the step for later surface in status/detail/recap.
+			if (res.sandboxArtifacts) {
+				task.sandboxArtifacts = res.sandboxArtifacts;
+				persist(ctx, quest);
+			}
+
 			return {
 				content: [
 					{
@@ -518,6 +525,20 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			}
 			if (quest.sandbox?.allowedPaths?.length) {
 				sandboxLines.push(`  Allowed paths: ${quest.sandbox.allowedPaths.join(", ")}`);
+			}
+			// Per-step sandbox artifacts from delegation
+			if (t.sandboxArtifacts) {
+				const a = t.sandboxArtifacts;
+				if (a.worktreePath) sandboxLines.push(`  Worktree path: ${a.worktreePath}`);
+				if (a.touchedPaths.length) sandboxLines.push(`  Touched: ${a.touchedPaths.join(", ")}`);
+				if (a.changedFiles?.length) sandboxLines.push(`  Changed: ${a.changedFiles.join(", ")}`);
+				const blocked = a.calls.filter((c) => c.blocked);
+				if (blocked.length) {
+					sandboxLines.push(`  Blocked calls: ${blocked.length}`);
+					for (const c of blocked) {
+						sandboxLines.push(`    - ${c.tool}: ${c.reason ?? "policy"}`);
+					}
+				}
 			}
 			if (sandboxLines.length > 0) {
 				lines.push(``, ...sandboxLines);

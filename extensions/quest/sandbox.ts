@@ -5,7 +5,11 @@
  * sub-agent spawn time. All functions are pure and SDK-free so they can be
  * unit-tested (like delegate.ts).
  */
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
 import type { SandboxMode, SandboxPolicy, SandboxOverrides, WorktreeConfig } from "./types";
+
+export type { SandboxCallRecord, SandboxArtifacts } from "./types";
 
 /**
  * Resolved runtime sandbox profile computed from quest-level policy and
@@ -412,4 +416,41 @@ export function isPackageInstallCommand(cmd: string): boolean {
 /** True when the command is destructive (force-delete, wipe, partition, etc.). */
 export function isDestructiveCommand(cmd: string): boolean {
 	return classifyCommand(cmd) === "destructive";
+}
+
+// ── Worktree isolation (isolated mode) ──────────────────────────────────────
+
+/**
+ * Create a git worktree at `worktree.path` based on `worktree.baseBranch`.
+ * Returns the absolute worktree path on success, null if creation failed
+ * (missing git, dirty repo, or any error). Best-effort — never throws.
+ */
+export function createWorktree(worktree: WorktreeConfig, cwd: string): string | null {
+	try {
+		const target = join(cwd, worktree.path);
+		execFileSync("git", ["worktree", "add", "--detach", target, worktree.baseBranch], {
+			cwd,
+			timeout: 30_000,
+			stdio: "pipe",
+		});
+		// ponytail: sync git call is fine for one sub-agent spawn; switch to async only if it blocks UI.
+		return target;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Remove a git worktree and prune its metadata. Best-effort — never throws.
+ */
+export function removeWorktree(worktreePath: string, cwd: string): void {
+	try {
+		execFileSync("git", ["worktree", "remove", "--force", worktreePath], {
+			cwd,
+			timeout: 30_000,
+			stdio: "pipe",
+		});
+	} catch {
+		/* best-effort cleanup */
+	}
 }

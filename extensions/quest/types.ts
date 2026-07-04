@@ -49,6 +49,42 @@ export interface QuestStep {
 	 * quest policy as-is".
 	 */
 	sandbox?: SandboxOverrides;
+	/**
+	 * Per-step sandbox/tool-call artifacts populated during isolated-mode
+	 * delegation. Records every guarded tool call (allowed/blocked), touched
+	 * paths, changed files from git diff, the commit hash, and the worktree
+	 * path. Absent when the step hasn't been delegated yet or the sandbox is
+	 * off.
+	 */
+	sandboxArtifacts?: SandboxArtifacts;
+}
+
+/** One guarded-tool-call log entry (the core artifact record). */
+export interface SandboxCallRecord {
+	/** Tool name that was invoked (e.g. "bash", "edit"). */
+	tool: string;
+	/** The tool-call arguments at invocation time. */
+	input: Record<string, unknown>;
+	/** Whether the call was blocked by sandbox policy. */
+	blocked: boolean;
+	/** Policy reason when blocked; absent for allowed calls. */
+	reason?: string;
+	/** Epoch-ms timestamp. */
+	timestamp: number;
+}
+
+/** Sandbox telemetry collected during a single step delegation. */
+export interface SandboxArtifacts {
+	/** Every guarded tool call made by the sub-agent (allowed + blocked). */
+	calls: SandboxCallRecord[];
+	/** Write-tool paths touched across all calls (deduplicated). */
+	touchedPaths: string[];
+	/** Files changed according to git diff --name-only at step end. */
+	changedFiles?: string[];
+	/** Commit hash when the sub-agent committed its work. */
+	commitHash?: string;
+	/** Absolute worktree path used during isolated-mode delegation. */
+	worktreePath?: string;
 }
 
 export interface GitIntegration {

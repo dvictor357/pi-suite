@@ -86,12 +86,6 @@ export function extractFinalText(
 	return "";
 }
 
-export interface SubAgentResult {
-	ok: boolean;
-	output: string;
-	error?: string;
-}
-
 /**
  * Build a sandbox constraint block for injection into sub-agent prompts.
  *

@@ -144,6 +144,14 @@ export interface ProjectMemory {
 	 * start on the cheapest rung and escalate only on verified failure.
 	 */
 	modelLadder?: ModelLadderConfig;
+	/**
+	 * Additive knowledge graph that captures project-level relationships —
+	 * loop patterns, sandbox logs, artifact sets, design decisions, general
+	 * knowledge, and eval results — as nodes connected by typed edges.
+	 * Written by the `memory_graph` tool; pi-memory preserves it across
+	 * rescans like the other foreign fields.
+	 */
+	graph?: MemoryGraph;
 }
 
 /**
@@ -192,4 +200,54 @@ export interface UserMemory {
 	conventions: string[];
 	facts: MemoryFact[];
 	lastModified: number;
+}
+
+// ── Memory graph (pi-memory additive knowledge structure) ─────────────────
+
+/** Kinds of nodes the memory graph can hold. */
+export type NodeKind =
+	| "loop-pattern"
+	| "sandbox-log"
+	| "artifact-set"
+	| "design-decision"
+	| "knowledge"
+	| "eval-result";
+
+/** Kinds of directed edges between graph nodes. */
+export type EdgeKind = "depends-on" | "produces" | "refines" | "relates-to";
+
+/** One named node in the project memory graph. */
+export interface MemoryNode {
+	/** Unique opaque id (caller-chosen; e.g. "sandbox-2026-07-04-001"). */
+	id: string;
+	/** Semantic category of this node. */
+	kind: NodeKind;
+	/** Short human-readable title. */
+	label: string;
+	/** Longer free-form detail (findings, notes, evidence). */
+	detail?: string;
+	/** Epoch-ms creation time. */
+	createdAt: number;
+	/** Epoch-ms last-update time. */
+	updatedAt: number;
+}
+
+/** One directed edge in the project memory graph. */
+export interface MemoryEdge {
+	/** Source node id. */
+	from: string;
+	/** Target node id. */
+	to: string;
+	/** Relationship type. */
+	kind: EdgeKind;
+	/** Optional edge annotation. */
+	label?: string;
+}
+
+/** Additive knowledge graph stored on {@link ProjectMemory.graph}. */
+export interface MemoryGraph {
+	/** All graph nodes. */
+	nodes: MemoryNode[];
+	/** All graph edges. */
+	edges: MemoryEdge[];
 }

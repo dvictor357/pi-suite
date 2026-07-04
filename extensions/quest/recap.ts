@@ -52,8 +52,11 @@ export function buildQuestRecap(quest: Quest): string {
 
 	for (const [i, step] of quest.steps.entries()) {
 		const result = oneLine(step.result || step.verifyResult);
+		const artifactSuffix = step.sandboxArtifacts
+			? ` — ${step.sandboxArtifacts.touchedPaths.length} file(s) touched${step.sandboxArtifacts.changedFiles?.length ? `, ${step.sandboxArtifacts.changedFiles.length} changed` : ""}`
+			: "";
 		lines.push(
-			`- ${iconFor(step.status)} #${i + 1} **${step.content}**${result ? ` — ${short(result)}` : ""}`,
+			`- ${iconFor(step.status)} #${i + 1} **${step.content}**${result ? ` — ${short(result)}` : ""}${artifactSuffix}`,
 		);
 	}
 

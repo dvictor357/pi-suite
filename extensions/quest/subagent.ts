@@ -25,10 +25,26 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
-import { toolsForRole, extractFinalText, awaitFinalTurn, type SubAgentResult } from "./delegate";
-import { isSandboxActive, sandboxToolPlan, GUARDED_SANDBOX_TOOLS } from "./sandbox";
-import type { SandboxProfile } from "./sandbox";
+import { toolsForRole, extractFinalText, awaitFinalTurn } from "./delegate";
+import {
+	isSandboxActive,
+	sandboxToolPlan,
+	GUARDED_SANDBOX_TOOLS,
+	createWorktree,
+	removeWorktree,
+} from "./sandbox";
+import { execSync } from "node:child_process";
+import type { SandboxProfile, SandboxCallRecord, SandboxArtifacts } from "./sandbox";
 import { evaluateToolCall } from "./sandbox-guard";
+
+/** Extended result that carries sandbox artifacts when a sandbox was active. */
+export interface SubAgentResult {
+	ok: boolean;
+	output: string;
+	error?: string;
+	/** Sandbox artifacts collected during delegation; absent when sandbox is off. */
+	sandboxArtifacts?: SandboxArtifacts;
+}
 
 export interface SubAgentRequest {
 	/** Sub-agent role (scout, worker, …) — drives the tool scope when `tools` is not set. */
@@ -66,16 +82,26 @@ const TOOL_DEFINITION_FACTORIES: Record<string, (cwd: string) => ToolDefinition<
 
 const GUARDED = new Set<string>(GUARDED_SANDBOX_TOOLS);
 
-/** Wrap a tool definition's `execute` so a policy-violating call is blocked before it runs. */
+/** Wrap a tool definition's `execute` so a policy-violating call is blocked before it runs
+ * and every call (allowed or blocked) is recorded in the supplied log array. */
 function guard(
 	def: ToolDefinition<any, any, any>,
 	profile: SandboxProfile,
+	log: SandboxCallRecord[],
 ): ToolDefinition<any, any, any> {
 	const run = def.execute.bind(def);
 	return {
 		...def,
 		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-			const decision = evaluateToolCall(profile, def.name, params as Record<string, unknown>);
+			const input = params as Record<string, unknown>;
+			const decision = evaluateToolCall(profile, def.name, input);
+			log.push({
+				tool: def.name,
+				input,
+				blocked: decision.block,
+				reason: decision.reason,
+				timestamp: Date.now(),
+			});
 			if (decision.block) {
 				return {
 					content: [{ type: "text", text: decision.reason ?? "Sandbox: tool call blocked." }],
@@ -91,19 +117,20 @@ function guard(
 /**
  * Build the guarded tool-definition set for a sandboxed sub-agent: read-only
  * tools pass through, {@link GUARDED_SANDBOX_TOOLS} (bash/edit/write) are wrapped
- * with the sandbox guard.
+ * with the sandbox guard. Every guarded call is appended to `log`.
  */
 function buildGuardedTools(
 	cwd: string,
 	role: string,
 	profile: SandboxProfile,
+	log: SandboxCallRecord[],
 ): ToolDefinition<any, any, any>[] {
 	const out: ToolDefinition<any, any, any>[] = [];
 	for (const name of sandboxToolPlan(role, profile)) {
 		const factory = TOOL_DEFINITION_FACTORIES[name];
 		if (!factory) continue;
 		const def = factory(cwd);
-		out.push(GUARDED.has(name) ? guard(def, profile) : def);
+		out.push(GUARDED.has(name) ? guard(def, profile, log) : def);
 	}
 	return out;
 }
@@ -122,10 +149,21 @@ export async function runSubAgent(
 
 	let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
 	let cleanup: (() => void) | undefined;
+	// Worktree path for isolated mode — cleaned up in `finally`.
+	let worktreePath: string | null = null;
 	try {
 		const sandboxed = req.sandboxProfile && isSandboxActive(req.sandboxProfile);
+		const callLog: SandboxCallRecord[] = [];
+
+		// Isolated mode: create a real git worktree and run the sub-agent inside it.
+		let sessionCwd = ctx.cwd;
+		if (sandboxed && req.sandboxProfile!.worktree) {
+			worktreePath = createWorktree(req.sandboxProfile!.worktree, ctx.cwd);
+			if (worktreePath) sessionCwd = worktreePath;
+		}
+
 		const created = await createAgentSession({
-			cwd: ctx.cwd,
+			cwd: sessionCwd,
 			model: req.model,
 			modelRegistry: ctx.modelRegistry,
 			sessionManager: SessionManager.inMemory(),
@@ -134,7 +172,7 @@ export async function runSubAgent(
 			...(sandboxed
 				? {
 						noTools: "builtin" as const,
-						customTools: buildGuardedTools(ctx.cwd, req.role, req.sandboxProfile!),
+						customTools: buildGuardedTools(sessionCwd, req.role, req.sandboxProfile!, callLog),
 					}
 				: { tools: req.tools ?? toolsForRole(req.role) }),
 		});
@@ -148,11 +186,60 @@ export async function runSubAgent(
 		await session.prompt(req.prompt);
 		const messages = await promise;
 
-		return { ok: true, output: extractFinalText(messages) };
+		// ── Collect sandbox artifacts ─────────────────────────────────────
+		let sandboxArtifacts: SandboxArtifacts | undefined;
+		if (sandboxed && callLog.length > 0) {
+			const touched = collectTouchedPaths(callLog);
+			sandboxArtifacts = {
+				calls: callLog,
+				touchedPaths: touched,
+				worktreePath: worktreePath ?? undefined,
+			};
+			// Gather git diff when the sub-agent touched files.
+			if (touched.length > 0) {
+				const changed = gitChangedFiles(sessionCwd);
+				if (changed) sandboxArtifacts.changedFiles = changed;
+			}
+		}
+
+		return { ok: true, output: extractFinalText(messages), sandboxArtifacts };
 	} catch (err) {
 		return { ok: false, output: "", error: err instanceof Error ? err.message : String(err) };
 	} finally {
 		cleanup?.();
 		session?.dispose();
+		// Clean up the worktree when configured to do so.
+		if (worktreePath && req.sandboxProfile?.worktree?.autoCleanup) {
+			removeWorktree(worktreePath, ctx.cwd);
+		}
+	}
+}
+
+/** Extract write-tool paths (deduplicated) from a call log. */
+function collectTouchedPaths(log: SandboxCallRecord[]): string[] {
+	const seen = new Set<string>();
+	for (const rec of log) {
+		if (rec.blocked) continue;
+		if (rec.tool !== "edit" && rec.tool !== "write") continue;
+		const path =
+			typeof rec.input.path === "string"
+				? rec.input.path
+				: typeof rec.input.file_path === "string"
+					? rec.input.file_path
+					: typeof rec.input.file === "string"
+						? rec.input.file
+						: undefined;
+		if (path) seen.add(path);
+	}
+	return [...seen];
+}
+
+/** Return `git diff --name-only` output as an array, or null on failure. */
+function gitChangedFiles(cwd: string): string[] | null {
+	try {
+		const out = execSync("git diff --name-only", { cwd, timeout: 10_000, stdio: "pipe" });
+		return out.toString().trim().split("\n").filter(Boolean);
+	} catch {
+		return null;
 	}
 }
