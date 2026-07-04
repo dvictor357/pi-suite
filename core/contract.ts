@@ -74,6 +74,8 @@ export interface TodoItem {
 	sourceId?: string;
 	/** Source-local task index. */
 	sourceIndex?: number;
+	/** Nesting level for tree display: 0 = root, 1+ = indented child. */
+	level?: number;
 	createdAt: number;
 	completedAt: number | null;
 }

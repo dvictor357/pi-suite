@@ -33,6 +33,7 @@ import {
 	readJSON,
 	writeJSON,
 	writeSessionMeta,
+	todoListPath,
 	asRecord,
 	numOr,
 	optStr,
@@ -41,19 +42,18 @@ import {
 	oneOf,
 } from "../../core";
 import type { TodoItem, TodoList, TodoStatus as Status } from "../../core";
-import { displayOrder } from "./display";
+import { treePrefix, visibleOrder } from "./display";
 
 const MAX_ITEMS = 30;
 const TRUNCATE_AT = 10;
+const PROGRESS_BAR_WIDTH = 20;
+const CONTENT_MAX = 80;
+const SECONDARY_MAX = 50;
 
 const TODO_DIR = join(AGENT_DIR, "tmp", "todos");
 const ARCHIVE_DIR = join(TODO_DIR, "archive");
 
 // ── Storage ──────────────────────────────────────────────────────────────────
-
-function storePath(cwd: string): string {
-	return join(TODO_DIR, `${cwdHash(cwd)}.json`);
-}
 
 function archivePath(cwd: string, timestamp: number): string {
 	return join(ARCHIVE_DIR, `${cwdHash(cwd)}-${timestamp}.json`);
@@ -67,7 +67,7 @@ function archivePath(cwd: string, timestamp: number): string {
  */
 function storeStamp(cwd: string): string | null {
 	try {
-		const p = storePath(cwd);
+		const p = todoListPath(cwd);
 		if (!existsSync(p)) return null;
 		const s = statSync(p);
 		return `${s.mtimeMs}:${s.size}`;
@@ -91,6 +91,7 @@ function coerceTodoItem(value: unknown): TodoItem | null {
 		source: optStr(i.source),
 		sourceId: optStr(i.sourceId),
 		sourceIndex: optNum(i.sourceIndex),
+		level: optNum(i.level),
 		createdAt: numOr(i.createdAt, Date.now()),
 		completedAt: optNum(i.completedAt) ?? null,
 	};
@@ -98,7 +99,7 @@ function coerceTodoItem(value: unknown): TodoItem | null {
 
 function loadTodos(cwd: string): TodoList {
 	try {
-		const p = storePath(cwd);
+		const p = todoListPath(cwd);
 		if (!existsSync(p)) return { cwd, items: [], version: 1 };
 		const raw = asRecord(JSON.parse(readFileSync(p, "utf8")));
 		if (Array.isArray(raw.items)) {
@@ -112,7 +113,7 @@ function loadTodos(cwd: string): TodoList {
 }
 
 function saveTodos(list: TodoList): void {
-	writeJSON(storePath(list.cwd), list);
+	writeJSON(todoListPath(list.cwd), list);
 }
 
 function writeTodoSessionMeta(cwd: string, list: TodoList): void {
@@ -279,14 +280,33 @@ const ICON: Record<Status, string> = {
 	delegated: "⇢",
 };
 
+function usesTree(items: TodoItem[]): boolean {
+	return items.some((i) => (i.level ?? 0) > 0);
+}
+
+function clip(text: string, max: number): string {
+	return text.length > max ? text.slice(0, max - 1) + "…" : text;
+}
+
+function progressBar(done: number, total: number): string {
+	if (total === 0) return "";
+	const ratio = done / total;
+	const filled = Math.round(ratio * PROGRESS_BAR_WIDTH);
+	const bar = "█".repeat(filled) + "░".repeat(PROGRESS_BAR_WIDTH - filled);
+	return `[${bar}] ${done}/${total}`;
+}
+
 function formatItems(items: TodoItem[], truncate = false): string {
-	const sorted = displayOrder(items);
+	const sorted = visibleOrder(items);
+	const treeMode = usesTree(items);
 	let lines = sorted.map((i, idx) => {
+		const content = clip(i.content, CONTENT_MAX);
 		const extras: string[] = [];
 		if (i.agent) extras.push(`→ ${i.agent}`);
-		if (i.result) extras.push(`✓ ${i.result.slice(0, 60)}`);
+		if (i.result) extras.push(`✓ ${clip(i.result, SECONDARY_MAX)}`);
 		const extra = extras.length ? `  ${extras.join(" · ")}` : "";
-		return `${idx}. ${ICON[i.status]} ${i.content}${extra}`;
+		const prefix = treeMode ? treePrefix(sorted, idx) : "";
+		return `${idx}. ${ICON[i.status]} ${prefix}${content}${extra}`;
 	});
 	if (truncate && lines.length > TRUNCATE_AT) {
 		const shown = lines.slice(0, 8);
@@ -299,15 +319,13 @@ function formatItems(items: TodoItem[], truncate = false): string {
 function buildOutput(list: TodoList, warnings: string[] = []): string {
 	const done = list.items.filter((i) => i.status === "completed").length;
 	const total = list.items.length;
-	const active = list.items.filter((i) => i.status === "in_progress").length;
-	const delegated = list.items.filter((i) => i.status === "delegated").length;
 
 	const header = list.title ? `## ${list.title}\n` : "";
-	const stats = `${done}/${total} done${active ? ` · ${active} in progress` : ""}${delegated ? ` · ${delegated} delegated` : ""}`;
+	const bar = progressBar(done, total);
 	const warningText = warnings.length ? `\n⚠ ${warnings.join(" · ")}` : "";
 	const items = formatItems(list.items, true);
 
-	return `${header}${stats}${warningText}\n${items}`;
+	return `${header}${bar}${warningText}\n${items}`;
 }
 
 // ── Status badge ─────────────────────────────────────────────────────────────
@@ -354,6 +372,9 @@ const TodoItemSchema = Type.Object({
 	),
 	sourceId: Type.Optional(Type.String({ description: "Optional external source id" })),
 	sourceIndex: Type.Optional(Type.Number({ description: "Optional source-local task index" })),
+	level: Type.Optional(
+		Type.Number({ description: "Nesting level for tree display: 0 = root, 1+ = indented child" }),
+	),
 });
 
 const TodoWriteParams = Type.Object({
@@ -460,6 +481,7 @@ export default function (pi: ExtensionAPI) {
 					sourceId: typeof raw.sourceId === "string" ? raw.sourceId : prev?.item.sourceId,
 					sourceIndex:
 						typeof raw.sourceIndex === "number" ? raw.sourceIndex : prev?.item.sourceIndex,
+					level: typeof raw.level === "number" ? raw.level : prev?.item.level,
 					createdAt: prev?.item.createdAt ?? now,
 					completedAt: raw.status === "completed" ? (prev?.item.completedAt ?? now) : null,
 				};
@@ -472,9 +494,11 @@ export default function (pi: ExtensionAPI) {
 				version: 1,
 			};
 
-			// Auto-archive if all items completed
+			// Auto-archive if all items completed, then clear the active list
 			if (list.items.length > 0 && list.items.every((i) => i.status === "completed")) {
 				archiveList(list);
+				list.items = [];
+				list.title = undefined;
 				warnings.push("all done — list archived");
 			}
 
@@ -505,23 +529,45 @@ export default function (pi: ExtensionAPI) {
 			const items = (result.details as { items?: TodoItem[] } | undefined)?.items ?? [];
 			if (items.length === 0) return new Text("(no todos)", 0, 0);
 
-			const colorFor: Record<Status, string> = {
-				completed: "success",
-				in_progress: "warning",
-				delegated: "accent",
-				pending: "muted",
+			const colorFor: Record<Status, { fg: string; icon: string }> = {
+				completed: { fg: "success", icon: "☑" },
+				in_progress: { fg: "warning", icon: "▶" },
+				delegated: { fg: "accent", icon: "⇢" },
+				pending: { fg: "muted", icon: "☐" },
 			};
-			const sorted = displayOrder(items);
-			const lines = sorted
-				.map((i, idx) => {
-					const agent = i.agent ? ` → ${i.agent}` : "";
-					return theme.fg(
-						colorFor[i.status] as any,
-						`${idx}. ${ICON[i.status]} ${i.content}${agent}`,
-					);
-				})
-				.join("\n");
-			return new Text(lines, 0, 0);
+			const done = items.filter((i) => i.status === "completed").length;
+			const total = items.length;
+			const sorted = visibleOrder(items);
+			const treeMode = usesTree(items);
+
+			const lines: string[] = [];
+
+			// Themed progress bar
+			if (total > 0) {
+				const ratio = Math.round((done / total) * PROGRESS_BAR_WIDTH);
+				const bar =
+					theme.fg("success", "█".repeat(ratio)) +
+					theme.fg("dim", "░".repeat(PROGRESS_BAR_WIDTH - ratio));
+				lines.push(`${bar} ${done}/${total}`);
+				lines.push("");
+			}
+
+			for (let idx = 0; idx < sorted.length; idx++) {
+				const i = sorted[idx];
+				const c = colorFor[i.status];
+				const prefix = treeMode ? treePrefix(sorted, idx) : "";
+				const secondaryPrefix = " ".repeat(prefix.length);
+				const content = clip(i.content, CONTENT_MAX);
+				lines.push(theme.fg(c.fg as any, `${idx}. ${c.icon} ${prefix}${content}`));
+				if (i.agent) {
+					lines.push(theme.fg("dim", `   ${secondaryPrefix}→ ${i.agent}`));
+				}
+				if (i.result) {
+					lines.push(theme.fg("dim", `   ${secondaryPrefix}✓ ${clip(i.result, SECONDARY_MAX)}`));
+				}
+			}
+
+			return new Text(lines.join("\n"), 0, 0);
 		},
 	});
 
@@ -645,14 +691,14 @@ export default function (pi: ExtensionAPI) {
 						return;
 					}
 					const list = getCached(ctx.cwd);
-					const item = displayOrder(list.items)[idx];
+					const item = visibleOrder(list.items)[idx];
 					if (!item) {
 						ctx.ui.notify(`No item at index ${idx}.`, "error");
 						return;
 					}
-					// Parse --agent and --context flags
+					// Parse --agent (single word) and --context (up to next --flag or EOL)
 					const agentMatch = restStr.match(/--agent\s+(\S+)/);
-					const ctxMatch = restStr.match(/--context\s+(.+)/);
+					const ctxMatch = restStr.match(/--context\s+(.+?)(?=\s+--|$)/);
 					if (agentMatch) item.agent = agentMatch[1];
 					if (ctxMatch) item.context = ctxMatch[1];
 					item.status = "delegated";
@@ -664,17 +710,42 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify(`Delegated [${idx}] ${item.content}${agent}`, "info");
 					return;
 				}
+				case "detail": {
+					const idx = parseInt(rest[0], 10);
+					if (isNaN(idx) || idx < 0) {
+						ctx.ui.notify("Usage: /todo detail <index>", "error");
+						return;
+					}
+					const list = getCached(ctx.cwd);
+					const item = visibleOrder(list.items)[idx];
+					if (!item) {
+						ctx.ui.notify(`No item at index ${idx}.`, "error");
+						return;
+					}
+					const detailLines = [
+						`[${idx}] ${item.status.toUpperCase()}: ${item.content}`,
+						item.agent ? `  Agent: ${item.agent}` : "",
+						item.context ? `  Context: ${item.context}` : "",
+						item.result ? `  Result: ${item.result}` : "",
+						item.createdAt ? `  Created: ${new Date(item.createdAt).toISOString()}` : "",
+						item.completedAt ? `  Done: ${new Date(item.completedAt).toISOString()}` : "",
+					]
+						.filter(Boolean)
+						.join("\n");
+					ctx.ui.notify(detailLines, "info");
+					return;
+				}
 				default: {
 					// Maybe it's a numeric index → show detail
 					const idx = parseInt(sub, 10);
 					if (!isNaN(idx) && idx >= 0) {
 						const list = getCached(ctx.cwd);
-						const item = displayOrder(list.items)[idx];
+						const item = visibleOrder(list.items)[idx];
 						if (!item) {
 							ctx.ui.notify(`No item at index ${idx}.`, "error");
 							return;
 						}
-						const lines = [
+						const detailLines = [
 							`[${idx}] ${item.status.toUpperCase()}: ${item.content}`,
 							item.agent ? `  Agent: ${item.agent}` : "",
 							item.context ? `  Context: ${item.context}` : "",
@@ -684,7 +755,7 @@ export default function (pi: ExtensionAPI) {
 						]
 							.filter(Boolean)
 							.join("\n");
-						ctx.ui.notify(lines, "info");
+						ctx.ui.notify(detailLines, "info");
 						return;
 					}
 					ctx.ui.notify(
