@@ -1,5 +1,7 @@
 # pi-suite
 
+![pi-suite article header](docs/assets/pi_suite_article_header.png)
+
 A loop-engineering toolkit for [pi](https://pi.dev) — three extensions, previously
 maintained as separate repos, now consolidated here behind one cross-extension contract:
 
@@ -23,8 +25,9 @@ are now deprecated in favor of this suite.
 /quest create  →  plan steps  →  delegate agents  →  verify  →  recap
 ```
 
-When a quest finishes, `pi-quest` now posts a compact recap with the scorecard, step
-results, git commits, saved conventions, and next action.
+When a quest finishes, `pi-quest` archives the active quest, clears its synced todo
+items, and posts a compact recap with the scorecard, step results, git commits, saved
+conventions, and next action.
 
 ## Layout
 
