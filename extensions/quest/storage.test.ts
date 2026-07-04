@@ -1,9 +1,16 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyQuest, loadModelLadder, loadQuest, rememberModelLadder, saveQuest } from "./storage";
+import {
+	emptyQuest,
+	listArchives,
+	loadModelLadder,
+	loadQuest,
+	rememberModelLadder,
+	saveQuest,
+} from "./storage";
 import type { SandboxPolicy } from "./types";
 import { projectMemoryPath, questActivePath, readJSON, writeJSON } from "./utils";
 
@@ -35,6 +42,35 @@ test("loadQuest defaults sandboxed network/package install permissions to false"
 	assert.equal(loaded?.sandbox?.mode, "restricted");
 	assert.equal(loaded?.sandbox?.allowNetwork, false);
 	assert.equal(loaded?.sandbox?.allowPackageInstall, false);
+});
+
+test("loadQuest archives and clears a stale finished active quest", () => {
+	const cwd = tempCwd();
+	const quest = emptyQuest("Finished quest", "archive stale completion");
+	quest.status = "active";
+	quest.steps = [
+		{
+			content: "done step",
+			status: "done",
+			agent: "worker",
+			context: "",
+			dependencies: [],
+			result: "done",
+			attempts: 1,
+			startedAt: 1,
+			completedAt: 2,
+			verified: true,
+			verifyResult: "PASS",
+			verifyRetries: 0,
+			commitHash: null,
+			branchName: null,
+		},
+	];
+	saveQuest(quest, cwd);
+
+	assert.equal(loadQuest(cwd), null);
+	assert.equal(existsSync(questActivePath(cwd)), false);
+	assert.equal(listArchives(1, cwd)[0]?.name, "Finished quest");
 });
 
 test("loadQuest defaults non-sandbox network/package install permissions to true", () => {

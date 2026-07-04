@@ -3,6 +3,7 @@ import { DEFAULT_RETRY_POLICY } from "../../core";
 import { MAX_BURST, MAX_RETRIES } from "./constants";
 import {
 	archiveQuest,
+	clearActiveQuest,
 	loadModelLadder,
 	loadQuest,
 	saveQuest,
@@ -11,7 +12,7 @@ import {
 import { buildFailureBrief, decideVerifyFailAction, rungModel } from "./ladder";
 import { nextPendingStep, formatQuestStatus, wasTurnAborted } from "./steering";
 import { renderStatus, writeQuestSessionMeta } from "./status";
-import { syncQuestToTodo } from "./todo-sync";
+import { clearQuestFromTodo, syncQuestToTodo } from "./todo-sync";
 import { resolveSandboxProfile } from "./sandbox";
 import { evaluateToolCall } from "./sandbox-guard";
 import { buildQuestRecap } from "./recap";
@@ -183,8 +184,15 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 					quest.status = "done";
 					quest.completedAt = Date.now();
 					syncConventionsToMemory(quest, ctx.cwd);
-					archiveQuest(quest, ctx.cwd);
-					persist(ctx, quest);
+					if (archiveQuest(quest, ctx.cwd)) {
+						clearActiveQuest(ctx.cwd);
+						rt.setQuest(null);
+						renderStatus(ctx, null);
+						writeQuestSessionMeta(ctx.cwd, null);
+						clearQuestFromTodo(ctx.cwd);
+					} else {
+						persist(ctx, quest);
+					}
 
 					rt.setAutoPilotLocked(true);
 					try {

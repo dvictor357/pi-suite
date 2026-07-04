@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { TEAMS_DIR } from "./constants";
-import { archiveQuest, emptyQuest, listArchives, loadQuest } from "./storage";
+import { archiveQuest, clearActiveQuest, emptyQuest, listArchives, loadQuest } from "./storage";
 import { clearQuestFromTodo, compactAwarenessBlock } from "./todo-sync";
 import { ensureBuiltInTeams, loadTeams, teamInstallFromGit } from "./teams";
 import { formatQuestStatus, nextPendingStep } from "./steering";
@@ -376,8 +376,8 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 					if (quest.status !== "done") {
 						quest.status = "done";
 						quest.completedAt = Date.now();
-						archiveQuest(quest, ctx.cwd);
 					}
+					if (archiveQuest(quest, ctx.cwd)) clearActiveQuest(ctx.cwd);
 					rt.setQuest(null);
 					renderStatus(ctx, null);
 					writeQuestSessionMeta(ctx.cwd, null);

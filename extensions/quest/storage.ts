@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { AgentModelChoice, ModelLadderConfig } from "../../core";
 import { asRecord, strArray, boolOr, strOr, oneOf, numOr, optStr, optNum } from "../../core";
@@ -336,6 +336,20 @@ export function loadQuest(cwd: string): Quest | null {
 			} else {
 				raw.sandbox = undefined;
 			}
+
+			const finishedSteps =
+				raw.steps.length > 0 &&
+				raw.steps.every(
+					(t: Quest["steps"][number]) => t.status === "done" || t.status === "skipped",
+				) &&
+				!raw.steps.some((t: Quest["steps"][number]) => t.status === "failed");
+			if (raw.status === "done" || finishedSteps) {
+				raw.status = "done";
+				raw.completedAt = typeof raw.completedAt === "number" ? raw.completedAt : Date.now();
+				if (archiveQuest(raw as Quest, cwd)) clearActiveQuest(cwd);
+				return null;
+			}
+
 			return raw as Quest;
 		}
 	} catch (e) {
@@ -355,6 +369,10 @@ export function saveQuest(quest: Quest, cwd: string): void {
 		taskIndex: commit.stepIndex,
 	}));
 	writeJSON(questActivePath(cwd), quest);
+}
+
+export function clearActiveQuest(cwd: string): void {
+	rmSync(questActivePath(cwd), { force: true });
 }
 
 export function archiveQuest(quest: Quest, cwd: string): string | null {

@@ -4,6 +4,7 @@ import type { ModelLadderConfig } from "../../core";
 import { formatDirectiveFor, LADDER } from "./constants";
 import {
 	archiveQuest,
+	clearActiveQuest,
 	loadAgentModels,
 	loadModelLadder,
 	rememberAgentModel,
@@ -425,8 +426,8 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			if (quest.status !== "done") {
 				quest.status = "done";
 				quest.completedAt = Date.now();
-				archiveQuest(quest, ctx.cwd);
 			}
+			if (archiveQuest(quest, ctx.cwd)) clearActiveQuest(ctx.cwd);
 			rt.setQuest(null);
 			renderStatus(ctx, null);
 			writeQuestSessionMeta(ctx.cwd, null);
