@@ -25,6 +25,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
+import type { ThinkingLevel } from "../../core";
 import { toolsForRole, extractFinalText, awaitFinalTurn } from "./delegate";
 import {
 	isSandboxActive,
@@ -51,6 +52,8 @@ export interface SubAgentRequest {
 	role: string;
 	/** The resolved model the sub-agent runs with. */
 	model: Model<any>;
+	/** Thinking effort for this role; absent preserves the harness default. */
+	thinkingLevel?: ThinkingLevel;
 	/** Fully-formed instruction sent to the sub-agent (persona + step + context). */
 	prompt: string;
 	/**
@@ -173,6 +176,7 @@ export async function runSubAgent(
 		const created = await createAgentSession({
 			cwd: sessionCwd,
 			model: req.model,
+			thinkingLevel: req.thinkingLevel,
 			modelRegistry: ctx.modelRegistry,
 			sessionManager: SessionManager.inMemory(),
 			// Sandboxed: disable built-in tools and supply guarded definitions so

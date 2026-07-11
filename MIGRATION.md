@@ -116,6 +116,19 @@ Operationally, `quest_assign_ladder` validates and approves the rung list once p
 Ladder transitions never re-prompt, judge roles are excluded, and explicit step models
 bypass the ladder.
 
+## pi-minions delegation and thinking levels — RESOLVED
+
+`AgentModelChoice` now has an additive optional `thinkingLevel` field. No
+`CONTRACT_VERSION` bump is required: old readers ignore it and old entries without it keep
+their previous default/tier-thinking behavior. `quest_assign_model` approves model and
+thinking together, and unsandboxed Quest steering calls pi-minions' `subagent` tool with
+the resolved model/thinking as per-invocation overrides.
+
+The old `quest_delegate` entry point remains registered as a compatibility and security
+fallback. Quest deliberately uses it for `restricted`/`isolated` steps because its guarded
+in-process tool definitions enforce sandbox policy; pi-minions does not yet enforce that
+policy in the child process.
+
 ## Order
 
 Migrate **pi-memory** and **pi-todo** first (they are leaf producers of the shared

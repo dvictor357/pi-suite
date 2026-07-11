@@ -188,27 +188,48 @@ export function buildSteeringMessage(
 
 	// Surface sandbox context when the quest or step has an active sandbox.
 	const sandboxMode = task.sandbox?.mode || quest.sandbox?.mode;
-	const sandboxBlock = sandboxMode
+	const sandboxActive = Boolean(sandboxMode && sandboxMode !== "none");
+	const sandboxBlock = sandboxActive
 		? `**Sandbox:** ${
 				sandboxMode === "isolated" ? "isolated 🔒" : "restricted 🔒"
-			} — sub-agent is restricted per sandbox policy.`
+			} — use the guarded Quest fallback; pi-minions does not enforce this policy yet.`
 		: "";
 
-	// Surface the model to run this sub-agent with: the task's own assignment
-	// wins, else the current approved ladder rung, else the project's remembered
-	// choice for this role. When none exists, nudge the orchestrator to propose.
-	const remembered = loadAgentModels(cwd)[task.agent]?.model;
+	// Surface the runtime to use for this minion: the task's own model wins, else
+	// the current approved ladder rung, else the project's remembered role choice.
+	// Unsandboxed work goes through pi-minions; active Quest sandboxes retain the
+	// guarded compatibility path because that enforcement is local to pi-suite.
+	const rememberedChoice = loadAgentModels(cwd)[task.agent];
+	const remembered = rememberedChoice?.model;
+	const thinkingLevel = rememberedChoice?.thinkingLevel;
 	const ladder = task.rung !== undefined ? loadModelLadder(cwd) : null;
 	const ladderModel = ladder && !task.model?.trim() ? rungModel(ladder, task.rung ?? 0) : undefined;
 	const assignedModel = task.model?.trim() || ladderModel?.trim() || remembered?.trim();
+	const minionTask =
+		"Execute the current Quest step using the full step, context, dependencies, sandbox, prior-failure, and project-awareness details in this steering message.";
+	const minionArgs = [
+		`agent=${JSON.stringify(task.agent)}`,
+		`task=${JSON.stringify(minionTask)}`,
+		assignedModel ? `model=${JSON.stringify(assignedModel)}` : "",
+		thinkingLevel ? `thinking=${JSON.stringify(thinkingLevel)}` : "",
+	]
+		.filter(Boolean)
+		.join(", ");
 	const modelLine = assignedModel
-		? ladderModel
-			? `**Model:** rung ${task.rung! + 1}/${ladder!.rungs.length} — \`${assignedModel}\` (ladder); delegate with quest_delegate(index=${index}).`
-			: `**Model:** \`${assignedModel}\` — delegate with quest_delegate(index=${index}).`
-		: `**Model:** none assigned for role \`${task.agent}\`. Propose one via quest_assign_model(role="${task.agent}", proposed="…", stepIndex=${index}), then quest_delegate(index=${index}).`;
+		? sandboxActive
+			? `**Model:** \`${assignedModel}\`${thinkingLevel ? ` · thinking \`${thinkingLevel}\`` : ""}.\n**Guarded call:** \`quest_delegate(index=${index})\``
+			: [
+					ladderModel
+						? `**Model:** rung ${task.rung! + 1}/${ladder!.rungs.length} — \`${assignedModel}\` (ladder).`
+						: `**Model:** \`${assignedModel}\`${thinkingLevel ? ` · thinking \`${thinkingLevel}\`` : ""}.`,
+					`**Minion call:** \`subagent(${minionArgs})\``,
+				].join("\n")
+		: sandboxActive
+			? `**Model:** none assigned for role \`${task.agent}\`. First call quest_assign_model(role=${JSON.stringify(task.agent)}, proposed="…", thinkingLevel="…", stepIndex=${index}), then call \`quest_delegate(index=${index})\`.`
+			: `**Model:** none assigned for role \`${task.agent}\`. First call quest_assign_model(role=${JSON.stringify(task.agent)}, proposed="…", thinkingLevel="…", stepIndex=${index}), then call \`subagent(agent=${JSON.stringify(task.agent)}, task=${JSON.stringify(minionTask)})\`.`;
 
 	// Distilled prior verified failures: the orchestrator writing the next
-	// quest_delegate/quest_update calls needs to know why this step is retrying.
+	// subagent/quest_update calls need to know why this step is retrying.
 	const briefBlock = renderFailureBriefs(
 		task.failureBriefs,
 		briefBudgetForModel(assignedModel ? { id: assignedModel } : undefined, LADDER),
@@ -219,7 +240,7 @@ export function buildSteeringMessage(
 		`## Quest: ${quest.name} (${done}/${total} done)`,
 		``,
 		`**Current step:** ${task.content}`,
-		`**Use subagent:** \`${task.agent}\``,
+		`**Agent role:** \`${task.agent}\``,
 		`**Context:** ${task.context}`,
 		deps ? `**Depends on:** ${deps}` : "",
 		sandboxBlock,

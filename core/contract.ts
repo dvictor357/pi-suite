@@ -129,7 +129,7 @@ export interface ProjectMemory {
 	/** Written by pi-quest's `quest_memory_save`. Keyed research findings. */
 	research?: Record<string, ProjectResearchFinding>;
 	/**
-	 * Project-scoped role → model assignments approved by the user during a quest.
+	 * Project-scoped role → model/thinking assignments approved during a quest.
 	 * Written by pi-quest's `quest_assign_model` so the orchestrator asks once per
 	 * role per project; pi-memory preserves it and surfaces it back into the prompt
 	 * so future sessions reuse the choice. Keyed by sub-agent role (e.g. "scout").
@@ -170,12 +170,26 @@ export interface ModelLadderConfig {
 	reason?: string;
 }
 
+/** Thinking effort supported by pi sub-agent sessions. */
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+export const THINKING_LEVELS: readonly ThinkingLevel[] = [
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+];
+
 /** A user-approved model assignment for a sub-agent role; see ProjectMemory.agentModels. */
 export interface AgentModelChoice {
 	/** Model id as understood by the harness/registry (e.g. "deepseek-v4-flash"). */
 	model: string;
 	/** Provider that owns the model (e.g. "deepseek"), when known. */
 	provider?: string;
+	/** Thinking effort requested for this role's minions. */
+	thinkingLevel?: ThinkingLevel;
 	/** Why the orchestrator picked this model for the role (short rationale). */
 	reason?: string;
 	/** Epoch ms the assignment was approved. */

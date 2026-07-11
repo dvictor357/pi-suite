@@ -1,7 +1,17 @@
 import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { AgentModelChoice, ModelLadderConfig } from "../../core";
-import { asRecord, strArray, boolOr, strOr, oneOf, numOr, optStr, optNum } from "../../core";
+import {
+	THINKING_LEVELS,
+	asRecord,
+	strArray,
+	boolOr,
+	strOr,
+	oneOf,
+	numOr,
+	optStr,
+	optNum,
+} from "../../core";
 import type {
 	GitIntegration,
 	Quest,
@@ -31,8 +41,21 @@ import {
  */
 export function loadAgentModels(cwd: string): Record<string, AgentModelChoice> {
 	const memory = loadProjectMemory(cwd);
-	const models = memory?.agentModels;
-	return models && typeof models === "object" ? (models as Record<string, AgentModelChoice>) : {};
+	const models = asRecord(memory?.agentModels);
+	const choices: Record<string, AgentModelChoice> = {};
+	for (const [role, value] of Object.entries(models)) {
+		const raw = asRecord(value);
+		const model = optStr(raw.model)?.trim();
+		if (!model) continue;
+		choices[role] = {
+			model,
+			provider: optStr(raw.provider),
+			thinkingLevel: oneOf(raw.thinkingLevel, THINKING_LEVELS) ? raw.thinkingLevel : undefined,
+			reason: optStr(raw.reason),
+			timestamp: numOr(raw.timestamp, 0),
+		};
+	}
+	return choices;
 }
 
 /**

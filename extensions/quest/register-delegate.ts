@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import type { ModelLadderConfig } from "../../core";
+import { THINKING_LEVELS, type ModelLadderConfig } from "../../core";
 import { formatDirectiveFor, LADDER } from "./constants";
 import {
 	archiveQuest,
@@ -34,10 +35,11 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 		name: "quest_assign_model",
 		label: "Quest Assign Model",
 		description: [
-			"Assign a model to a sub-agent role for this project. As orchestrator you propose a model;",
+			"Assign a model and optional thinking level to a sub-agent role for this project.",
+			"As orchestrator you propose both based on the role's work;",
 			"the user approves it or picks another from their configured models. The approved choice is",
 			"remembered in project memory (so the user is asked once per role) and, when stepIndex is given,",
-			"stamped onto that step. Call this before quest_delegate when a role has no model yet.",
+			"stamped onto that step. Call this before delegating when a role has no model yet.",
 		].join(" "),
 		parameters: Type.Object({
 			role: Type.String({
@@ -47,6 +49,12 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				description:
 					"Model id you propose for this role (e.g. 'claude-opus-4-5' or 'deepseek/deepseek-v4-flash')",
 			}),
+			thinkingLevel: Type.Optional(
+				StringEnum(THINKING_LEVELS, {
+					description:
+						"Thinking effort for this role's minions (off/minimal/low/medium/high/xhigh)",
+				}),
+			),
 			reason: Type.Optional(
 				Type.String({ description: "Short rationale for proposing this model" }),
 			),
@@ -79,6 +87,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				rememberAgentModel(ctx.cwd, role, {
 					model: matched.id,
 					provider: matched.provider,
+					thinkingLevel: params.thinkingLevel,
 					reason: params.reason,
 					timestamp: Date.now(),
 				});
@@ -87,16 +96,23 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					content: [
 						{
 							type: "text",
-							text: `(headless) Assigned "${role}" → ${matched.id} · ${matched.provider}.`,
+							text: `(headless) Assigned "${role}" → ${matched.id} · ${matched.provider}${params.thinkingLevel ? ` · thinking ${params.thinkingLevel}` : ""}.`,
 						},
 					],
-					details: { role, model: matched.id, provider: matched.provider, outcome: "assigned" },
+					details: {
+						role,
+						model: matched.id,
+						provider: matched.provider,
+						thinkingLevel: params.thinkingLevel,
+						outcome: "assigned",
+					},
 				};
 			}
 
 			const result = await promptModelAssignment(ctx, {
 				role,
 				proposed: params.proposed,
+				thinkingLevel: params.thinkingLevel,
 				reason: params.reason,
 			});
 			if (result.outcome === "cancelled") {
@@ -110,7 +126,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					content: [
 						{
 							type: "text",
-							text: `Kept harness default for "${role}" (no override). quest_delegate will run it with the session's current model.`,
+							text: `Kept the pi default for "${role}" (no project override).`,
 						},
 					],
 					details: { role, outcome: "default" },
@@ -120,6 +136,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			rememberAgentModel(ctx.cwd, role, {
 				model: m.id,
 				provider: m.provider,
+				thinkingLevel: params.thinkingLevel,
 				reason: params.reason,
 				timestamp: Date.now(),
 			});
@@ -128,10 +145,16 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				content: [
 					{
 						type: "text",
-						text: `Assigned sub-agent "${role}" → ${m.id} · ${m.provider}. Remembered for this project.`,
+						text: `Assigned sub-agent "${role}" → ${m.id} · ${m.provider}${params.thinkingLevel ? ` · thinking ${params.thinkingLevel}` : ""}. Remembered for this project.`,
 					},
 				],
-				details: { role, model: m.id, provider: m.provider, outcome: "assigned" },
+				details: {
+					role,
+					model: m.id,
+					provider: m.provider,
+					thinkingLevel: params.thinkingLevel,
+					outcome: "assigned",
+				},
 			};
 		},
 	});
@@ -245,9 +268,10 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 
 	pi.registerTool({
 		name: "quest_delegate",
-		label: "Quest Delegate",
+		label: "Quest Delegate (Legacy)",
 		description: [
-			"Run a quest step by spawning an isolated sub-agent with the model assigned to its role.",
+			"Compatibility fallback that directly spawns a quest sub-agent.",
+			"Normal auto-pilot execution uses pi-minions' subagent tool instead.",
 			"The model is resolved from the task, else the project's remembered choice for the role.",
 			"If none is assigned, pass `proposed` (or call quest_assign_model first). Read-only roles",
 			"(scout/verifier/reviewer/planner) get a read-only tool scope. Returns the sub-agent's",
@@ -270,7 +294,9 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			const task = quest.steps[params.index];
 			const role = task.agent;
 
-			const remembered = loadAgentModels(ctx.cwd)[role]?.model;
+			const rememberedChoice = loadAgentModels(ctx.cwd)[role];
+			const remembered = rememberedChoice?.model;
+			const thinkingLevel = rememberedChoice?.thinkingLevel;
 
 			// Approved ladder: initialize the step's rung from project history on
 			// first delegation, then resolve the rung's model. Every rung was
@@ -362,7 +388,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 
 			const res = await runSubAgent(
 				ctx,
-				{ role, model, prompt, tools: sandboxTools, sandboxProfile },
+				{ role, model, thinkingLevel, prompt, tools: sandboxTools, sandboxProfile },
 				signal,
 			);
 
@@ -374,7 +400,14 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 							text: `Sub-agent for step #${params.index + 1} failed: ${res.error ?? "unknown error"}`,
 						},
 					],
-					details: { index: params.index, role, model: model.id, ok: false, error: res.error },
+					details: {
+						index: params.index,
+						role,
+						model: model.id,
+						thinkingLevel,
+						ok: false,
+						error: res.error,
+					},
 				};
 			}
 
@@ -389,7 +422,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					{
 						type: "text",
 						text: [
-							`Sub-agent (\`${role}\` · ${model.id}) finished step #${params.index + 1}: **${task.content}**`,
+							`Sub-agent (\`${role}\` · ${model.id}${thinkingLevel ? ` · thinking ${thinkingLevel}` : ""}) finished step #${params.index + 1}: **${task.content}**`,
 							``,
 							res.output || "(no output)",
 							``,
@@ -397,7 +430,14 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 						].join("\n"),
 					},
 				],
-				details: { index: params.index, role, model: model.id, ok: true, output: res.output },
+				details: {
+					index: params.index,
+					role,
+					model: model.id,
+					thinkingLevel,
+					ok: true,
+					output: res.output,
+				},
 			};
 		},
 	});

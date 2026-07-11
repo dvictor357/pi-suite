@@ -6,8 +6,10 @@ import assert from "node:assert/strict";
 import {
 	emptyQuest,
 	listArchives,
+	loadAgentModels,
 	loadModelLadder,
 	loadQuest,
+	rememberAgentModel,
 	rememberModelLadder,
 	saveQuest,
 } from "./storage";
@@ -256,6 +258,31 @@ test("rememberModelLadder round-trips via loadModelLadder and preserves other me
 	const onDisk = readJSON<Record<string, unknown>>(projectMemoryPath(cwd), {});
 	assert.deepEqual(onDisk.conventions, ["use tabs"], "read-merge-write keeps memory's fields");
 	assert.ok(onDisk.agentModels, "agentModels untouched");
+});
+
+test("rememberAgentModel round-trips an optional thinking level and ignores invalid disk values", () => {
+	const cwd = tempCwd();
+	rememberAgentModel(cwd, "worker", {
+		model: "gpt-5.6-sol",
+		provider: "openai",
+		thinkingLevel: "medium",
+		timestamp: 123,
+	});
+
+	assert.deepEqual(loadAgentModels(cwd).worker, {
+		model: "gpt-5.6-sol",
+		provider: "openai",
+		thinkingLevel: "medium",
+		reason: undefined,
+		timestamp: 123,
+	});
+
+	writeJSON(projectMemoryPath(cwd), {
+		agentModels: {
+			worker: { model: "gpt-5.6-sol", thinkingLevel: "extreme", timestamp: 124 },
+		},
+	});
+	assert.equal(loadAgentModels(cwd).worker?.thinkingLevel, undefined);
 });
 
 test("loadModelLadder rejects malformed ladders and a future contract", () => {

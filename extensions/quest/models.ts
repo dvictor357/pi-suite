@@ -115,7 +115,7 @@ export type ModelAssignment =
  */
 export async function promptModelAssignment(
 	ctx: ExtensionContext,
-	opts: { role: string; proposed: string; reason?: string },
+	opts: { role: string; proposed: string; thinkingLevel?: string; reason?: string },
 ): Promise<ModelAssignment> {
 	return enqueueUiPrompt(async () => {
 		const available = ctx.modelRegistry.getAvailable().map(toModelLike);
@@ -131,6 +131,7 @@ export async function promptModelAssignment(
 		const ordered = matched ? [matched, ...available.filter((m) => m !== matched)] : [...available];
 
 		const reasonLine = opts.reason ? `\nWhy: ${opts.reason}` : "";
+		const thinkingLine = opts.thinkingLevel ? `\nThinking: ${opts.thinkingLevel}` : "";
 
 		// Non-TUI fallback: simple flat list
 		if (!ctx.hasUI) {
@@ -140,8 +141,8 @@ export async function promptModelAssignment(
 			labels.push(KEEP_DEFAULT);
 
 			const title = matched
-				? `Assign sub-agent "${opts.role}" → ${formatModelLabel(matched)}?${reasonLine}`
-				: `Pick a model for sub-agent "${opts.role}" (proposed "${opts.proposed}" isn't available).${reasonLine}`;
+				? `Assign sub-agent "${opts.role}" → ${formatModelLabel(matched)}?${thinkingLine}${reasonLine}`
+				: `Pick a model for sub-agent "${opts.role}" (proposed "${opts.proposed}" isn't available).${thinkingLine}${reasonLine}`;
 
 			const choice = await ctx.ui.select(title, labels);
 			if (choice === undefined) return { outcome: "cancelled" };
@@ -154,8 +155,8 @@ export async function promptModelAssignment(
 
 		// TUI: SelectList with height cap and type-to-filter
 		const titleText = matched
-			? `Assign sub-agent "${opts.role}" → ${formatModelLabel(matched)}?${reasonLine}`
-			: `Pick a model for "${opts.role}" (proposed "${opts.proposed}" not found)${reasonLine}`;
+			? `Assign sub-agent "${opts.role}" → ${formatModelLabel(matched)}?${thinkingLine}${reasonLine}`
+			: `Pick a model for "${opts.role}" (proposed "${opts.proposed}" not found)${thinkingLine}${reasonLine}`;
 
 		// Dynamic import so the test runner (which resolves via CJS) doesn't trip
 		const { DynamicBorder } = await import("@earendil-works/pi-coding-agent");

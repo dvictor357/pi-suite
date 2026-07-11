@@ -26,7 +26,7 @@ config and the quest auto-pilot loop.
 
 | Capability                | Delivered by                                                                                                                                                                                              |
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Plan & delegate**       | `quest_create` → `quest_plan` → `quest_approve` → auto-pilot steps via `quest_delegate`                                                                                                                   |
+| **Plan & delegate**       | `quest_create` → `quest_plan` → `quest_approve` → auto-pilot steps via pi-minions `subagent` (guarded `quest_delegate` fallback for sandboxed steps)                                                      |
 | **Auto-pilot loop**       | Quest runtime (`register-events.ts`) fires pending steps, delegates sub-agents, verifies results, and escalates model rungs on failure                                                                    |
 | **Model ladder**          | `quest_assign_ladder` approves an ordered cheap→frontier rung list; verified failures escalate automatically (see [Verified escalation ladder](#verified-escalation-ladder))                              |
 | **Loop-engineering team** | Built-in `loop-engineering` team: architect (planner) → research (scout) → product + builder (worker) → evaluator (verifier). Use `quest_team` to list; pass `team: "loop-engineering"` to `quest_create` |
@@ -55,8 +55,8 @@ inspection.
 | `quest_approve`       | Approve pending plan and start execution                      |
 | `quest_decide`        | Ask the user a tradeoff question (branch, ambiguity)          |
 | `quest_update`        | Mark a step done/failed/skipped with a result summary         |
-| `quest_delegate`      | Spawn an isolated sub-agent to execute one step               |
-| `quest_assign_model`  | Propose a model for a role; user approves once per project    |
+| `quest_delegate`      | Legacy guarded fallback for sandboxed Quest steps             |
+| `quest_assign_model`  | Approve a role's model and optional thinking level            |
 | `quest_assign_ladder` | Propose a cheap→frontier model ladder for execution roles     |
 | `quest_status`        | Show current quest, steps, and progress                       |
 | `quest_task_detail`   | Full detail for one step (context, result, attempts, timing)  |
@@ -146,8 +146,8 @@ happens at pi's tool-call boundary. Be precise about what that means:
   makes. It returns `{ block: true, reason }` for a denied path, a
   destructive/network/package-install command, a denied-command pattern, or a
   path/command outside an allow-list in restricted/isolated mode.
-- **Sub-agent tool calls.** A spawned sub-agent's isolated session loads no extensions,
-  so the `tool_call` hook never fires inside it. Instead the spawn path (`subagent.ts`)
+- **Sandboxed sub-agent tool calls.** A guarded fallback sub-agent's isolated session loads
+  no extensions, so the `tool_call` hook never fires inside it. The fallback spawn path (`subagent.ts`)
   disables built-in tools (`noTools: "builtin"`) and supplies **guarded** tool
   definitions — bash/edit/write wrapped with the same `evaluateToolCall` guard — so the
   same policy is enforced per call rather than denying file work outright.
@@ -171,6 +171,27 @@ Quest-level `sandbox` policy and per-step overrides drive all of the above (over
 only tighten, never loosen). Sandbox status is surfaced in quest status, kanban, and step
 detail views. In `isolated` mode, pass `worktree` to `quest_create(sandbox: { … })` to
 configure the base branch and worktree path.
+
+Unsandboxed auto-pilot steps use pi-minions' `subagent` tool and pass the approved model,
+thinking level, and current ladder rung as per-invocation overrides. Restricted and isolated
+steps stay on `quest_delegate` because pi-minions does not yet enforce Quest's sandbox policy.
+
+## Minion model and thinking assignment
+
+`quest_assign_model` stores a project-scoped role assignment in
+`ProjectMemory.agentModels`. Assignments are additive and backward-compatible: old entries
+with only `model` still use pi's default/tier thinking, while new entries may include
+`thinkingLevel` (`off`, `minimal`, `low`, `medium`, `high`, or `xhigh`). Example:
+
+```text
+quest_assign_model(role="worker", proposed="gpt-5.6-sol", thinkingLevel="medium")
+```
+
+The normal Quest steering path then requests:
+
+```text
+subagent(agent="worker", task="…", model="gpt-5.6-sol", thinking="medium")
+```
 
 ## Verified escalation ladder
 

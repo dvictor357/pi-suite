@@ -100,12 +100,17 @@ test("promptModelAssignment serializes concurrent prompts", async () => {
 		},
 	} as unknown as ExtensionContext;
 
-	const first = promptModelAssignment(ctx, { role: "scout", proposed: "deepseek-v4-flash" });
+	const first = promptModelAssignment(ctx, {
+		role: "scout",
+		proposed: "deepseek-v4-flash",
+		thinkingLevel: "low",
+	});
 	const second = promptModelAssignment(ctx, { role: "worker", proposed: "claude-opus-4-5" });
 
 	await setImmediate();
 	assert.equal(titles.length, 1);
 	assert.match(titles[0], /scout/);
+	assert.match(titles[0], /Thinking: low/);
 
 	firstChoice.resolve(`${formatModelLabel(MODELS[0])}  ← orchestrator's pick`);
 	assert.deepEqual(await first, {

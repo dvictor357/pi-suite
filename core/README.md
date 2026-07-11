@@ -42,3 +42,6 @@ can't read.
 pi-memory's own profile does not produce. These are preserved across rescans via
 `withForeignFromDisk` in `extensions/memory/profile.ts` — the stale-snapshot guard that
 prevents a pi-memory save from clobbering newer quest-written data.
+
+`agentModels` entries may add `thinkingLevel` alongside `model`. The field is optional so
+older entries and standalone pi-minions installs retain their tier/default thinking.

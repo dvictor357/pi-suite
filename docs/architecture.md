@@ -213,6 +213,11 @@ Key boundaries:
   plus `rung` and `escalations`, so memory-resolved and ladder-resolved models contribute
   to future routing.
 
+- **pi-minions handoff:** unsandboxed steps are delegated through pi-minions' `subagent`
+  tool with the resolved rung model and role-level thinking as invocation overrides.
+  Restricted/isolated steps retain the guarded `quest_delegate` fallback until pi-minions
+  can enforce Quest's sandbox policy at its own process/tool boundary.
+
 No default rung list ships in the repo; hard-coded model catalogs rot. The feature is inert
 until a project approves a ladder. `computeEvalTimeSeries` in `core/eval-stats.ts` provides
 a daily-view companion: per-day pass rates, average durations, and escalation counts —
