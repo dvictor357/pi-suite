@@ -14,6 +14,25 @@ import { join } from "node:path";
 import { appendLine } from "./fs";
 import { runsDir } from "./run-ledger";
 
+/**
+ * Typed reason a step reached a non-passing terminal state. Turns eval stats
+ * from "how often did this fail" into "why did it fail", so routing and
+ * diagnostics can act on the cause. The deterministic verification gate emits
+ * the *_FAILURE codes; the others are available for the orchestrator/verifier
+ * to attribute non-check failures.
+ */
+export type FailureCode =
+	| "TEST_FAILURE"
+	| "TYPECHECK_FAILURE"
+	| "LINT_FAILURE"
+	| "FORMAT_FAILURE"
+	| "BAD_PLAN"
+	| "CONTEXT_MISSING"
+	| "TOOL_FAILURE"
+	| "POLICY_BLOCKED"
+	| "MODEL_QUALITY"
+	| "HUMAN_DECISION_REQUIRED";
+
 export interface EvalEntry {
 	/** Quest name. */
 	quest: string;
@@ -44,6 +63,23 @@ export interface EvalEntry {
 	rung?: number;
 	/** How many rung escalations the task consumed, when laddered. */
 	escalations?: number;
+	/**
+	 * Typed failure reason, when the terminal state was not a clean pass. Set by
+	 * the deterministic verification gate (TEST_FAILURE, …) and available for the
+	 * orchestrator to attribute other failures. Absent on a verified pass.
+	 */
+	failureCode?: FailureCode;
+	/**
+	 * Files the step changed, from git diff at verification time. Machine-checkable
+	 * evidence of what the step actually touched — absent when nothing changed or
+	 * git was unavailable.
+	 */
+	changedFiles?: string[];
+	/**
+	 * One-line summary of the deterministic checks that ran (e.g.
+	 * "test:pass typecheck:pass lint:skipped"). Absent when no checks ran.
+	 */
+	checksSummary?: string;
 	/** Epoch-ms timestamp. */
 	timestamp: number;
 }

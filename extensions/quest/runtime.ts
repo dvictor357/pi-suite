@@ -37,7 +37,10 @@ import type {
 	EvalEntry,
 	EvalStatsIndex,
 	MemoryGraph,
+	FailureCode,
 } from "../../core";
+import { captureBaseline } from "./evidence";
+import { summarizeChecks } from "./checks";
 import { loadTeams, ensureBuiltInTeams } from "./teams";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { syncQuestToTodo } from "./todo-sync";
@@ -96,6 +99,7 @@ export interface QuestRuntime {
 		status: "done" | "failed" | "skipped",
 		verified: boolean,
 		evidence: string | null | undefined,
+		failureCode?: FailureCode,
 	): EvalEntry;
 	/**
 	 * Per-(role, model) verified-pass rates aggregated from this project's eval
@@ -242,6 +246,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		status: "done" | "failed" | "skipped",
 		verified: boolean,
 		evidence: string | null | undefined,
+		failureCode?: FailureCode,
 	): EvalEntry {
 		return {
 			quest: quest.name,
@@ -258,6 +263,12 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 			status,
 			verified,
 			verifyEvidence: evidence ?? null,
+			// Machine-checkable evidence stamped onto the step by the verification
+			// gate — lets eval stats reason about what actually changed and why a
+			// step failed, not just how often.
+			failureCode,
+			changedFiles: step.evidence?.changedFiles,
+			checksSummary: step.evidence ? summarizeChecks(step.evidence.checks) : undefined,
 			durationMs: step.startedAt ? (step.completedAt ?? Date.now()) - step.startedAt : 0,
 			tokensIn: 0,
 			tokensOut: 0,
@@ -278,6 +289,13 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		step.status = "running";
 		step.attempts++;
 		if (!step.startedAt) step.startedAt = Date.now();
+		// Stamp the pre-step repo baseline once, before the worker touches anything,
+		// so the verification gate can attribute this step's diff even across
+		// retries and intermediate commits. Best-effort — null outside a git repo.
+		if (step.baselineSha === undefined) {
+			const base = captureBaseline(ctx.cwd);
+			if (base.sha) step.baselineSha = base.sha;
+		}
 		quest.lastFiredStepIndex = index;
 		quest.stepsSincePause++;
 		persist(ctx, quest);

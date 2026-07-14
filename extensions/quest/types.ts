@@ -1,4 +1,5 @@
 import type { FailureBrief } from "./ladder";
+import type { StepEvidence } from "./evidence";
 
 export type QuestStatus = "planning" | "active" | "paused" | "done" | "idle";
 export type StepStatus = "pending" | "running" | "verifying" | "done" | "failed" | "skipped";
@@ -57,6 +58,19 @@ export interface QuestStep {
 	 * off.
 	 */
 	sandboxArtifacts?: SandboxArtifacts;
+	/**
+	 * Repo HEAD SHA captured when this step fired (runtime.ts fireStep). The
+	 * deterministic verification gate diffs against it so a step's changed files
+	 * are attributable even across intermediate commits. Absent for steps that
+	 * fired before evidence capture existed, or outside a git repo.
+	 */
+	baselineSha?: string;
+	/**
+	 * Objective evidence gathered by the verification gate — changed files, diff
+	 * stat, and deterministic check outcomes (see evidence.ts). Populated when the
+	 * step enters verification; absent before then.
+	 */
+	evidence?: StepEvidence;
 }
 
 /** One guarded-tool-call log entry (the core artifact record). */

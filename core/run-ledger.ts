@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { AGENT_DIR } from "./paths";
 import { cwdHash } from "./hash";
 import { appendLine } from "./fs";
+import type { FailureCode } from "./eval-logging";
 
 export type RunEventKind =
 	| "task_start"
@@ -21,6 +22,7 @@ export type RunEventKind =
 	| "verify_start"
 	| "verify_pass"
 	| "verify_fail"
+	| "checks"
 	| "escalate";
 
 export interface RunEvent {
@@ -58,6 +60,13 @@ export interface RunEvent {
 	toModel?: string;
 	/** "escalate": ladder rung index the task moves to. */
 	rung?: number;
+	/** "checks" / "verify_fail": typed failure reason (see FailureCode). */
+	failureCode?: FailureCode;
+	/**
+	 * "checks": compact per-check outcome summary, e.g.
+	 * "test:pass typecheck:fail lint:skipped".
+	 */
+	checksSummary?: string;
 }
 
 /** Append callback for one quest run ledger. */

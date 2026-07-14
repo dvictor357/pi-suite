@@ -43,7 +43,7 @@ export type { RetryPolicy } from "./retry-policy";
 export { createRunLedger, recordRunEvent, runLedgerPath, runsDir } from "./run-ledger";
 export type { RunLedger, RunEvent, RunEventKind } from "./run-ledger";
 export { createEvalLog, recordEvalEntry, evalLogPath, evalsDir } from "./eval-logging";
-export type { EvalLog, EvalEntry } from "./eval-logging";
+export type { EvalLog, EvalEntry, FailureCode } from "./eval-logging";
 export {
 	readAllEvalEntries,
 	computeEvalStats,

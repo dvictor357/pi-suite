@@ -2,7 +2,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import type { StepStatus } from "./types";
-import { formatDirectiveFor, LADDER, MAX_DEPENDENCY_DEPTH, MAX_VERIFY_RETRIES } from "./constants";
+import type { FailureCode } from "../../core";
+import { LADDER, MAX_DEPENDENCY_DEPTH, MAX_VERIFY_RETRIES, VERIFICATION } from "./constants";
 import { loadModelLadder } from "./storage";
 import { loadTeams } from "./teams";
 import { buildSandboxComplianceChecks, parseVerifyOutcome } from "./verifier";
@@ -13,6 +14,14 @@ import {
 	renderFailureBriefs,
 	rungModel,
 } from "./ladder";
+import {
+	failureCodeForCheck,
+	firstFailure,
+	planChecks,
+	runChecks,
+	summarizeChecks,
+} from "./checks";
+import { collectDiffEvidence, renderEvidenceBlock, type StepEvidence } from "./evidence";
 import { buildVerificationImpactContext, enrichPlanningContext } from "./codebase";
 import { detectDependencyCycle, getMaxDependencyDepth } from "./graph";
 import { nextPendingStep } from "./steering";
@@ -416,6 +425,205 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 
 			const task = quest.steps[params.index];
 
+			// Shared verified-failure handling: distil a failure brief, then retry
+			// on the same rung, escalate to the next, or auto-fail per the ladder
+			// policy. Called both by the manual LLM verdict path below and by the
+			// deterministic check gate (which passes a taxonomy `failureCode`), so
+			// the two failure sources share one retry/escalation machine.
+			const applyVerifyFail = (
+				evidence: string | undefined,
+				inferred: boolean,
+				failureCode?: FailureCode,
+			) => {
+				task.verifyResult = `[FAIL] ${evidence || ""}`.trim();
+				task.verified = true;
+				task.verifyRetries++;
+
+				task.failureBriefs = [
+					...(task.failureBriefs ?? []),
+					buildFailureBrief({
+						attempt: (task.failureBriefs?.length ?? 0) + 1,
+						model: task.lastModel ?? task.model,
+						rung: task.rung,
+						evidence: evidence ?? "",
+						attempted: task.result,
+						inferred,
+					}),
+				];
+
+				const ladder = task.rung !== undefined ? loadModelLadder(ctx.cwd) : null;
+				const decision = decideVerifyFailAction({
+					verifyRetries: task.verifyRetries,
+					rung: task.rung,
+					escalations: task.escalations ?? 0,
+					ladderLength: ladder?.rungs.length ?? 0,
+				});
+				const retriesLeft = decision.retriesLeft;
+
+				if (decision.action === "retry") {
+					task.status = "pending";
+					task.attempts = 0;
+					task.startedAt = null;
+					task.result = `Verification FAIL #${task.verifyRetries}: ${evidence || "no details"}. Fix and retry (${retriesLeft} retries left).`;
+					task.completedAt = null;
+
+					recordRun(ctx.cwd, {
+						kind: "verify_fail",
+						taskIndex: params.index,
+						taskContent: task.content,
+						agent: "verifier",
+						timestamp: Date.now(),
+						evidence,
+						verifyRetriesLeft: retriesLeft,
+						failureCode,
+					});
+					quest.lastFiredStepIndex = -1;
+					quest.sameStepCount = 0;
+					persist(ctx, quest);
+
+					return {
+						content: [
+							{
+								type: "text" as const,
+								text: [
+									`❌ Step #${params.index + 1} **VERIFICATION FAIL**: ${task.content}`,
+									evidence ? `  Evidence: ${evidence}` : "",
+									``,
+									`Retry ${task.verifyRetries}/${MAX_VERIFY_RETRIES}. Step reset to pending with fix context.`,
+									`${retriesLeft} verification retries remaining before auto-fail.`,
+								].join("\n"),
+							},
+						],
+						details: { task, verified: false, outcome: "FAIL", retriesLeft, failureCode },
+					};
+				}
+
+				if (decision.action === "escalate" && decision.nextRung !== undefined && ladder) {
+					const fromRung = task.rung;
+					const fromModel =
+						task.lastModel ??
+						task.model ??
+						(fromRung !== undefined ? rungModel(ladder, fromRung) : undefined);
+					const toModel = rungModel(ladder, decision.nextRung);
+
+					task.status = "pending";
+					task.attempts = 0;
+					task.verifyRetries = 0;
+					task.rung = decision.nextRung;
+					task.escalations = (task.escalations ?? 0) + 1;
+					task.startedAt = null;
+					task.completedAt = null;
+					task.result = `Verification FAIL on ${fromModel ?? "previous model"}: ${evidence || "no details"}. Escalating to rung ${decision.nextRung} (${toModel}).`;
+
+					recordRun(ctx.cwd, {
+						kind: "verify_fail",
+						taskIndex: params.index,
+						taskContent: task.content,
+						agent: "verifier",
+						timestamp: Date.now(),
+						evidence,
+						verifyRetriesLeft: 0,
+						failureCode,
+					});
+					recordRun(ctx.cwd, {
+						kind: "escalate",
+						taskIndex: params.index,
+						taskContent: task.content,
+						agent: task.agent,
+						model: fromModel,
+						fromModel,
+						toModel,
+						rung: decision.nextRung,
+						timestamp: Date.now(),
+						evidence,
+					});
+
+					quest.lastFiredStepIndex = -1;
+					quest.sameStepCount = 0;
+					persist(ctx, quest);
+
+					return {
+						content: [
+							{
+								type: "text" as const,
+								text: [
+									`⬆️ Step #${params.index + 1} **VERIFICATION FAIL — ESCALATING**: ${task.content}`,
+									evidence ? `  Evidence: ${evidence}` : "",
+									``,
+									`Rung ${fromRung ?? "?"} (${fromModel ?? "unknown"}) exhausted. Next delegation will use rung ${decision.nextRung}/${ladder.rungs.length - 1} (${toModel}).`,
+									`Per-rung verification retry budget reset; failure briefs will be included in the next prompt.`,
+								].join("\n"),
+							},
+						],
+						details: {
+							task,
+							verified: false,
+							outcome: "FAIL",
+							escalated: true,
+							fromRung,
+							nextRung: decision.nextRung,
+							fromModel,
+							toModel,
+							escalations: task.escalations,
+							failureCode,
+						},
+					};
+				}
+
+				// No retries/escalations left: auto-fail.
+				const failureTrail = renderFailureBriefs(
+					task.failureBriefs,
+					briefBudgetForModel(
+						task.lastModel || task.model ? { id: task.lastModel ?? task.model } : undefined,
+						LADDER,
+					),
+					LADDER.maxBriefs,
+				);
+				task.status = "failed";
+				task.completedAt = Date.now();
+				task.result = [
+					`Verification FAIL after ${MAX_VERIFY_RETRIES} retries${task.escalations ? ` and ${task.escalations} escalation(s)` : ""}: ${evidence || "no details"}`,
+					failureTrail,
+				]
+					.filter(Boolean)
+					.join("\n\n");
+
+				recordRun(ctx.cwd, {
+					kind: "verify_fail",
+					taskIndex: params.index,
+					taskContent: task.content,
+					agent: "verifier",
+					timestamp: Date.now(),
+					evidence,
+					verifyRetriesLeft: 0,
+					failureCode,
+				});
+				recordEval(
+					ctx.cwd,
+					makeEval(quest, task, params.index, "failed", false, task.result, failureCode),
+				);
+
+				quest.lastFiredStepIndex = -1;
+				quest.sameStepCount = 0;
+				persist(ctx, quest);
+
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: [
+								`❌ Step #${params.index + 1} **AUTO-FAILED** (${MAX_VERIFY_RETRIES} verification retries exhausted): ${task.content}`,
+								evidence ? `  Last evidence: ${evidence}` : "",
+								failureTrail,
+							]
+								.filter(Boolean)
+								.join("\n"),
+						},
+					],
+					details: { task, verified: false, outcome: "FAIL", exhausted: true, failureCode },
+				};
+			};
+
 			// ── Verification outcome ──────────────────────────────────────────
 			// The explicit verifyOutcome flag wins. Otherwise, when the step is
 			// already awaiting verification, infer the verdict deterministically
@@ -448,10 +656,9 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					};
 				}
 
-				task.verifyResult = `[${effectiveOutcome}] ${effectiveEvidence || ""}`.trim();
-				task.verified = true;
-
 				if (effectiveOutcome === "PASS") {
+					task.verifyResult = `[PASS] ${effectiveEvidence || ""}`.trim();
+					task.verified = true;
 					task.status = "done";
 					task.completedAt = Date.now();
 
@@ -505,188 +712,8 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					};
 				}
 
-				// FAIL
-				task.verifyRetries++;
-
-				// Distill this failure into a brief before task.result is overwritten.
-				// Briefs are rendered into the retry prompts at delegation time —
-				// replacing the old unbounded evidence append onto task.context.
-				task.failureBriefs = [
-					...(task.failureBriefs ?? []),
-					buildFailureBrief({
-						attempt: (task.failureBriefs?.length ?? 0) + 1,
-						model: task.lastModel ?? task.model,
-						rung: task.rung,
-						evidence: effectiveEvidence ?? "",
-						attempted: task.result,
-						inferred: inferredOutcome,
-					}),
-				];
-
-				const ladder = task.rung !== undefined ? loadModelLadder(ctx.cwd) : null;
-				const decision = decideVerifyFailAction({
-					verifyRetries: task.verifyRetries,
-					rung: task.rung,
-					escalations: task.escalations ?? 0,
-					ladderLength: ladder?.rungs.length ?? 0,
-				});
-				const retriesLeft = decision.retriesLeft;
-
-				if (decision.action === "retry") {
-					task.status = "pending";
-					task.attempts = 0;
-					task.startedAt = null;
-					task.result = `Verification FAIL #${task.verifyRetries}: ${effectiveEvidence || "no details"}. Fix and retry (${retriesLeft} retries left).`;
-					task.completedAt = null;
-
-					recordRun(ctx.cwd, {
-						kind: "verify_fail",
-						taskIndex: params.index,
-						taskContent: task.content,
-						agent: "verifier",
-						timestamp: Date.now(),
-						evidence: effectiveEvidence,
-						verifyRetriesLeft: retriesLeft,
-					});
-					quest.lastFiredStepIndex = -1;
-					quest.sameStepCount = 0;
-					persist(ctx, quest);
-
-					return {
-						content: [
-							{
-								type: "text",
-								text: [
-									`❌ Step #${params.index + 1} **VERIFICATION FAIL**: ${task.content}`,
-									effectiveEvidence ? `  Evidence: ${effectiveEvidence}` : "",
-									``,
-									`Retry ${task.verifyRetries}/${MAX_VERIFY_RETRIES}. Step reset to pending with fix context.`,
-									`${retriesLeft} verification retries remaining before auto-fail.`,
-								].join("\n"),
-							},
-						],
-						details: { task, verified: false, outcome: "FAIL", retriesLeft },
-					};
-				}
-
-				if (decision.action === "escalate" && decision.nextRung !== undefined && ladder) {
-					const fromRung = task.rung;
-					const fromModel =
-						task.lastModel ??
-						task.model ??
-						(fromRung !== undefined ? rungModel(ladder, fromRung) : undefined);
-					const toModel = rungModel(ladder, decision.nextRung);
-
-					task.status = "pending";
-					task.attempts = 0;
-					task.verifyRetries = 0;
-					task.rung = decision.nextRung;
-					task.escalations = (task.escalations ?? 0) + 1;
-					task.startedAt = null;
-					task.completedAt = null;
-					task.result = `Verification FAIL on ${fromModel ?? "previous model"}: ${effectiveEvidence || "no details"}. Escalating to rung ${decision.nextRung} (${toModel}).`;
-
-					recordRun(ctx.cwd, {
-						kind: "verify_fail",
-						taskIndex: params.index,
-						taskContent: task.content,
-						agent: "verifier",
-						timestamp: Date.now(),
-						evidence: effectiveEvidence,
-						verifyRetriesLeft: 0,
-					});
-					recordRun(ctx.cwd, {
-						kind: "escalate",
-						taskIndex: params.index,
-						taskContent: task.content,
-						agent: task.agent,
-						model: fromModel,
-						fromModel,
-						toModel,
-						rung: decision.nextRung,
-						timestamp: Date.now(),
-						evidence: effectiveEvidence,
-					});
-
-					quest.lastFiredStepIndex = -1;
-					quest.sameStepCount = 0;
-					persist(ctx, quest);
-
-					return {
-						content: [
-							{
-								type: "text",
-								text: [
-									`⬆️ Step #${params.index + 1} **VERIFICATION FAIL — ESCALATING**: ${task.content}`,
-									effectiveEvidence ? `  Evidence: ${effectiveEvidence}` : "",
-									``,
-									`Rung ${fromRung ?? "?"} (${fromModel ?? "unknown"}) exhausted. Next delegation will use rung ${decision.nextRung}/${ladder.rungs.length - 1} (${toModel}).`,
-									`Per-rung verification retry budget reset; failure briefs will be included in the next prompt.`,
-								].join("\n"),
-							},
-						],
-						details: {
-							task,
-							verified: false,
-							outcome: "FAIL",
-							escalated: true,
-							fromRung,
-							nextRung: decision.nextRung,
-							fromModel,
-							toModel,
-							escalations: task.escalations,
-						},
-					};
-				}
-
-				// No retries/escalations left: auto-fail
-				const failureTrail = renderFailureBriefs(
-					task.failureBriefs,
-					briefBudgetForModel(
-						task.lastModel || task.model ? { id: task.lastModel ?? task.model } : undefined,
-						LADDER,
-					),
-					LADDER.maxBriefs,
-				);
-				task.status = "failed";
-				task.completedAt = Date.now();
-				task.result = [
-					`Verification FAIL after ${MAX_VERIFY_RETRIES} retries${task.escalations ? ` and ${task.escalations} escalation(s)` : ""}: ${effectiveEvidence || "no details"}`,
-					failureTrail,
-				]
-					.filter(Boolean)
-					.join("\n\n");
-
-				recordRun(ctx.cwd, {
-					kind: "verify_fail",
-					taskIndex: params.index,
-					taskContent: task.content,
-					agent: "verifier",
-					timestamp: Date.now(),
-					evidence: effectiveEvidence,
-					verifyRetriesLeft: 0,
-				});
-				recordEval(ctx.cwd, makeEval(quest, task, params.index, "failed", false, task.result));
-
-				quest.lastFiredStepIndex = -1;
-				quest.sameStepCount = 0;
-				persist(ctx, quest);
-
-				return {
-					content: [
-						{
-							type: "text",
-							text: [
-								`❌ Step #${params.index + 1} **AUTO-FAILED** (${MAX_VERIFY_RETRIES} verification retries exhausted): ${task.content}`,
-								effectiveEvidence ? `  Last evidence: ${effectiveEvidence}` : "",
-								failureTrail,
-							]
-								.filter(Boolean)
-								.join("\n"),
-						},
-					],
-					details: { task, verified: false, outcome: "FAIL", exhausted: true },
-				};
+				// FAIL — shared retry/escalate/auto-fail machine (LLM verdict source).
+				return applyVerifyFail(effectiveEvidence, inferredOutcome);
 			}
 
 			// ── Normal completion — check if verification needed ─────────────
@@ -695,8 +722,60 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				const hasVerifier = team?.verification ?? true;
 
 				if (hasVerifier) {
-					task.status = "verifying";
 					if (params.result) task.result = params.result;
+
+					// ── Deterministic gate ──────────────────────────────────────
+					// Run the project's own type/lint/format/test checks BEFORE any
+					// LLM verifier. A failing check is objective ground truth: the
+					// step fails immediately (through the shared fail machine, tagged
+					// with a taxonomy code) and no verifier is spawned. Only when the
+					// checks pass does the LLM judge what they cannot.
+					//
+					// Checks run ONLY when the step actually changed files: repo-wide
+					// checks reflect the whole tree, so running them on a no-op step
+					// (e.g. a research/scout step) would wrongly attribute pre-existing
+					// redness to it. With no changes there is nothing to gate — the LLM
+					// verifier then judges whether the step should have produced changes.
+					const diff = collectDiffEvidence(ctx.cwd, task.baselineSha ?? null);
+					const checkResults =
+						VERIFICATION.enabled && diff.changedFiles.length > 0
+							? runChecks(planChecks(ctx.cwd), ctx.cwd)
+							: [];
+					const evidence: StepEvidence = {
+						changedFiles: diff.changedFiles,
+						diffStat: diff.diffStat,
+						baselineSha: task.baselineSha ?? null,
+						checks: checkResults,
+						capturedAt: Date.now(),
+					};
+					task.evidence = evidence;
+					const checksSummary = summarizeChecks(checkResults);
+					const failed = firstFailure(checkResults);
+
+					if (checkResults.length > 0) {
+						recordRun(ctx.cwd, {
+							kind: "checks",
+							taskIndex: params.index,
+							taskContent: task.content,
+							agent: task.agent,
+							timestamp: Date.now(),
+							checksSummary,
+							failureCode: failed ? failureCodeForCheck(failed.kind) : undefined,
+						});
+					}
+
+					if (failed) {
+						const evidenceText = [
+							`Deterministic ${failed.kind} check failed (\`${failed.command}\`, exit ${failed.exitCode}).`,
+							`Checks: ${checksSummary}.`,
+							failed.summary ? `Output tail:\n${failed.summary}` : "",
+						]
+							.filter(Boolean)
+							.join("\n");
+						return applyVerifyFail(evidenceText, false, failureCodeForCheck(failed.kind));
+					}
+
+					task.status = "verifying";
 					// Preserve verifyRetries across same-rung retry attempts. Escalation
 					// resets it explicitly, so the budget stays per-rung.
 					task.verified = false;
@@ -713,23 +792,31 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					const verifierAgent =
 						team?.members.find((m) => m.agent === "verifier" || m.role === "tester")?.agent ??
 						"verifier";
+					const evidenceBlock = renderEvidenceBlock(task.evidence);
 					return {
 						content: [
 							{
 								type: "text",
 								text: [
 									`🔍 Step #${params.index + 1} **entered verification**: ${task.content}`,
+									checkResults.length > 0
+										? `Deterministic checks passed (${checksSummary}).`
+										: evidence.changedFiles.length === 0
+											? `This step changed no files — confirm whether that is expected for this step before PASS.`
+											: `No deterministic checks were applicable for this project — judge more carefully.`,
 									``,
 									`**Step result to verify:**`,
 									`> ${params.result || task.result || "(no result provided)"}`,
 									``,
+									evidenceBlock,
+									``,
 									`**Verification step:** Spawn a \`subagent(agent="${verifierAgent}")\` to verify this task.`,
 									`The verifier should check:`,
 									`1. Does the result match the step requirements?`,
-									`2. Is the implementation correct and complete?`,
-									`3. Are there any issues or missing pieces?`,
-									`4. Is the code formatted and lint-clean per the project's own conventions? ${formatDirectiveFor(ctx.model)} If the project's formatter/linter was not run or leaves the tree dirty/inconsistent, this is a FAIL.`,
-									`5. Review dependency impact for changed files before PASS.`,
+									`2. Is the implementation correct and complete for the domain?`,
+									`3. Are there issues or missing pieces the deterministic checks cannot catch?`,
+									`4. Is the change architecturally sound and readable? (Type/lint/format/test were already gated deterministically — do not re-run or re-litigate them.)`,
+									`5. Review dependency impact for the changed files listed above before PASS.`,
 									...(sandboxChecks.length > 0 ? [``, ...sandboxChecks] : []),
 									``,
 									impactContext,
@@ -743,7 +830,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 								].join("\n"),
 							},
 						],
-						details: { task, verifying: true, verifierAgent },
+						details: { task, verifying: true, verifierAgent, checksSummary },
 					};
 				}
 			}

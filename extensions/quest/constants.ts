@@ -62,6 +62,37 @@ export function formatDirectiveFor(model?: BudgetModelInfo): string {
 	return verbosityForModel(model) === "compact" ? FORMAT_DIRECTIVE_COMPACT : FORMAT_DIRECTIVE;
 }
 
+// ── Deterministic verification gate ──────────────────────────────────────────
+/**
+ * Tunable knobs for the deterministic verification gate (see `checks.ts` and the
+ * `quest_update` gate). These checks run in the project's own cwd after a worker
+ * reports a step done; a failing check hard-fails the step before any LLM
+ * verifier is spawned. Surfaced here so timeouts and ordering are configured in
+ * one place rather than as magic numbers inside the runner.
+ */
+export interface VerificationConfig {
+	/** Master switch. When false, the gate is skipped and behaviour matches pre-gate. */
+	enabled: boolean;
+	/** Per-check wall-clock timeout in ms (a hung check counts as a failure). */
+	timeoutMs: number;
+	/** Max characters of a check's captured output tail kept in its summary. */
+	outputTailChars: number;
+	/**
+	 * Order checks run in. Cheapest/most-decisive first so the gate can stop at the
+	 * first failure without spending time on slower checks.
+	 */
+	checkOrder: readonly ("typecheck" | "lint" | "test" | "format")[];
+}
+
+export const VERIFICATION: VerificationConfig = {
+	enabled: true,
+	// Generous enough for a real test suite, bounded so a hang can't stall the loop.
+	timeoutMs: 180_000,
+	outputTailChars: 1200,
+	// Fast type/lint/format signals before the (usually slower) test run.
+	checkOrder: ["typecheck", "lint", "format", "test"],
+};
+
 // ── Codebase retrieval ranking ───────────────────────────────────────────────
 /**
  * Tunable knobs for the BM25-based codebase retrieval ranker (see
