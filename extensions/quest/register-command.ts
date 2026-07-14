@@ -10,7 +10,7 @@ import { renderStatus, writeQuestSessionMeta } from "./status";
 import type { QuestRuntime } from "./runtime";
 
 export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
-	const { getQuest, persist, launchKanban } = rt;
+	const { getQuest, persist, launchKanban, claims: claimReg } = rt;
 
 	pi.registerCommand("quest", {
 		description:
@@ -218,6 +218,7 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 					quest.pauseReason = "Paused by user.";
 					quest.lastFiredStepIndex = -1;
 					quest.sameStepCount = 0;
+					rt.cancelActiveSteps(ctx, quest, "paused by user");
 					persist(ctx, quest);
 					ctx.ui.notify(`Quest "${quest.name}" paused. /quest resume to continue.`, "info");
 					return;
@@ -379,6 +380,7 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 					}
 					if (archiveQuest(quest, ctx.cwd)) clearActiveQuest(ctx.cwd);
 					rt.setQuest(null);
+					claimReg.clear(ctx.cwd);
 					renderStatus(ctx, null);
 					writeQuestSessionMeta(ctx.cwd, null);
 					clearQuestFromTodo(ctx.cwd); // flush quest items, not re-sync them as completed

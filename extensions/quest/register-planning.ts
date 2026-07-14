@@ -25,11 +25,22 @@ import { collectDiffEvidence, renderEvidenceBlock, type StepEvidence } from "./e
 import { buildVerificationImpactContext, enrichPlanningContext } from "./codebase";
 import { detectDependencyCycle, getMaxDependencyDepth } from "./graph";
 import { nextPendingStep } from "./steering";
+import { persistHandoff } from "./context-broker";
+import { normalizeClaims, validateClaims } from "./write-claim";
 import { resolveSandboxProfile } from "./sandbox";
 import type { QuestRuntime } from "./runtime";
 
 export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void {
-	const { getQuest, persist, recordRun, recordEval, makeEval, codebaseToolAvailable } = rt;
+	const {
+		getQuest,
+		persist,
+		recordRun,
+		recordEval,
+		makeEval,
+		codebaseToolAvailable,
+		textResult,
+		claims: claimReg,
+	} = rt;
 
 	pi.registerTool({
 		name: "quest_plan",
@@ -37,7 +48,8 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 		description: [
 			"Save a step breakdown for the current quest. Replaces all existing steps.",
 			"Each step needs: content, agent (sub-agent type), context (focused instructions).",
-			"Optionally: dependencies (array of step indices that must complete first).",
+			"Optionally: dependencies, readClaim, and writeClaim (cwd-relative path arrays).",
+			"Exploration/judge roles are read-only; concurrent writers need disjoint write claims.",
 			"Set autoStart: true to immediately begin auto-pilot execution.",
 			"When planningMode='approve' and running interactively, shows the plan to the user for approval.",
 		].join(" "),
@@ -63,6 +75,12 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 								description:
 									"Model id to run this step's sub-agent with. Usually leave unset — quest assigns it via quest_assign_model (asking the user once per role).",
 							}),
+						),
+						readClaim: Type.Optional(
+							Type.Array(Type.String(), { description: "Cwd-relative paths this step reads" }),
+						),
+						writeClaim: Type.Optional(
+							Type.Array(Type.String(), { description: "Cwd-relative paths this step writes" }),
 						),
 						sandbox: Type.Optional(
 							Type.Object({
@@ -129,6 +147,12 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 								description:
 									"Model id to run this step's sub-agent with. Usually leave unset — quest assigns it via quest_assign_model (asking the user once per role).",
 							}),
+						),
+						readClaim: Type.Optional(
+							Type.Array(Type.String(), { description: "Cwd-relative paths this step reads" }),
+						),
+						writeClaim: Type.Optional(
+							Type.Array(Type.String(), { description: "Cwd-relative paths this step writes" }),
 						),
 						sandbox: Type.Optional(
 							Type.Object({
@@ -213,13 +237,37 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				};
 			}
 
+			for (let i = 0; i < plannedSteps.length; i++) {
+				const step = plannedSteps[i];
+				const policyError = validateClaims(step.agent, step.writeClaim, step.readClaim);
+				try {
+					if (policyError) throw new Error(policyError);
+					normalizeClaims(step.readClaim, ctx.cwd);
+					normalizeClaims(step.writeClaim, ctx.cwd);
+				} catch (error) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Invalid claims in step #${i + 1}: ${error instanceof Error ? error.message : String(error)}`,
+							},
+						],
+						details: {},
+					};
+				}
+			}
+
 			quest.steps = plannedSteps.map((t) => ({
 				content: t.content,
 				status: "pending" as StepStatus,
+				phase: "queued" as const,
+				phaseChangedAt: Date.now(),
 				agent: t.agent,
 				model: t.model?.trim() || undefined,
 				context: t.context,
 				dependencies: Array.isArray(t.dependencies) ? t.dependencies : [],
+				readClaim: t.readClaim?.length ? [...new Set(t.readClaim)] : undefined,
+				writeClaim: t.writeClaim?.length ? [...new Set(t.writeClaim)] : undefined,
 				result: null,
 				attempts: 0,
 				startedAt: null,
@@ -461,11 +509,14 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				const retriesLeft = decision.retriesLeft;
 
 				if (decision.action === "retry") {
-					task.status = "pending";
+					if (!rt.beginStepRetry(ctx, quest, params.index, "verification failed")) {
+						return textResult("Retry blocked; the owned worktree was retained as evidence.");
+					}
 					task.attempts = 0;
 					task.startedAt = null;
 					task.result = `Verification FAIL #${task.verifyRetries}: ${evidence || "no details"}. Fix and retry (${retriesLeft} retries left).`;
 					task.completedAt = null;
+					rt.transitionStep(ctx, quest, params.index, "queued", "bounded verification retry");
 
 					recordRun(ctx.cwd, {
 						kind: "verify_fail",
@@ -506,7 +557,9 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 						(fromRung !== undefined ? rungModel(ladder, fromRung) : undefined);
 					const toModel = rungModel(ladder, decision.nextRung);
 
-					task.status = "pending";
+					if (!rt.beginStepRetry(ctx, quest, params.index, "model escalation")) {
+						return textResult("Escalation blocked; the owned worktree was retained as evidence.");
+					}
 					task.attempts = 0;
 					task.verifyRetries = 0;
 					task.rung = decision.nextRung;
@@ -514,6 +567,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					task.startedAt = null;
 					task.completedAt = null;
 					task.result = `Verification FAIL on ${fromModel ?? "previous model"}: ${evidence || "no details"}. Escalating to rung ${decision.nextRung} (${toModel}).`;
+					rt.transitionStep(ctx, quest, params.index, "queued", "escalated retry queued");
 
 					recordRun(ctx.cwd, {
 						kind: "verify_fail",
@@ -571,6 +625,9 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				}
 
 				// No retries/escalations left: auto-fail.
+				if (!rt.transitionStep(ctx, quest, params.index, "failed", "retry budget exhausted")) {
+					return textResult("Cannot mark failed from the current phase.");
+				}
 				const failureTrail = renderFailureBriefs(
 					task.failureBriefs,
 					briefBudgetForModel(
@@ -579,7 +636,6 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					),
 					LADDER.maxBriefs,
 				);
-				task.status = "failed";
 				task.completedAt = Date.now();
 				task.result = [
 					`Verification FAIL after ${MAX_VERIFY_RETRIES} retries${task.escalations ? ` and ${task.escalations} escalation(s)` : ""}: ${evidence || "no details"}`,
@@ -605,6 +661,8 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 
 				quest.lastFiredStepIndex = -1;
 				quest.sameStepCount = 0;
+				claimReg.unregister(ctx.cwd, params.index);
+				rt.dispatchGuard.release(ctx.cwd, params.index);
 				persist(ctx, quest);
 
 				return {
@@ -657,9 +715,24 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				}
 
 				if (effectiveOutcome === "PASS") {
+					const awaitingIntegration = Boolean(
+						quest.parallel?.enabled && task.sandboxArtifacts?.worktreePath,
+					);
+					if (
+						!rt.transitionStep(
+							ctx,
+							quest,
+							params.index,
+							awaitingIntegration ? "checking" : "done",
+							awaitingIntegration
+								? "verification passed; awaiting integration"
+								: "verification passed",
+						)
+					) {
+						return textResult("Cannot complete from the current phase.");
+					}
 					task.verifyResult = `[PASS] ${effectiveEvidence || ""}`.trim();
 					task.verified = true;
-					task.status = "done";
 					task.completedAt = Date.now();
 
 					recordRun(ctx.cwd, {
@@ -674,6 +747,10 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 
 					quest.lastFiredStepIndex = -1;
 					quest.sameStepCount = 0;
+					if (!awaitingIntegration) {
+						claimReg.unregister(ctx.cwd, params.index);
+						rt.dispatchGuard.release(ctx.cwd, params.index);
+					}
 					persist(ctx, quest);
 
 					const done = quest.steps.filter((t) => t.status === "done").length;
@@ -716,6 +793,13 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				return applyVerifyFail(effectiveEvidence, inferredOutcome);
 			}
 
+			// Persist the child completion payload at the quest_update boundary. Keep
+			// task.result unchanged for legacy consumers while downstream steps receive
+			// only the bounded structured handoff.
+			if (params.result && task.status !== "verifying") {
+				persistHandoff(quest, params.index, params.result);
+			}
+
 			// ── Normal completion — check if verification needed ─────────────
 			if (params.status === "done" && quest.verifyOnComplete) {
 				const team = quest.team ? loadTeams()[quest.team] : null;
@@ -736,10 +820,16 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					// (e.g. a research/scout step) would wrongly attribute pre-existing
 					// redness to it. With no changes there is nothing to gate — the LLM
 					// verifier then judges whether the step should have produced changes.
-					const diff = collectDiffEvidence(ctx.cwd, task.baselineSha ?? null);
+					if (
+						!rt.transitionStep(ctx, quest, params.index, "checking", "running deterministic checks")
+					) {
+						return textResult("Cannot start checks from the current phase.");
+					}
+					const verificationCwd = task.sandboxArtifacts?.worktreePath ?? ctx.cwd;
+					const diff = collectDiffEvidence(verificationCwd, task.baselineSha ?? null);
 					const checkResults =
 						VERIFICATION.enabled && diff.changedFiles.length > 0
-							? runChecks(planChecks(ctx.cwd), ctx.cwd)
+							? runChecks(planChecks(verificationCwd), verificationCwd)
 							: [];
 					const evidence: StepEvidence = {
 						changedFiles: diff.changedFiles,
@@ -775,7 +865,9 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 						return applyVerifyFail(evidenceText, false, failureCodeForCheck(failed.kind));
 					}
 
-					task.status = "verifying";
+					if (!rt.transitionStep(ctx, quest, params.index, "verifying", "checks passed")) {
+						return textResult("Cannot enter verification from the current phase.");
+					}
 					// Preserve verifyRetries across same-rung retry attempts. Escalation
 					// resets it explicitly, so the budget stays per-rung.
 					task.verified = false;
@@ -810,7 +902,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 									``,
 									evidenceBlock,
 									``,
-									`**Verification step:** Spawn a \`subagent(agent="${verifierAgent}")\` to verify this task.`,
+									`**Verification step:** Spawn a \`subagent(agent="${verifierAgent}"${task.sandboxArtifacts?.worktreePath ? `, cwd=${JSON.stringify(verificationCwd)}` : ""})\` to verify this task.`,
 									`The verifier should check:`,
 									`1. Does the result match the step requirements?`,
 									`2. Is the implementation correct and complete for the domain?`,
@@ -835,10 +927,23 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				}
 			}
 
-			task.status = params.status;
+			// Parallel branches finish in checking until deterministic integration.
+			const nextPhase =
+				params.status === "done" && quest.parallel?.enabled && task.sandboxArtifacts?.worktreePath
+					? "checking"
+					: params.status;
+			if (!rt.transitionStep(ctx, quest, params.index, nextPhase, "quest_update")) {
+				return textResult(`Invalid phase transition for step #${params.index + 1}.`);
+			}
+
 			if (params.result) task.result = params.result;
 			if (params.status === "done" || params.status === "failed") {
 				task.completedAt = Date.now();
+			}
+			// Release write claims on terminal states.
+			if (task.phase === "done" || task.phase === "failed" || task.phase === "skipped") {
+				claimReg.unregister(ctx.cwd, params.index);
+				rt.dispatchGuard.release(ctx.cwd, params.index);
 			}
 
 			const git = quest.gitIntegration;

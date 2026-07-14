@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import type { SandboxPolicy } from "./types";
+import type { ParallelConfig, SandboxPolicy } from "./types";
 import { emptyQuest } from "./storage";
 import { compactAwarenessBlock } from "./todo-sync";
 import { codebaseStatusSummary, hasCodebaseCache, loadCodebaseIndex } from "./codebase";
@@ -40,6 +40,19 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 				Type.Boolean({
 					description: "Auto-verify completed steps with a verifier sub-agent (default: true)",
 					default: true,
+				}),
+			),
+			parallel: Type.Optional(
+				Type.Object({
+					enabled: Type.Boolean({
+						description: "Explicitly enable isolated parallel execution (default: false)",
+					}),
+					maxConcurrent: Type.Optional(
+						Type.Number({ description: "Maximum concurrent steps (1-8, default: 3)" }),
+					),
+					stepTimeoutMs: Type.Optional(
+						Type.Number({ description: "Per-step timeout in milliseconds (default: 600000)" }),
+					),
 				}),
 			),
 			gitIntegration: Type.Optional(
@@ -158,6 +171,7 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 				params.verifyOnComplete ?? true,
 				params.gitIntegration,
 				params.sandbox as SandboxPolicy | undefined,
+				params.parallel as ParallelConfig | undefined,
 			);
 			validateAndSetTeam(quest, params.team);
 			ensureLedgers(ctx.cwd, quest.name);

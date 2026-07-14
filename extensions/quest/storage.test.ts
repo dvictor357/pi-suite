@@ -18,6 +18,58 @@ import { projectMemoryPath, questActivePath, readJSON, writeJSON } from "./utils
 
 const tempCwd = (): string => mkdtempSync(join(tmpdir(), "pi-suite-quest-storage-"));
 
+test("loadQuest defensively restores structured handoffs", () => {
+	const cwd = tempCwd();
+	const quest = emptyQuest("Handoff", "restore completion data");
+	quest.status = "paused";
+	quest.steps = [
+		{
+			content: "step",
+			status: "done",
+			agent: "worker",
+			context: "",
+			dependencies: [],
+			result: "legacy output",
+			handoff: {
+				version: 1,
+				summary: "focused summary",
+				filesChanged: ["src/a.ts"],
+				verification: ["npm test: passed"],
+			},
+			attempts: 1,
+			startedAt: 1,
+			completedAt: 2,
+			verified: true,
+			verifyResult: "PASS",
+			verifyRetries: 0,
+			commitHash: null,
+			branchName: null,
+		},
+		{
+			content: "pending",
+			status: "pending",
+			agent: "worker",
+			context: "",
+			dependencies: [0],
+			result: null,
+			attempts: 0,
+			startedAt: null,
+			completedAt: null,
+			verified: false,
+			verifyResult: null,
+			verifyRetries: 0,
+			commitHash: null,
+			branchName: null,
+		},
+	];
+	saveQuest(quest, cwd);
+
+	const loaded = loadQuest(cwd);
+	assert.equal(loaded?.steps[0].handoff?.summary, "focused summary");
+	assert.deepEqual(loaded?.steps[0].handoff?.filesChanged, ["src/a.ts"]);
+	assert.equal(loaded?.steps[0].result, "legacy output");
+});
+
 test("loadQuest defaults sandboxed network/package install permissions to false", () => {
 	const cwd = tempCwd();
 	const sandbox = {
@@ -44,6 +96,53 @@ test("loadQuest defaults sandboxed network/package install permissions to false"
 	assert.equal(loaded?.sandbox?.mode, "restricted");
 	assert.equal(loaded?.sandbox?.allowNetwork, false);
 	assert.equal(loaded?.sandbox?.allowPackageInstall, false);
+});
+
+test("loadQuest round-trips durable phases and bounded parallel config", () => {
+	const cwd = tempCwd();
+	const quest = emptyQuest(
+		"Parallel",
+		"persist execution state",
+		undefined,
+		"auto",
+		true,
+		undefined,
+		undefined,
+		{ enabled: true, maxConcurrent: 99, stepTimeoutMs: 10 },
+	);
+	quest.status = "paused";
+	quest.steps = [
+		{
+			content: "running",
+			status: "running",
+			phase: "dispatching",
+			phaseChangedAt: 123,
+			dispatchId: "dispatch-1",
+			agent: "worker",
+			context: "",
+			dependencies: [],
+			result: null,
+			attempts: 1,
+			startedAt: 100,
+			completedAt: null,
+			verified: false,
+			verifyResult: null,
+			verifyRetries: 0,
+			commitHash: null,
+			branchName: null,
+		},
+	];
+	saveQuest(quest, cwd);
+
+	const loaded = loadQuest(cwd);
+	assert.equal(loaded?.steps[0].phase, "dispatching");
+	assert.equal(loaded?.steps[0].phaseChangedAt, 123);
+	assert.equal(loaded?.steps[0].dispatchId, "dispatch-1");
+	assert.deepEqual(loaded?.parallel, {
+		enabled: true,
+		maxConcurrent: 8,
+		stepTimeoutMs: 1_000,
+	});
 });
 
 test("loadQuest archives and clears a stale finished active quest", () => {
@@ -200,6 +299,8 @@ test("loadQuest defaults ladder fields on legacy steps and round-trips populated
 			rung: 1,
 			escalations: 1,
 			lastModel: "ornith-1.0",
+			readClaim: ["src/input.ts"],
+			writeClaim: ["src/output.ts"],
 			failureBriefs: [
 				{
 					attempt: 1,
@@ -228,6 +329,8 @@ test("loadQuest defaults ladder fields on legacy steps and round-trips populated
 	assert.equal(laddered.rung, 1);
 	assert.equal(laddered.escalations, 1);
 	assert.equal(laddered.lastModel, "ornith-1.0");
+	assert.deepEqual(laddered.readClaim, ["src/input.ts"]);
+	assert.deepEqual(laddered.writeClaim, ["src/output.ts"]);
 	assert.equal(laddered.failureBriefs?.length, 1, "malformed brief dropped");
 	assert.equal(laddered.failureBriefs?.[0].evidence, "tests fail");
 	assert.equal(laddered.failureBriefs?.[0].inferred, true);

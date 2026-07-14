@@ -23,7 +23,10 @@ export type RunEventKind =
 	| "verify_pass"
 	| "verify_fail"
 	| "checks"
-	| "escalate";
+	| "escalate"
+	| "timeout"
+	| "conflict"
+	| "phase_transition";
 
 export interface RunEvent {
 	/** Discriminator — the event "shape" in the union below. */
@@ -38,6 +41,11 @@ export interface RunEvent {
 	model?: string;
 	/** Epoch-ms timestamp. */
 	timestamp: number;
+	/** Durable phase transition metadata. */
+	fromPhase?: string;
+	toPhase?: string;
+	dispatchId?: string;
+	reason?: string;
 
 	/** "task_complete": final output. */
 	result?: string;

@@ -2,11 +2,44 @@ import type { FailureBrief } from "./ladder";
 import type { StepEvidence } from "./evidence";
 
 export type QuestStatus = "planning" | "active" | "paused" | "done" | "idle";
+/** Backward-compatible summary consumed by todo/kanban and older pi-suite releases. */
 export type StepStatus = "pending" | "running" | "verifying" | "done" | "failed" | "skipped";
+/** Persisted execution phase. `status` remains the coarse compatibility projection. */
+export type StepPhase =
+	| "queued"
+	| "dispatching"
+	| "running"
+	| "checking"
+	| "verifying"
+	| "retrying"
+	| "blocked"
+	| "done"
+	| "failed"
+	| "skipped";
+
+export interface ParallelConfig {
+	enabled: boolean;
+	maxConcurrent?: number;
+	stepTimeoutMs?: number;
+}
+
+/** Bounded completion data passed only to steps that directly depend on this step. */
+export interface StepHandoff {
+	version: 1;
+	summary: string;
+	filesChanged: string[];
+	verification: string[];
+	notes?: string;
+}
 
 export interface QuestStep {
 	content: string;
 	status: StepStatus;
+	/** Durable fine-grained phase; absent legacy steps are derived from `status`. */
+	phase?: StepPhase;
+	phaseChangedAt?: number;
+	/** Stable per-attempt token used for duplicate-dispatch protection and restart evidence. */
+	dispatchId?: string;
 	agent: string;
 	/**
 	 * Model the orchestrator assigned to this step's sub-agent, once the user has
@@ -17,6 +50,8 @@ export interface QuestStep {
 	context: string;
 	dependencies: number[];
 	result: string | null;
+	/** Structured, bounded completion summary for dependency handoff. */
+	handoff?: StepHandoff;
 	attempts: number;
 	startedAt: number | null;
 	completedAt: number | null;
@@ -71,6 +106,16 @@ export interface QuestStep {
 	 * step enters verification; absent before then.
 	 */
 	evidence?: StepEvidence;
+	/**
+	 * Paths this step declares it will write to. The orchestrator uses these to
+	 * prevent overlapping concurrent writes.
+	 * Paths are relative to cwd. Absent/empty = no write claims (backward-compatible).
+	 */
+	writeClaim?: string[];
+	/**
+	 * Paths this step declares it needs to read. Paths are validated within cwd.
+	 */
+	readClaim?: string[];
 }
 
 /** One guarded-tool-call log entry (the core artifact record). */
@@ -145,6 +190,12 @@ export interface Quest {
 	 * sandbox support.
 	 */
 	sandbox?: SandboxPolicy;
+	/**
+	 * Opt-in parallel dispatch config. When enabled, dependency-ready non-overlapping
+	 * steps are dispatched in batches instead of one-at-a-time. Sequential remains
+	 * the default. Absent/undefined means parallel is off.
+	 */
+	parallel?: ParallelConfig;
 	commits: {
 		stepIndex: number;
 		/** @deprecated Use stepIndex. */

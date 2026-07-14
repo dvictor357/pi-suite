@@ -40,12 +40,31 @@ import type {
 	FailureCode,
 } from "../../core";
 import { captureBaseline } from "./evidence";
+import { LADDER, MAX_RETRIES } from "./constants";
 import { summarizeChecks } from "./checks";
 import { loadTeams, ensureBuiltInTeams } from "./teams";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { syncQuestToTodo } from "./todo-sync";
 import { QuestKanban, type KanbanActions } from "./kanban";
 import { hasCodebaseTool } from "./codebase";
+import { ActivityTracker } from "./activity-panel";
+import { buildStepContext, collectDependencyHandoffs } from "./context-broker";
+import { briefBudgetForModel, renderFailureBriefs } from "./ladder";
+import { isSandboxActive, resolveSandboxProfile } from "./sandbox";
+import { WriteClaimRegistry } from "./write-claim";
+import { DispatchGuard, checkTimeout, resolvePhase, validateTransition } from "./phase-loop";
+import {
+	isDispatchable,
+	selectDispatchBatch,
+	buildBatchSteering,
+	integrateBatch,
+	stepWorktreePath,
+	createStepWorktree,
+	removeStepWorktree,
+	isWorkingTreeClean,
+	DEFAULT_PARALLEL_CONFIG,
+	type ParallelConfig,
+} from "./parallel";
 
 /** Stable, filesystem-safe slug for a quest name (ledger/eval directory key). */
 export function questSlug(name: string): string {
@@ -86,6 +105,14 @@ export interface QuestRuntime {
 	 * next `agent_end` (which a slash command never produces on its own).
 	 */
 	fireNextTask(ctx: ExtensionContext): boolean;
+	/**
+	 * Opt-in parallel batch dispatch. When {@link Quest.parallel}.enabled,
+	 * select dependency-ready non-overlapping steps, create worktrees, steer
+	 * the orchestrator to delegate them, and integrate results. Sequential
+	 * auto-pilot is the unchanged default; this path only activates when
+	 * `quest.parallel?.enabled` is true.
+	 */
+	fireParallelBatch(ctx: ExtensionContext, quest: Quest): boolean;
 
 	// ── Observability ledgers ────────────────────────────────────────────────────
 	getLedgers(cwd: string): { ledger: RunLedger; evalLog: EvalLog };
@@ -128,6 +155,24 @@ export interface QuestRuntime {
 	makeKanbanActions(ctx: ExtensionContext): KanbanActions;
 	/** Shared kanban overlay launcher used by /quest and /quest kanban. */
 	launchKanban(ctx: ExtensionContext, quest: Quest): Promise<void>;
+	/** Live activity tracker for sub-agent execution events. */
+	readonly activity: ActivityTracker;
+	/** In-memory write-claim registry for concurrent write conflict detection. */
+	readonly claims: WriteClaimRegistry;
+	/** In-memory dispatch guard for duplicate-dispatch protection. */
+	readonly dispatchGuard: DispatchGuard;
+	/** Validate, ledger, and persist one durable step phase transition. */
+	transitionStep(
+		ctx: ExtensionContext,
+		quest: Quest,
+		index: number,
+		to: import("./types").StepPhase,
+		reason?: string,
+	): boolean;
+	/** Start a retry and clean only a clean owned worktree; dirty evidence blocks the step. */
+	beginStepRetry(ctx: ExtensionContext, quest: Quest, index: number, reason: string): boolean;
+	/** Cancel active attempts, retaining isolated worktrees as blocked evidence. */
+	cancelActiveSteps(ctx: ExtensionContext, quest: Quest, reason: string): void;
 }
 
 export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
@@ -285,8 +330,94 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		syncQuestToTodo(quest, ctx.cwd);
 	}
 
+	function transitionStep(
+		ctx: ExtensionContext,
+		quest: Quest,
+		index: number,
+		to: import("./types").StepPhase,
+		reason?: string,
+	): boolean {
+		const step = quest.steps[index];
+		if (!step) return false;
+		const transition = validateTransition(step, to);
+		if (!transition.ok) return false;
+		recordRun(ctx.cwd, {
+			kind: "phase_transition",
+			taskIndex: index,
+			taskContent: step.content,
+			agent: step.agent,
+			timestamp: step.phaseChangedAt ?? Date.now(),
+			fromPhase: transition.from,
+			toPhase: transition.to,
+			dispatchId: step.dispatchId,
+			reason,
+		});
+		if (["retrying", "blocked", "done", "failed", "skipped"].includes(to)) {
+			claims.unregister(ctx.cwd, index);
+			dispatchGuard.release(ctx.cwd, index);
+		}
+		persist(ctx, quest);
+		return true;
+	}
+
+	function beginStepRetry(
+		ctx: ExtensionContext,
+		quest: Quest,
+		index: number,
+		reason: string,
+	): boolean {
+		if (!transitionStep(ctx, quest, index, "retrying", reason)) return false;
+		const step = quest.steps[index];
+		const worktree = step.sandboxArtifacts?.worktreePath;
+		const ownedWorktree = stepWorktreePath(ctx.cwd, quest.name, index);
+		if (worktree && worktree !== ownedWorktree) {
+			step.result =
+				`${step.result ?? ""}\n[RETRY BLOCKED] Refusing to clean unowned worktree ${worktree}.`.trim();
+			transitionStep(ctx, quest, index, "blocked", "worktree ownership mismatch");
+			return false;
+		}
+		if (worktree && !removeStepWorktree(worktree, ctx.cwd)) {
+			step.result =
+				`${step.result ?? ""}\n[RETRY BLOCKED] Owned worktree retained at ${worktree}.`.trim();
+			transitionStep(ctx, quest, index, "blocked", "retry worktree contains evidence");
+			return false;
+		}
+		if (worktree && step.sandboxArtifacts) delete step.sandboxArtifacts.worktreePath;
+		step.startedAt = null;
+		step.dispatchId = undefined;
+		return true;
+	}
+
+	function cancelActiveSteps(ctx: ExtensionContext, quest: Quest, reason: string): void {
+		for (let index = 0; index < quest.steps.length; index++) {
+			const step = quest.steps[index];
+			if (!["dispatching", "running", "checking", "verifying"].includes(resolvePhase(step)))
+				continue;
+			if (!transitionStep(ctx, quest, index, "retrying", reason)) continue;
+			step.startedAt = null;
+			step.dispatchId = undefined;
+			transitionStep(
+				ctx,
+				quest,
+				index,
+				step.sandboxArtifacts?.worktreePath ? "blocked" : "queued",
+				step.sandboxArtifacts?.worktreePath
+					? `${reason}; owned worktree retained at ${step.sandboxArtifacts.worktreePath}`
+					: reason,
+			);
+		}
+		claims.clear(ctx.cwd);
+		dispatchGuard.clear(ctx.cwd);
+	}
+
 	function fireStep(ctx: ExtensionContext, quest: Quest, step: QuestStep, index: number): void {
-		step.status = "running";
+		if (resolvePhase(step) !== "queued") return;
+		if (!dispatchGuard.acquire(ctx.cwd, index)) return;
+		step.dispatchId = dispatchGuard.dispatchId(ctx.cwd, index);
+		if (!transitionStep(ctx, quest, index, "dispatching")) {
+			dispatchGuard.release(ctx.cwd, index);
+			return;
+		}
 		step.attempts++;
 		if (!step.startedAt) step.startedAt = Date.now();
 		// Stamp the pre-step repo baseline once, before the worker touches anything,
@@ -298,7 +429,10 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		}
 		quest.lastFiredStepIndex = index;
 		quest.stepsSincePause++;
-		persist(ctx, quest);
+		if (!transitionStep(ctx, quest, index, "running")) {
+			dispatchGuard.release(ctx.cwd, index);
+			return;
+		}
 
 		autoPilotLocked = true;
 		try {
@@ -314,8 +448,175 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		const quest = getQuest(ctx.cwd);
 		if (!quest || quest.status !== "active") return false;
 		const next = nextPendingStep(quest);
+		if (
+			quest.parallel?.enabled &&
+			next &&
+			!quest.steps.some(
+				(step, index) =>
+					isDispatchable(step, quest.steps) &&
+					isSandboxActive(resolveSandboxProfile(quest.sandbox, step.sandbox)),
+			)
+		) {
+			return fireParallelBatch(ctx, quest);
+		}
 		if (!next) return false;
 		fireStep(ctx, quest, next.task, next.index);
+		return true;
+	}
+
+	function fireParallelBatch(ctx: ExtensionContext, quest: Quest): boolean {
+		const cfg: ParallelConfig = quest.parallel?.enabled
+			? { ...DEFAULT_PARALLEL_CONFIG, ...quest.parallel }
+			: DEFAULT_PARALLEL_CONFIG;
+		if (!cfg.enabled || quest.status !== "active") return false;
+
+		// Recover timed-out attempts before selecting more work. Dirty worktrees are
+		// retained and blocked; clean ones can be retried without losing evidence.
+		for (let index = 0; index < quest.steps.length; index++) {
+			const step = quest.steps[index];
+			if (!checkTimeout(step, cfg.stepTimeoutMs)) continue;
+			recordRun(ctx.cwd, {
+				kind: "timeout",
+				taskIndex: index,
+				taskContent: step.content,
+				agent: step.agent,
+				timestamp: Date.now(),
+				dispatchId: step.dispatchId,
+			});
+			if (!beginStepRetry(ctx, quest, index, "step timeout")) continue;
+			if (step.attempts > MAX_RETRIES) {
+				transitionStep(ctx, quest, index, "failed", "attempt budget exhausted");
+			} else {
+				transitionStep(ctx, quest, index, "queued", "timeout retry");
+			}
+		}
+
+		// Verification finishes in the owned worktree. Integrate completed branches
+		// in deterministic dependency/index order before dispatching the next batch.
+		const readyToIntegrate = quest.steps
+			.map((step, index) => ({ step, index }))
+			.filter(({ step }) => step.phase === "checking" && step.sandboxArtifacts?.worktreePath)
+			.map(({ index }) => index);
+		if (readyToIntegrate.length > 0) {
+			const result = integrateBatch(quest, readyToIntegrate, ctx.cwd);
+			for (const index of result.integrated) {
+				transitionStep(ctx, quest, index, "done", "verified branch integrated");
+				claims.unregister(ctx.cwd, index);
+				dispatchGuard.release(ctx.cwd, index);
+			}
+			for (const index of result.conflicts) {
+				const step = quest.steps[index];
+				step.result = `${step.result ?? ""}
+[MERGE CONFLICT] Branch ${step.branchName} retained at ${step.sandboxArtifacts?.worktreePath}.`.trim();
+				transitionStep(ctx, quest, index, "blocked", "merge conflict; worktree retained");
+				recordRun(ctx.cwd, {
+					kind: "conflict",
+					taskIndex: index,
+					taskContent: step.content,
+					agent: step.agent,
+					timestamp: Date.now(),
+					evidence: step.result,
+				});
+				claims.unregister(ctx.cwd, index);
+				dispatchGuard.release(ctx.cwd, index);
+			}
+			if (result.conflicts.length > 0) {
+				quest.status = "paused";
+				quest.pauseReason = `Parallel integration blocked by ${result.conflicts.length} merge conflict(s); owned worktrees were retained.`;
+				persist(ctx, quest);
+				return false;
+			}
+		}
+
+		if (!isWorkingTreeClean(ctx.cwd)) {
+			quest.status = "paused";
+			quest.pauseReason =
+				"Parallel dispatch requires a clean main working tree so owned worktrees include the complete project state.";
+			persist(ctx, quest);
+			return false;
+		}
+
+		const batch = selectDispatchBatch(quest, dispatchGuard, claims, ctx.cwd, cfg);
+		for (const conflict of batch.conflicts) {
+			const step = quest.steps[conflict.index];
+			recordRun(ctx.cwd, {
+				kind: "conflict",
+				taskIndex: conflict.index,
+				taskContent: step.content,
+				agent: step.agent,
+				timestamp: Date.now(),
+				reason:
+					conflict.blockedBy < 0
+						? "parallel writer has no valid write claim"
+						: `write claim overlaps step #${conflict.blockedBy + 1}`,
+			});
+		}
+		if (batch.indices.length === 0) return false;
+
+		const dispatched: number[] = [];
+		for (const index of batch.indices) {
+			const step = quest.steps[index];
+			step.dispatchId = dispatchGuard.dispatchId(ctx.cwd, index);
+			const branch = `pi-quest/${questSlug(quest.name)}/step-${index + 1}-${step.dispatchId?.slice(0, 8)}`;
+			const worktree = stepWorktreePath(ctx.cwd, quest.name, index);
+			const created = createStepWorktree(worktree, ctx.cwd, branch);
+			if (!created) {
+				claims.unregister(ctx.cwd, index);
+				dispatchGuard.release(ctx.cwd, index);
+				transitionStep(
+					ctx,
+					quest,
+					index,
+					"blocked",
+					`Could not create owned worktree ${worktree}.`,
+				);
+				continue;
+			}
+			step.branchName = branch;
+			step.sandboxArtifacts = {
+				...(step.sandboxArtifacts ?? { calls: [], touchedPaths: [] }),
+				worktreePath: created,
+			};
+			if (!transitionStep(ctx, quest, index, "dispatching", "owned worktree ready")) continue;
+			step.attempts++;
+			step.startedAt = Date.now();
+			const base = captureBaseline(created);
+			if (base.sha) step.baselineSha = base.sha;
+			if (!transitionStep(ctx, quest, index, "running", "parallel subagent dispatched")) continue;
+			dispatched.push(index);
+		}
+		if (dispatched.length === 0) return false;
+
+		quest.lastFiredStepIndex = dispatched[dispatched.length - 1];
+		quest.stepsSincePause += dispatched.length;
+		persist(ctx, quest);
+		autoPilotLocked = true;
+		try {
+			pi.sendUserMessage(
+				buildBatchSteering(quest, dispatched, ctx.cwd, (step, _index, model) => {
+					const modelInfo = model ? { id: model } : undefined;
+					return buildStepContext({
+						role: step.agent,
+						content: step.content,
+						context: step.context,
+						persona: resolvePersona(quest.team, step.agent),
+						dependencyResults: collectDependencyHandoffs(quest, step),
+						failureBriefBlock: renderFailureBriefs(
+							step.failureBriefs,
+							briefBudgetForModel(modelInfo, LADDER),
+							LADDER.maxBriefs,
+						),
+						sandboxProfile: resolveSandboxProfile(quest.sandbox, step.sandbox),
+						modelInfo,
+						cwd: ctx.cwd,
+						includeLegacyFraming: true,
+					});
+				}),
+				{ deliverAs: "steer" },
+			);
+		} finally {
+			autoPilotLocked = false;
+		}
 		return true;
 	}
 
@@ -377,6 +678,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 				q.pauseReason = "Paused via board.";
 				q.lastFiredStepIndex = -1;
 				q.sameStepCount = 0;
+				cancelActiveSteps(ctx, q, "paused via board");
 				persist(ctx, q);
 				ctx.ui.notify?.(`Quest "${q.name}" paused. r to resume.`, "info");
 			},
@@ -432,11 +734,12 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 				if (!q) return;
 				const task = q.steps[taskIndex];
 				if (!task || task.status !== "failed") return;
-				task.status = "pending";
+				if (!beginStepRetry(ctx, q, taskIndex, "manual retry")) return;
 				task.attempts = 0;
 				task.startedAt = null;
 				task.completedAt = null;
 				task.result = null;
+				transitionStep(ctx, q, taskIndex, "queued", "manual retry queued");
 				persist(ctx, q);
 				ctx.ui.notify?.(`Step #${taskIndex + 1} "${task.content}" reset for retry.`, "info");
 			},
@@ -465,6 +768,10 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		);
 	}
 
+	const activity = new ActivityTracker();
+	const claims = new WriteClaimRegistry();
+	const dispatchGuard = new DispatchGuard();
+
 	return {
 		pi,
 		getQuest,
@@ -476,6 +783,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		},
 		fireStep,
 		fireNextTask,
+		fireParallelBatch,
 		getLedgers,
 		ensureLedgers,
 		recordRun,
@@ -489,5 +797,11 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		validateAndSetTeam,
 		makeKanbanActions,
 		launchKanban,
+		activity,
+		claims,
+		dispatchGuard,
+		transitionStep,
+		beginStepRetry,
+		cancelActiveSteps,
 	};
 }

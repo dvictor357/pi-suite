@@ -182,6 +182,20 @@ actually trips the constrained check pays the shorter form. The compact/full spl
 content-preserving — both state the same requirement — so intelligence is not traded away
 for the token savings.
 
+## Durable phase loop and opt-in parallelism
+
+Quest persists a fine-grained `step.phase` while retaining `step.status` as the legacy
+coarse projection. All auto-pilot phase changes are validated and appended to the run
+ledger. Stale sessions consume their attempt, bounded timeout/retry policy applies, and
+pause/abort clears dispatch ownership without deleting isolated work.
+
+Sequential dispatch remains the default. `quest_create.parallel.enabled` explicitly opts
+into bounded batches of dependency-ready steps. Each selected step owns a branch and a Git
+worktree outside the main checkout; declared write claims reject predictable overlap.
+Checks and verification run in that worktree, then verified branches integrate in stable
+dependency/index order. Merge conflicts pause the quest with the branch/worktree retained
+as evidence; cleanup removes only clean worktrees.
+
 ## Verified escalation ladder
 
 Quest can spend cheap tokens first without lowering the quality bar. The user approves an
@@ -214,9 +228,13 @@ Key boundaries:
   to future routing.
 
 - **pi-minions handoff:** unsandboxed steps are delegated through pi-minions' `subagent`
-  tool with the resolved rung model and role-level thinking as invocation overrides.
-  Restricted/isolated steps retain the guarded `quest_delegate` fallback until pi-minions
-  can enforce Quest's sandbox policy at its own process/tool boundary.
+  tool with the resolved rung model and role-level thinking as invocation overrides. The
+  child receives the actual step/context, direct-dependency handoffs, failure briefs,
+  project awareness, hygiene directive, and a bounded JSON completion schema. `quest_update`
+  keeps legacy prose in `step.result` and additively stores a defensive `step.handoff`;
+  downstream prompts render only direct dependencies' bounded handoffs. Restricted/isolated
+  steps retain the guarded `quest_delegate` fallback with the same context assembly until
+  pi-minions can enforce Quest's sandbox policy at its own process/tool boundary.
 
 No default rung list ships in the repo; hard-coded model catalogs rot. The feature is inert
 until a project approves a ladder. `computeEvalTimeSeries` in `core/eval-stats.ts` provides

@@ -3,6 +3,9 @@ import { MAX_BURST, MAX_RETRIES, ICON, LADDER, formatDirectiveFor } from "./cons
 import { compactAwarenessBlock } from "./todo-sync";
 import { loadAgentModels, loadModelLadder } from "./storage";
 import { briefBudgetForModel, renderFailureBriefs, rungModel } from "./ladder";
+import { resolveSandboxProfile } from "./sandbox";
+import { buildStepContext, collectDependencyHandoffs } from "./context-broker";
+import { resolvePhase } from "./phase-loop";
 
 /**
  * Whether the just-ended turn was aborted by the user (Esc), as opposed to
@@ -24,7 +27,7 @@ export function wasTurnAborted(messages: ReadonlyArray<unknown> | undefined): bo
 export function nextPendingStep(quest: Quest): { task: QuestStep; index: number } | null {
 	for (let i = 0; i < quest.steps.length; i++) {
 		const t = quest.steps[i];
-		if (t.status !== "pending") continue;
+		if (t.status !== "pending" || resolvePhase(t) !== "queued") continue;
 		const allDepsMet = t.dependencies.every((d) => {
 			const s = quest.steps[d]?.status;
 			return s === "done" || s === "skipped";
@@ -93,6 +96,9 @@ export function formatQuestStatus(quest: Quest): string {
 				const blocked = a.calls.filter((c) => c.blocked).length;
 				if (blocked) parts.push(`🚫${blocked}`);
 				if (a.worktreePath) parts.push(`🌳`);
+			}
+			if (t.writeClaim && t.writeClaim.length > 0) {
+				parts.push(`✍️${t.writeClaim.length}`);
 			}
 			return parts.length ? ` ${parts.join(" ")}` : "";
 		};
@@ -186,8 +192,12 @@ export function buildSteeringMessage(
 
 	const deps = task.dependencies.map((d) => `#${d + 1} — ${quest.steps[d].content}`).join(", ");
 
+	// Dependency results: collected via context-broker for structured handoffs.
+	const dependencyResults = collectDependencyHandoffs(quest, task);
+
 	// Surface sandbox context when the quest or step has an active sandbox.
-	const sandboxMode = task.sandbox?.mode || quest.sandbox?.mode;
+	const sandboxProfile = resolveSandboxProfile(quest.sandbox, task.sandbox);
+	const sandboxMode = sandboxProfile.mode;
 	const sandboxActive = Boolean(sandboxMode && sandboxMode !== "none");
 	const sandboxBlock = sandboxActive
 		? `**Sandbox:** ${
@@ -205,8 +215,35 @@ export function buildSteeringMessage(
 	const ladder = task.rung !== undefined ? loadModelLadder(cwd) : null;
 	const ladderModel = ladder && !task.model?.trim() ? rungModel(ladder, task.rung ?? 0) : undefined;
 	const assignedModel = task.model?.trim() || ladderModel?.trim() || remembered?.trim();
-	const minionTask =
-		"Execute the current Quest step using the full step, context, dependencies, sandbox, prior-failure, and project-awareness details in this steering message.";
+
+	// Build the complete sub-agent prompt via the shared context broker so the
+	// pi-minions child agent receives actual step content, dependency handoffs,
+	// failure briefs, sandbox constraints, project awareness, format directive,
+	// and the completion schema — not a generic reference to the parent steering
+	// message it cannot see.
+	const modelInfo = assignedModel ? { id: assignedModel } : undefined;
+	const formatDirective = formatDirectiveFor(modelInfo);
+	const awarenessBlock = compactAwarenessBlock(cwd, modelInfo);
+	const briefBlock = renderFailureBriefs(
+		task.failureBriefs,
+		briefBudgetForModel(modelInfo, LADDER),
+		LADDER.maxBriefs,
+	);
+
+	const minionTask = buildStepContext({
+		role: task.agent,
+		content: task.content,
+		context: task.context,
+		dependencyResults,
+		failureBriefBlock: briefBlock,
+		sandboxProfile: sandboxActive ? sandboxProfile : undefined,
+		modelInfo,
+		cwd,
+		// pi-minions adds its own agent persona; legacy framing is only for
+		// quest_delegate.
+		includeLegacyFraming: false,
+	});
+
 	const minionArgs = [
 		`agent=${JSON.stringify(task.agent)}`,
 		`task=${JSON.stringify(minionTask)}`,
@@ -228,14 +265,13 @@ export function buildSteeringMessage(
 			? `**Model:** none assigned for role \`${task.agent}\`. First call quest_assign_model(role=${JSON.stringify(task.agent)}, proposed="…", thinkingLevel="…", stepIndex=${index}), then call \`quest_delegate(index=${index})\`.`
 			: `**Model:** none assigned for role \`${task.agent}\`. First call quest_assign_model(role=${JSON.stringify(task.agent)}, proposed="…", thinkingLevel="…", stepIndex=${index}), then call \`subagent(agent=${JSON.stringify(task.agent)}, task=${JSON.stringify(minionTask)})\`.`;
 
-	// Distilled prior verified failures: the orchestrator writing the next
-	// subagent/quest_update calls need to know why this step is retrying.
-	const briefBlock = renderFailureBriefs(
-		task.failureBriefs,
-		briefBudgetForModel(assignedModel ? { id: assignedModel } : undefined, LADDER),
-		LADDER.maxBriefs,
-	);
+	// Write-claim advisory for the current step.
+	const claimBlock =
+		task.writeClaim && task.writeClaim.length > 0
+			? `**Write claims:** ${task.writeClaim.map((p) => `\`${p}\``).join(", ")}\n⚠ Other running steps must not write to these paths.`
+			: "";
 
+	// ── Steering message (orchestrator-visible overview + tool-call suggestion) ──
 	return [
 		`## Quest: ${quest.name} (${done}/${total} done)`,
 		``,
@@ -244,11 +280,12 @@ export function buildSteeringMessage(
 		`**Context:** ${task.context}`,
 		deps ? `**Depends on:** ${deps}` : "",
 		sandboxBlock,
+		claimBlock,
 		modelLine,
 		briefBlock,
-		compactAwarenessBlock(cwd, assignedModel ? { id: assignedModel } : undefined),
+		awarenessBlock,
 		``,
-		formatDirectiveFor(assignedModel ? { id: assignedModel } : undefined),
+		formatDirective,
 		``,
 		`When complete, call **quest_update** with step index ${index} to mark it done.`,
 		`If you hit a blocker you can't resolve, call quest_update with status "failed" and explain why.`,

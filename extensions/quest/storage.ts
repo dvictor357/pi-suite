@@ -14,12 +14,15 @@ import {
 } from "../../core";
 import type {
 	GitIntegration,
+	ParallelConfig,
 	Quest,
 	SandboxMode,
 	SandboxPolicy,
 	SandboxOverrides,
+	StepPhase,
 	WorktreeConfig,
 } from "./types";
+import { coerceStepHandoff } from "./context-broker";
 import { coerceFailureBrief } from "./ladder";
 import {
 	readJSON,
@@ -116,6 +119,36 @@ export function rememberModelLadder(cwd: string, config: ModelLadderConfig): voi
 }
 
 const VALID_SANDBOX_MODES: SandboxMode[] = ["none", "restricted", "isolated"];
+const VALID_STEP_PHASES: StepPhase[] = [
+	"queued",
+	"dispatching",
+	"running",
+	"checking",
+	"verifying",
+	"retrying",
+	"blocked",
+	"done",
+	"failed",
+	"skipped",
+];
+
+function normalizeParallelConfig(input: unknown): ParallelConfig | undefined {
+	const raw = asRecord(input);
+	if (!boolOr(raw.enabled, false)) return undefined;
+	const maxConcurrent = numOr(raw.maxConcurrent, 3);
+	const stepTimeoutMs = numOr(raw.stepTimeoutMs, 600_000);
+	return {
+		enabled: true,
+		maxConcurrent: Math.max(
+			1,
+			Math.min(8, Number.isFinite(maxConcurrent) ? Math.floor(maxConcurrent) : 3),
+		),
+		stepTimeoutMs: Math.max(
+			1_000,
+			Number.isFinite(stepTimeoutMs) ? Math.floor(stepTimeoutMs) : 600_000,
+		),
+	};
+}
 
 function normalizeSandboxPolicy(input: unknown): SandboxPolicy {
 	const raw = asRecord(input);
@@ -229,6 +262,7 @@ export function emptyQuest(
 	verifyOnComplete = true,
 	gitIntegration?: Partial<GitIntegration>,
 	sandbox?: SandboxPolicy,
+	parallel?: ParallelConfig,
 ): Quest {
 	return {
 		version: 1,
@@ -256,6 +290,7 @@ export function emptyQuest(
 			branchPrefix: gitIntegration?.branchPrefix ?? "quest/",
 		},
 		sandbox: sandbox && sandbox.mode !== "none" ? sandbox : undefined,
+		parallel: parallel?.enabled ? normalizeParallelConfig(parallel) : undefined,
 		createdAt: Date.now(),
 		completedAt: null,
 		updatedAt: Date.now(),
@@ -273,10 +308,20 @@ export function loadQuest(cwd: string): Quest | null {
 			raw.steps = rawSteps.map((t: any) => ({
 				content: t.content || "",
 				status: t.status || "pending",
+				phase: oneOf(t.phase, VALID_STEP_PHASES) ? t.phase : undefined,
+				phaseChangedAt: typeof t.phaseChangedAt === "number" ? t.phaseChangedAt : undefined,
+				dispatchId: typeof t.dispatchId === "string" ? t.dispatchId : undefined,
 				agent: t.agent || "worker",
 				context: t.context || "",
 				dependencies: Array.isArray(t.dependencies) ? t.dependencies : [],
+				readClaim: Array.isArray(t.readClaim)
+					? t.readClaim.filter((p: unknown): p is string => typeof p === "string")
+					: undefined,
+				writeClaim: Array.isArray(t.writeClaim)
+					? t.writeClaim.filter((p: unknown): p is string => typeof p === "string")
+					: undefined,
 				result: t.result || null,
+				handoff: coerceStepHandoff(t.handoff),
 				attempts: t.attempts || 0,
 				completedAt: t.completedAt || null,
 				verified: typeof t.verified === "boolean" ? t.verified : false,
@@ -388,6 +433,7 @@ export function loadQuest(cwd: string): Quest | null {
 			} else {
 				raw.sandbox = undefined;
 			}
+			raw.parallel = normalizeParallelConfig(raw.parallel);
 
 			const finishedSteps =
 				raw.steps.length > 0 &&

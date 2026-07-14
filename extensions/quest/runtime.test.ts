@@ -65,6 +65,50 @@ function seedActive(
 	return quest;
 }
 
+describe("retry lifecycle", () => {
+	test("beginStepRetry releases dispatch and write ownership before requeue", () => {
+		const h = fakeRuntime();
+		try {
+			const quest = seedActive(h.rt, h.cwd, [
+				makeTask({ status: "failed", phase: "failed", writeClaim: ["src/a.ts"] }),
+			]);
+			h.rt.dispatchGuard.acquire(h.cwd, 0);
+			h.rt.claims.register(h.cwd, 0, "do the thing", [`${h.cwd}/src/a.ts`]);
+
+			assert.equal(h.rt.beginStepRetry(h.ctx, quest, 0, "test retry"), true);
+			assert.equal(quest.steps[0].phase, "retrying");
+			assert.equal(h.rt.dispatchGuard.isInFlight(h.cwd, 0), false);
+			assert.deepEqual(h.rt.claims.active(h.cwd), []);
+			assert.equal(h.rt.transitionStep(h.ctx, quest, 0, "queued", "retry queued"), true);
+		} finally {
+			h.cleanup();
+		}
+	});
+
+	test("beginStepRetry refuses a persisted worktree it does not own", () => {
+		const h = fakeRuntime();
+		try {
+			const quest = seedActive(h.rt, h.cwd, [
+				makeTask({
+					status: "failed",
+					phase: "failed",
+					sandboxArtifacts: {
+						calls: [],
+						touchedPaths: [],
+						worktreePath: join(h.cwd, "someone-elses-worktree"),
+					},
+				}),
+			]);
+
+			assert.equal(h.rt.beginStepRetry(h.ctx, quest, 0, "test retry"), false);
+			assert.equal(quest.steps[0].phase, "blocked");
+			assert.match(quest.steps[0].result ?? "", /Refusing to clean unowned worktree/);
+		} finally {
+			h.cleanup();
+		}
+	});
+});
+
 describe("fireNextTask", () => {
 	test("fires the first eligible pending step and steers exactly once", () => {
 		const h = fakeRuntime();
@@ -80,6 +124,25 @@ describe("fireNextTask", () => {
 			assert.equal(quest.stepsSincePause, 1);
 			assert.equal(h.steers.length, 1);
 			assert.match(h.steers[0], /first/);
+		} finally {
+			h.cleanup();
+		}
+	});
+
+	test("falls back to guarded sequential dispatch when a ready step is sandboxed", () => {
+		const h = fakeRuntime();
+		try {
+			const quest = seedActive(h.rt, h.cwd, [
+				makeTask({
+					content: "sandboxed",
+					sandbox: { mode: "restricted", allowedPaths: ["src/**"] },
+				}),
+			]);
+			quest.parallel = { enabled: true, maxConcurrent: 2 };
+
+			assert.equal(h.rt.fireNextTask(h.ctx), true);
+			assert.equal(h.steers.length, 1);
+			assert.match(h.steers[0], /quest_delegate/);
 		} finally {
 			h.cleanup();
 		}

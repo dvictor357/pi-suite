@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { THINKING_LEVELS, type ModelLadderConfig } from "../../core";
-import { formatDirectiveFor, LADDER } from "./constants";
+import { LADDER, MAX_RETRIES } from "./constants";
 import {
 	archiveQuest,
 	clearActiveQuest,
@@ -11,7 +11,8 @@ import {
 	rememberAgentModel,
 	rememberModelLadder,
 } from "./storage";
-import { resolveTaskModel, buildSubAgentPrompt } from "./delegate";
+import { resolveTaskModel } from "./delegate";
+import { buildStepContext, collectDependencyHandoffs } from "./context-broker";
 import {
 	briefBudgetForModel,
 	isNeverLadderRole,
@@ -27,6 +28,8 @@ import { renderStatus, writeQuestSessionMeta } from "./status";
 import { resolveSandboxProfile, sandboxToolsForRole } from "./sandbox";
 import { runSubAgent } from "./subagent";
 import type { QuestRuntime } from "./runtime";
+import { normalizeClaims, validateClaims } from "./write-claim";
+import { resolvePhase } from "./phase-loop";
 
 export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 	const { getQuest, textResult, resolvePersona, stampTaskModel, persist } = rt;
@@ -292,7 +295,37 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				);
 			}
 			const task = quest.steps[params.index];
+			if (resolvePhase(task) !== "running") {
+				return textResult(
+					`Step #${params.index + 1} is not running; let Quest dispatch it before delegation.`,
+				);
+			}
 			const role = task.agent;
+
+			// ── Write-claim validation ───────────────────────────────────
+			const claimErr = validateClaims(role, task.writeClaim, task.readClaim);
+			if (claimErr) return textResult(claimErr);
+
+			let normalizedWriteClaims: string[];
+			try {
+				normalizeClaims(task.readClaim, ctx.cwd);
+				normalizedWriteClaims = normalizeClaims(task.writeClaim, ctx.cwd);
+			} catch (error) {
+				return textResult(error instanceof Error ? error.message : String(error));
+			}
+			if (normalizedWriteClaims.length > 0) {
+				const conflict = rt.claims.register(
+					ctx.cwd,
+					params.index,
+					task.content,
+					normalizedWriteClaims,
+				);
+				if (conflict) {
+					return textResult(
+						`Write-claim conflict: step #${params.index + 1} ("${task.content}") wants to write to paths that step #${conflict.stepIndex + 1} ("${conflict.stepContent}") already holds. Wait for step #${conflict.stepIndex + 1} to complete or abort it first.`,
+					);
+				}
+			}
 
 			const rememberedChoice = loadAgentModels(ctx.cwd)[role];
 			const remembered = rememberedChoice?.model;
@@ -366,24 +399,22 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			const sandboxProfile = resolveSandboxProfile(quest.sandbox, task.sandbox);
 			const sandboxTools = sandboxToolsForRole(role, sandboxProfile);
 
-			const dependencyResults = task.dependencies.map((d) => ({
-				content: quest.steps[d]?.content ?? "",
-				result: quest.steps[d]?.result ?? null,
-			}));
 			const modelInfo = modelId ? { id: modelId } : undefined;
-			const prompt = buildSubAgentPrompt({
+			const prompt = buildStepContext({
 				role,
 				content: task.content,
 				context: task.context,
 				persona: resolvePersona(quest.team, role),
-				dependencyResults,
+				dependencyResults: collectDependencyHandoffs(quest, task),
 				failureBriefBlock: renderFailureBriefs(
 					task.failureBriefs,
 					briefBudgetForModel(modelInfo, LADDER),
 					LADDER.maxBriefs,
 				),
-				formatDirective: formatDirectiveFor(modelInfo),
 				sandboxProfile,
+				modelInfo,
+				cwd: ctx.cwd,
+				includeLegacyFraming: true,
 			});
 
 			const res = await runSubAgent(
@@ -393,11 +424,20 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			);
 
 			if (!res.ok) {
+				const error = res.error ?? "unknown error";
+				task.result = `Sub-agent failed: ${error}`;
+				if (task.attempts <= MAX_RETRIES && rt.beginStepRetry(ctx, quest, params.index, error)) {
+					rt.transitionStep(ctx, quest, params.index, "queued", "bounded sub-agent retry");
+				} else if (task.phase !== "blocked") {
+					rt.transitionStep(ctx, quest, params.index, "failed", "attempt budget exhausted");
+					task.completedAt = Date.now();
+					persist(ctx, quest);
+				}
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Sub-agent for step #${params.index + 1} failed: ${res.error ?? "unknown error"}`,
+							text: `Sub-agent for step #${params.index + 1} failed: ${error}`,
 						},
 					],
 					details: {
@@ -476,6 +516,8 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			}
 			if (archiveQuest(quest, ctx.cwd)) clearActiveQuest(ctx.cwd);
 			rt.setQuest(null);
+			rt.claims.clear(ctx.cwd);
+			rt.dispatchGuard.clear(ctx.cwd);
 			renderStatus(ctx, null);
 			writeQuestSessionMeta(ctx.cwd, null);
 			clearQuestFromTodo(ctx.cwd); // flush stale [Quest] items from pi-todo
@@ -544,6 +586,12 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			lines.push(``, `**Verification:** ✅ ${t.verifyResult || "passed"}`);
 		} else if (t.status === "verifying") {
 			lines.push(``, `**Verification:** 🔍 in progress (retries: ${t.verifyRetries})`);
+		}
+		if (t.writeClaim && t.writeClaim.length > 0) {
+			lines.push(``, `**Write claims:** ${t.writeClaim.map((p) => `\`${p}\``).join(", ")}`);
+		}
+		if (t.readClaim && t.readClaim.length > 0) {
+			lines.push(``, `**Read claims:** ${t.readClaim.map((p) => `\`${p}\``).join(", ")}`);
 		}
 		if (t.commitHash) {
 			lines.push(

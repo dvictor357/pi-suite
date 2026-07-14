@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { existsSync } from "node:fs";
 import { DEFAULT_RETRY_POLICY } from "../../core";
 import { MAX_BURST, MAX_RETRIES } from "./constants";
 import {
@@ -15,11 +16,19 @@ import { renderStatus, writeQuestSessionMeta } from "./status";
 import { clearQuestFromTodo, syncQuestToTodo } from "./todo-sync";
 import { resolveSandboxProfile } from "./sandbox";
 import { evaluateToolCall } from "./sandbox-guard";
+import { normalizeClaims, validateClaims } from "./write-claim";
 import { buildQuestRecap } from "./recap";
+import {
+	buildActivityWidgetFn,
+	buildActivityFooter,
+	buildActivityWorkingIndicator,
+} from "./activity-panel";
+import { recoverStaleRuns, resolvePhase } from "./phase-loop";
+import { cleanStaleWorktrees } from "./parallel";
 import type { QuestRuntime } from "./runtime";
 
 export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
-	const { getQuest, persist } = rt;
+	const { getQuest, persist, claims: claimReg, dispatchGuard } = rt;
 
 	pi.on("agent_end", async (event, ctx) => {
 		if (rt.isAutoPilotLocked()) return;
@@ -35,13 +44,7 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 			// back to pending and pause so a single Esc stops, and /quest resume picks
 			// up cleanly where it left off.
 			if (wasTurnAborted(event.messages)) {
-				for (const t of quest.steps) {
-					if (t.status === "running") {
-						t.status = "pending";
-						t.startedAt = null;
-						if (t.attempts > 0) t.attempts--; // the aborted attempt didn't run
-					}
-				}
+				rt.cancelActiveSteps(ctx, quest, "agent turn aborted");
 				quest.status = "paused";
 				quest.pauseReason = "Interrupted (Esc). /quest resume to continue.";
 				quest.lastFiredStepIndex = -1;
@@ -54,6 +57,32 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 					);
 				}
 				return;
+			}
+
+			// A completed orchestration turn cannot still own a live tool call. Any
+			// unresolved dispatch consumed its attempt; requeue it within the shared
+			// budget instead of leaving the quest permanently stuck in running.
+			for (let index = 0; index < quest.steps.length; index++) {
+				const step = quest.steps[index];
+				if (!["dispatching", "running"].includes(resolvePhase(step))) continue;
+				if (step.attempts > MAX_RETRIES) {
+					rt.transitionStep(ctx, quest, index, "failed", "dispatch turn ended unresolved");
+					step.completedAt = Date.now();
+					continue;
+				}
+				if (!rt.beginStepRetry(ctx, quest, index, "dispatch turn ended unresolved")) continue;
+				rt.transitionStep(ctx, quest, index, "queued", "bounded unresolved retry");
+			}
+
+			// ── Parallel dispatch (opt-in) ────────────────────────────────────
+			// When parallel is enabled, use batch dispatch instead of the sequential
+			// auto-pilot. fireParallelBatch handles recovery, integration, batch
+			// selection, and dispatch. When it returns false, no dispatchable steps
+			// remain — fall through to the shared completion logic.
+			const parallelEnabled = quest.parallel?.enabled;
+			if (parallelEnabled) {
+				const dispatched = rt.fireParallelBatch(ctx, quest);
+				if (dispatched) return;
 			}
 
 			const next = nextPendingStep(quest);
@@ -111,7 +140,13 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 
 							if (action === "Skip verification for all") {
 								for (const t of verifyingTasks) {
-									t.status = "done";
+									rt.transitionStep(
+										ctx,
+										quest,
+										quest.steps.indexOf(t),
+										"done",
+										"verification skipped by user",
+									);
 									t.verified = true;
 									t.verifyResult = "[SKIP] Verification skipped by user.";
 									t.completedAt = Date.now();
@@ -217,11 +252,13 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 
 						if (action === "Retry failed steps") {
 							for (const t of failedTasks) {
-								t.status = "pending";
+								const index = quest.steps.indexOf(t);
+								if (!rt.beginStepRetry(ctx, quest, index, "user retry")) continue;
 								t.attempts = 0;
 								t.startedAt = null;
 								t.completedAt = null;
 								t.result = null;
+								rt.transitionStep(ctx, quest, index, "queued", "user retry queued");
 							}
 							quest.status = "active";
 							quest.stepsSincePause = 0;
@@ -238,7 +275,7 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 
 						if (action === "Skip all failed") {
 							for (const t of failedTasks) {
-								t.status = "skipped";
+								rt.transitionStep(ctx, quest, quest.steps.indexOf(t), "skipped", "user skipped");
 								t.result = `Skipped by user.`;
 								t.completedAt = Date.now();
 							}
@@ -301,7 +338,7 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 						);
 
 						if (action === "Skip this step") {
-							next.task.status = "skipped";
+							rt.transitionStep(ctx, quest, next.index, "skipped", "stalled step skipped");
 							next.task.result = `Skipped by user after stalling (${quest.sameStepCount} attempts).`;
 							next.task.completedAt = Date.now();
 							quest.lastFiredStepIndex = -1;
@@ -312,7 +349,7 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 						}
 
 						if (action === "Mark as failed") {
-							next.task.status = "failed";
+							rt.transitionStep(ctx, quest, next.index, "failed", "stalled step failed");
 							next.task.result = `Failed by user after stalling (${quest.sameStepCount} attempts).`;
 							next.task.completedAt = Date.now();
 							quest.lastFiredStepIndex = -1;
@@ -360,6 +397,12 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 				});
 
 				if (decision.action === "escalate" && decision.nextRung !== undefined && ladder) {
+					if (!rt.beginStepRetry(ctx, quest, next.index, "attempt budget escalation")) {
+						quest.status = "paused";
+						quest.pauseReason = `Step #${next.index + 1} retry is blocked by retained worktree evidence.`;
+						persist(ctx, quest);
+						return;
+					}
 					const fromRung = next.task.rung;
 					const fromModel =
 						next.task.lastModel ??
@@ -379,7 +422,6 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 							inferred: false,
 						}),
 					];
-					next.task.status = "pending";
 					next.task.attempts = 0;
 					next.task.verifyRetries = 0;
 					next.task.rung = decision.nextRung;
@@ -387,6 +429,7 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 					next.task.startedAt = null;
 					next.task.completedAt = null;
 					next.task.result = `${evidence} Escalating from ${fromModel ?? "previous model"} to rung ${decision.nextRung} (${toModel}).`;
+					rt.transitionStep(ctx, quest, next.index, "queued", "escalated retry queued");
 					quest.lastFiredStepIndex = -1;
 					quest.sameStepCount = 0;
 					persist(ctx, quest);
@@ -403,7 +446,7 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 						evidence,
 					});
 				} else {
-					next.task.status = "failed";
+					rt.transitionStep(ctx, quest, next.index, "failed", "attempt budget exhausted");
 					next.task.result = `Auto-failed after ${MAX_RETRIES + 1} attempts.`;
 					quest.lastFiredStepIndex = -1;
 					quest.sameStepCount = 0;
@@ -463,8 +506,25 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 				}
 			}
 
-			// Fire the next step
-			rt.fireStep(ctx, quest, next.task, next.index);
+			// Fire the next step (sequential path only — parallel dispatch was handled above).
+			if (parallelEnabled) {
+				// In parallel mode, a step that nextPendingStep found but selectDispatchBatch
+				// skipped means there's a write-claim conflict or guard slot contention.
+				// Don't fire it sequentially — pause so the user can investigate.
+				quest.status = "paused";
+				quest.pauseReason = `Step #${next.index + 1} ("${next.task.content}") is ready but was not dispatched by the parallel selector. Possible write-claim conflict. Check quest_claims() or /quest resume.`;
+				quest.lastFiredStepIndex = -1;
+				quest.sameStepCount = 0;
+				persist(ctx, quest);
+				if (ctx.hasUI) {
+					ctx.ui.notify?.(
+						`Quest paused: parallel dispatch could not fire step #${next.index + 1}. Check claim conflicts.`,
+						"warning",
+					);
+				}
+			} else {
+				rt.fireStep(ctx, quest, next.task, next.index);
+			}
 		} catch (e) {
 			console.error("[pi-quest] agent_end handler crashed:", e);
 			const quest = getQuest(ctx.cwd);
@@ -491,9 +551,64 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 	pi.on("session_start", async (_event, ctx) => {
 		const quest = loadQuest(ctx.cwd);
 		rt.setQuest(quest);
+		rt.activity.reset(); // fresh tracker per session
+		rt.claims.reset(); // fresh claim registry per session
+		dispatchGuard.reset(); // fresh dispatch guard per session
+
+		// ── Stale-run recovery ───────────────────────────────────────────
+		if (quest) {
+			const cleanedWorktrees = cleanStaleWorktrees(ctx.cwd, quest.name);
+			if (cleanedWorktrees > 0) {
+				ctx.ui.notify?.(
+					`Cleaned ${cleanedWorktrees} already-integrated Quest worktree(s).`,
+					"info",
+				);
+			}
+			const stalePhases = quest.steps.map((step) => step.phase ?? step.status);
+			const { recovered } = recoverStaleRuns(quest.steps, MAX_RETRIES + 1);
+			if (recovered.length > 0) {
+				for (const index of recovered) {
+					const step = quest.steps[index];
+					rt.recordRun(ctx.cwd, {
+						kind: "phase_transition",
+						taskIndex: index,
+						taskContent: step.content,
+						agent: step.agent,
+						timestamp: step.phaseChangedAt ?? Date.now(),
+						fromPhase: stalePhases[index],
+						toPhase: step.phase,
+						reason: "stale session recovery",
+					});
+				}
+				saveQuest(quest, ctx.cwd);
+				rt.setQuest(quest);
+				ctx.ui.notify?.(
+					`Recovered ${recovered.length} stale step(s) (#${recovered.map((i) => i + 1).join(", #")}) from a previous session.`,
+					"info",
+				);
+			}
+
+			// Stale owned worktrees are deliberately retained: restart cleanup must
+			// never destroy unintegrated evidence.
+			for (const index of recovered) {
+				const step = quest.steps[index];
+				const worktreePath = step.sandboxArtifacts?.worktreePath;
+				if (worktreePath && existsSync(worktreePath)) {
+					rt.transitionStep(ctx, quest, index, "blocked", "stale worktree retained");
+					step.result =
+						`${step.result ?? ""}\n[RECOVERY] Owned worktree retained at ${worktreePath}.`.trim();
+				} else if (step.sandboxArtifacts) {
+					delete step.sandboxArtifacts.worktreePath;
+					step.branchName = null;
+				}
+			}
+			if (recovered.length > 0) saveQuest(quest, ctx.cwd);
+		}
+
 		renderStatus(ctx, quest);
 		writeQuestSessionMeta(ctx.cwd, quest);
 		if (quest?.status === "active") syncQuestToTodo(quest, ctx.cwd);
+		pushActivityUI(ctx, rt);
 
 		if (quest?.status === "active") {
 			ctx.ui.notify(
@@ -527,27 +642,133 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 	pi.on("model_select", async (_event, ctx) => {
 		renderStatus(ctx, rt.getQuest());
 		writeQuestSessionMeta(ctx.cwd, rt.getQuest());
+		pushActivityUI(ctx, rt);
 	});
 
-	// ── Sandbox enforcement ───────────────────────────────────────────────────
-	// Block tool calls that violate an active quest's sandbox policy. This is the
-	// real-enforcement counterpart to the prompt-injected guidance and the
-	// verifier's after-the-fact checks: a denied path / command / network call is
-	// stopped here, at pi's tool-call chokepoint, before it runs. Sub-agent tool
-	// calls don't reach this hook (their isolated session loads no extensions);
-	// they are guarded by guardTools() at spawn time instead.
+	pi.on("session_shutdown", async (_event, ctx) => {
+		clearActivityUI(ctx, rt);
+	});
+
+	// ── Activity panel ────────────────────────────────────────────────────────
+
+	const TRACKED_TOOLS = new Set(["subagent", "quest_delegate"]);
+
+	pi.on("tool_execution_start", async (event, ctx) => {
+		if (!TRACKED_TOOLS.has(event.toolName)) return;
+		const quest = getQuest(ctx.cwd);
+		if (!quest) return;
+		rt.activity.onStart(
+			event.toolCallId,
+			event.toolName as "subagent" | "quest_delegate",
+			event.args,
+			quest,
+		);
+		pushActivityUI(ctx, rt);
+	});
+
+	pi.on("tool_execution_update", async (event, ctx) => {
+		if (!TRACKED_TOOLS.has(event.toolName)) return;
+		rt.activity.onUpdate(event.toolCallId, event.partialResult);
+		pushActivityUI(ctx, rt);
+	});
+
+	pi.on("tool_execution_end", async (event, ctx) => {
+		if (!TRACKED_TOOLS.has(event.toolName)) return;
+		rt.activity.onEnd(
+			event.toolCallId,
+			event.isError,
+			event.isError ? String(event.result?.error ?? event.result ?? "unknown error") : undefined,
+		);
+		pushActivityUI(ctx, rt);
+	});
+
+	// ── Sandbox + write-claim enforcement ────────────────────────────────────
 	pi.on("tool_call", (event, ctx) => {
 		const quest = getQuest(ctx.cwd);
-		if (!quest || quest.status !== "active" || !quest.sandbox) return;
-		const profile = resolveSandboxProfile(quest.sandbox);
-		const decision = evaluateToolCall(
-			profile,
-			event.toolName,
-			event.input as unknown as Record<string, unknown>,
-		);
-		if (decision.block) {
-			ctx.ui.notify?.(decision.reason ?? "Sandbox: tool call blocked.", "warning");
-			return { block: true, reason: decision.reason };
+
+		// ── Sandbox enforcement ───────────────────────────────────────────
+		if (quest && quest.status === "active" && quest.sandbox) {
+			const profile = resolveSandboxProfile(quest.sandbox);
+			const decision = evaluateToolCall(
+				profile,
+				event.toolName,
+				event.input as unknown as Record<string, unknown>,
+			);
+			if (decision.block) {
+				ctx.ui.notify?.(decision.reason ?? "Sandbox: tool call blocked.", "warning");
+				return { block: true, reason: decision.reason };
+			}
+		}
+
+		// ── Write-claim enforcement: pi-minions subagent spawn ────────────
+		if (event.toolName === "subagent" && quest?.status === "active") {
+			const input = event.input as Record<string, unknown> | undefined;
+			const agent = typeof input?.agent === "string" ? input.agent.trim() : "";
+			if (!agent) return;
+
+			const firedIdx = quest.lastFiredStepIndex;
+			if (firedIdx < 0 || firedIdx >= quest.steps.length) return;
+			const fired = quest.steps[firedIdx];
+			if (fired.status !== "running" || fired.agent !== agent) return;
+
+			const claimErr = validateClaims(agent, fired.writeClaim, fired.readClaim);
+			if (claimErr) {
+				ctx.ui.notify?.(claimErr, "error");
+				return { block: true, reason: claimErr };
+			}
+
+			let normalized: string[];
+			try {
+				normalizeClaims(fired.readClaim, ctx.cwd);
+				normalized = normalizeClaims(fired.writeClaim, ctx.cwd);
+			} catch (error) {
+				const reason = error instanceof Error ? error.message : String(error);
+				ctx.ui.notify?.(reason, "error");
+				return { block: true, reason };
+			}
+			if (normalized.length > 0) {
+				const conflict = claimReg.register(ctx.cwd, firedIdx, fired.content, normalized);
+				if (conflict) {
+					const msg =
+						`Write-claim conflict: step #${firedIdx + 1} ("${fired.content}") ` +
+						`wants to write to paths that step #${conflict.stepIndex + 1} ` +
+						`("${conflict.stepContent}") already holds. ` +
+						`Wait for step #${conflict.stepIndex + 1} to complete or abort it first.`;
+					ctx.ui.notify?.(msg, "error");
+					return { block: true, reason: msg };
+				}
+			}
 		}
 	});
+}
+
+// ── Activity UI helpers ──────────────────────────────────────────────────────
+
+export function pushActivityUI(
+	ctx: import("@earendil-works/pi-coding-agent").ExtensionContext,
+	rt2: QuestRuntime,
+): void {
+	if (!ctx.hasUI) return;
+	const quest = rt2.getQuest(ctx.cwd);
+	const snap = quest ? rt2.activity.questSnapshot(quest) : null;
+
+	ctx.ui.setWidget(
+		"quest-activity",
+		rt2.activity.hasActivity || snap ? buildActivityWidgetFn(rt2.activity, snap) : undefined,
+		{ placement: "aboveEditor" },
+	);
+	ctx.ui.setStatus("quest-activity", buildActivityFooter(rt2.activity, snap) ?? undefined);
+	ctx.ui.setWorkingIndicator(buildActivityWorkingIndicator(rt2.activity));
+}
+
+export function clearActivityUI(
+	ctx: import("@earendil-works/pi-coding-agent").ExtensionContext,
+	rt2: QuestRuntime,
+): void {
+	rt2.activity.reset();
+	if (!ctx.hasUI) return;
+	ctx.ui.setWidget("quest-activity", undefined);
+	ctx.ui.setStatus("quest-activity", undefined);
+	ctx.ui.setStatus("quest", undefined);
+	ctx.ui.setWorkingIndicator();
 }

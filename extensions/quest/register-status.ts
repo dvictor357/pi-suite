@@ -9,7 +9,7 @@ import type { QuestRuntime } from "./runtime";
 import { readAllEvalEntries, computeEvalTimeSeries } from "../../core";
 
 export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
-	const { getQuest, persist } = rt;
+	const { getQuest, persist, claims: claimReg } = rt;
 
 	pi.registerTool({
 		name: "quest_status",
@@ -31,9 +31,24 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 			}
 			renderStatus(ctx, quest);
 			writeQuestSessionMeta(ctx.cwd, quest);
+
+			// Append active write claims to status output for visibility.
+			const active = claimReg.active(ctx.cwd);
+			const claimsBlock =
+				active.length > 0
+					? [
+							``,
+							`━━━ 🔒 ACTIVE WRITE CLAIMS (${active.length}) ━━━━━━━━━━━━━━━`,
+							...active.map(
+								(c) =>
+									`  Step #${c.stepIndex + 1} "${c.stepContent}" → ${c.paths.map((p) => `\`${p}\``).join(", ")}`,
+							),
+						].join("\n")
+					: "";
+
 			return {
-				content: [{ type: "text", text: formatQuestStatus(quest) }],
-				details: { quest },
+				content: [{ type: "text", text: formatQuestStatus(quest) + claimsBlock }],
+				details: { quest, activeClaims: active },
 			};
 		},
 	});
@@ -446,6 +461,41 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 			return {
 				content: [{ type: "text", text: lines.join("\n") }],
 				details: { series },
+			};
+		},
+	});
+
+	// ── quest_claims ────────────────────────────────────────────────────────
+
+	pi.registerTool({
+		name: "quest_claims",
+		label: "Quest Write Claims",
+		description: [
+			"Show active write claims registered by currently running steps.",
+			"Use this to diagnose write-claim conflicts — when a step delegation is",
+			"rejected, the conflicting step and its claimed paths are listed here.",
+		].join(" "),
+		parameters: Type.Object({}),
+		async execute(_id, _params, _signal, _onUpdate, ctx) {
+			const active = claimReg.active(ctx.cwd);
+			if (active.length === 0) {
+				return {
+					content: [{ type: "text", text: "No active write claims." }],
+					details: { claims: [] },
+				};
+			}
+			const lines = [
+				`## Active Write Claims (${active.length})`,
+				"",
+				...active.map(
+					(c) =>
+						`- **Step #${c.stepIndex + 1}** "${c.stepContent}" (registered ${new Date(c.registeredAt).toISOString()})
+  Paths: ${c.paths.map((p) => `\`${p}\``).join(", ")}`,
+				),
+			];
+			return {
+				content: [{ type: "text", text: lines.join("\n") }],
+				details: { claims: active },
 			};
 		},
 	});
