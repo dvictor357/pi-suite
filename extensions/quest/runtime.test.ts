@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createQuestRuntime } from "./runtime";
-import { emptyQuest, rememberAgentModel, rememberModelLadder, saveQuest } from "./storage";
+import { emptyQuest, saveQuest } from "./storage";
 import type { Quest, QuestStep } from "./types";
 
 /** A QuestStep with all required fields defaulted; override what a test cares about. */
@@ -240,109 +240,6 @@ describe("fireNextTask", () => {
 		try {
 			assert.equal(h.rt.fireNextTask(h.ctx), false);
 			assert.equal(h.steers.length, 0);
-		} finally {
-			h.cleanup();
-		}
-	});
-});
-
-describe("fireStep ladder init + lastModel stamp", () => {
-	test("ladder-eligible worker: initializes rung 0 and stamps lastModel on first fire", () => {
-		const h = fakeRuntime();
-		try {
-			rememberModelLadder(h.cwd, {
-				rungs: ["ornith-1.0", "mythos-5"],
-				roles: ["worker"],
-				approvedAt: Date.now(),
-			});
-			const quest = seedActive(h.rt, h.cwd, [
-				makeTask({ content: "implement feature", agent: "worker" }),
-			]);
-
-			assert.equal(h.rt.fireNextTask(h.ctx), true);
-			const step = quest.steps[0];
-			assert.equal(step.rung, 0);
-			assert.equal(step.lastModel, "ornith-1.0");
-			assert.equal(h.steers.length, 1);
-			assert.match(h.steers[0], /ornith-1\.0/);
-			assert.match(h.steers[0], /rung 1\/2/);
-		} finally {
-			h.cleanup();
-		}
-	});
-
-	test("explicit step.model bypasses ladder and stamps that model as lastModel", () => {
-		const h = fakeRuntime();
-		try {
-			rememberModelLadder(h.cwd, {
-				rungs: ["ornith-1.0", "mythos-5"],
-				roles: ["worker"],
-				approvedAt: Date.now(),
-			});
-			const quest = seedActive(h.rt, h.cwd, [
-				makeTask({ content: "pinned model", agent: "worker", model: "claude-opus" }),
-			]);
-
-			assert.equal(h.rt.fireNextTask(h.ctx), true);
-			const step = quest.steps[0];
-			assert.equal(step.rung, undefined);
-			assert.equal(step.lastModel, "claude-opus");
-			assert.match(h.steers[0], /claude-opus/);
-			assert.doesNotMatch(h.steers[0], /rung /);
-		} finally {
-			h.cleanup();
-		}
-	});
-
-	test("scout is not laddered; uses remembered model for lastModel", () => {
-		const h = fakeRuntime();
-		try {
-			rememberModelLadder(h.cwd, {
-				rungs: ["ornith-1.0", "mythos-5"],
-				approvedAt: Date.now(),
-			});
-			rememberAgentModel(h.cwd, "scout", {
-				model: "flash-scout",
-				timestamp: Date.now(),
-			});
-			const quest = seedActive(h.rt, h.cwd, [
-				makeTask({ content: "explore codebase", agent: "scout" }),
-			]);
-
-			assert.equal(h.rt.fireNextTask(h.ctx), true);
-			const step = quest.steps[0];
-			assert.equal(step.rung, undefined);
-			assert.equal(step.lastModel, "flash-scout");
-			assert.match(h.steers[0], /flash-scout/);
-		} finally {
-			h.cleanup();
-		}
-	});
-
-	test("re-fire of a step with rung already set does not re-pick start", () => {
-		const h = fakeRuntime();
-		try {
-			rememberModelLadder(h.cwd, {
-				rungs: ["ornith-1.0", "mythos-5"],
-				roles: ["worker"],
-				approvedAt: Date.now(),
-			});
-			// Pretend a prior escalation left the step on rung 1, requeued.
-			const quest = seedActive(h.rt, h.cwd, [
-				makeTask({
-					content: "retry after escalate",
-					agent: "worker",
-					rung: 1,
-					escalations: 1,
-					phase: "queued",
-					status: "pending",
-				}),
-			]);
-
-			assert.equal(h.rt.fireNextTask(h.ctx), true);
-			assert.equal(quest.steps[0].rung, 1);
-			assert.equal(quest.steps[0].lastModel, "mythos-5");
-			assert.match(h.steers[0], /mythos-5/);
 		} finally {
 			h.cleanup();
 		}
