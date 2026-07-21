@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import {
 	CONTEXT_BUDGET,
 	budgetForModel,
+	stepContextBudgetForModel,
+	fitSectionsToBudget,
 	isSmallModel,
 	isConstrainedModel,
 	verbosityForModel,
@@ -108,5 +110,132 @@ describe("clampToBudget", () => {
 		const out = clampToBudget("x".repeat(500), 50);
 		assert.ok(out.length <= 50);
 		assert.match(out, /…$/);
+	});
+});
+
+describe("stepContextBudgetForModel", () => {
+	test("unknown model gets the full step-context base", () => {
+		assert.equal(stepContextBudgetForModel(undefined), CONTEXT_BUDGET.stepContextBudget);
+		assert.equal(stepContextBudgetForModel({}), CONTEXT_BUDGET.stepContextBudget);
+	});
+
+	test("large ample-context model is never scaled down", () => {
+		assert.equal(
+			stepContextBudgetForModel({ id: "claude-opus-4-8", contextWindow: 200000 }),
+			CONTEXT_BUDGET.stepContextBudget,
+		);
+	});
+
+	test("tiny contextWindow shrinks the multi-block budget", () => {
+		const b = stepContextBudgetForModel({ id: "local-model", contextWindow: 8192 });
+		assert.ok(b < CONTEXT_BUDGET.stepContextBudget);
+		assert.equal(b, Math.round(CONTEXT_BUDGET.stepContextBudget * CONTEXT_BUDGET.lowContextScale));
+	});
+
+	test("respects a custom config override", () => {
+		const cfg = {
+			...CONTEXT_BUDGET,
+			stepContextBudget: 1000,
+			smallModelScale: 0.5,
+			minBudget: 100,
+		};
+		assert.equal(stepContextBudgetForModel({ id: "haiku" }, cfg), 500);
+	});
+});
+
+describe("fitSectionsToBudget", () => {
+	const task = "## Task\nimplement auth";
+	const failure = "## Failure\ntests failed on login";
+	const deps = "## Prior results\nuse AuthService";
+	const awareness = "## Project Awareness\nstack: ts";
+	const format = "## Format\nrun the formatter";
+
+	test("returns all sections when under budget", () => {
+		const out = fitSectionsToBudget(
+			[
+				{ text: task, priority: 0 },
+				{ text: failure, priority: 1 },
+				{ text: deps, priority: 2 },
+				{ text: awareness, priority: 3 },
+				{ text: format, priority: 4 },
+			],
+			10_000,
+		);
+		assert.match(out, /implement auth/);
+		assert.match(out, /tests failed/);
+		assert.match(out, /AuthService/);
+		assert.match(out, /stack: ts/);
+		assert.match(out, /formatter/);
+	});
+
+	test("drops whole low-priority sections first (format before awareness before deps)", () => {
+		// Budget that fits task + failure + deps but not awareness/format.
+		const core = [task, failure, deps].join("\n\n");
+		const budget = core.length + 5; // tiny headroom, not enough for more sections
+		const out = fitSectionsToBudget(
+			[
+				{ text: task, priority: 0 },
+				{ text: failure, priority: 1 },
+				{ text: deps, priority: 2 },
+				{ text: awareness, priority: 3 },
+				{ text: format, priority: 4 },
+			],
+			budget,
+		);
+		assert.match(out, /implement auth/);
+		assert.match(out, /tests failed/);
+		assert.match(out, /AuthService/);
+		assert.doesNotMatch(out, /Project Awareness/);
+		assert.doesNotMatch(out, /formatter/);
+		assert.ok(out.length <= budget);
+	});
+
+	test("priority order: drops format first, then awareness, keeps task", () => {
+		const sections = [
+			{ text: task, priority: 0 },
+			{ text: failure, priority: 1 },
+			{ text: deps, priority: 2 },
+			{ text: awareness, priority: 3 },
+			{ text: format, priority: 4 },
+		];
+		// Fit only task + failure.
+		const budget = [task, failure].join("\n\n").length + 2;
+		const out = fitSectionsToBudget(sections, budget);
+		assert.match(out, /implement auth/);
+		assert.match(out, /tests failed/);
+		assert.doesNotMatch(out, /AuthService/);
+		assert.doesNotMatch(out, /Project Awareness/);
+		assert.doesNotMatch(out, /formatter/);
+	});
+
+	test("never mid-line cuts when clamping residual priority-0 text", () => {
+		const longTask = [
+			"## Task",
+			"alpha line of work",
+			"beta line of work",
+			"gamma line of work",
+		].join("\n");
+		const out = fitSectionsToBudget([{ text: longTask, priority: 0 }], 40);
+		assert.ok(out.length <= 40);
+		const body = out.replace(/\n…$/, "");
+		for (const line of body.split("\n")) {
+			assert.ok(
+				longTask.split("\n").includes(line) || line === "",
+				`partial line leaked: ${JSON.stringify(line)}`,
+			);
+		}
+	});
+
+	test("skips empty sections", () => {
+		const out = fitSectionsToBudget(
+			[
+				{ text: task, priority: 0 },
+				{ text: "", priority: 1 },
+				{ text: "   ", priority: 2 },
+				{ text: format, priority: 4 },
+			],
+			10_000,
+		);
+		assert.equal(out, `${task}\n\n${format}`);
 	});
 });

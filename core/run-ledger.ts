@@ -68,7 +68,7 @@ export interface RunEvent {
 	toModel?: string;
 	/** "escalate": ladder rung index the task moves to. */
 	rung?: number;
-	/** "checks" / "verify_fail": typed failure reason (see FailureCode). */
+	/** "checks" / "verify_fail" / "task_fail": typed failure reason (see FailureCode). */
 	failureCode?: FailureCode;
 	/**
 	 * "checks": compact per-check outcome summary, e.g.
