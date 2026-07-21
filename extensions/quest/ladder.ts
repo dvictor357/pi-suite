@@ -81,6 +81,106 @@ export function rungModel(ladder: ModelLadderConfig, rung: number): string {
 	return ladder.rungs[Math.max(0, Math.min(rung, ladder.rungs.length - 1))];
 }
 
+// ── Dispatch preparation (auto-pilot + delegate) ─────────────────────────────
+
+/**
+ * Result of {@link prepareStepDispatchModel}. Pure decision only — callers stamp
+ * `rung` / `lastModel` onto the step and persist so escalation and evals see them.
+ */
+export interface PrepareStepDispatchResult {
+	/** Resolved model id for this dispatch, if any source yields one. */
+	model?: string;
+	/** Which precedence tier produced {@link model}. */
+	source?: "task" | "ladder" | "memory";
+	/**
+	 * Ladder rung to stamp when the ladder governs this step. Undefined when the
+	 * ladder does not apply (explicit model, judge role, or no approved ladder).
+	 */
+	rung?: number;
+	/** True when the step had no rung yet and a start rung was just chosen. */
+	rungInitialized: boolean;
+	/**
+	 * Model id to stamp as `step.lastModel` so eval entries and failure briefs
+	 * always know what ran — even when the source was ladder or memory, not an
+	 * explicit step.model override.
+	 */
+	lastModel?: string;
+}
+
+/**
+ * Prepare model + ladder state for auto-pilot (or `quest_delegate`) dispatch.
+ *
+ * Pure: does not mutate the step. On first dispatch of a ladder-eligible step,
+ * picks a start rung via {@link pickStartRung} and returns the rung's model.
+ * Explicit `step.model` and judge/exploration roles bypass the ladder entirely
+ * ({@link ladderApplies}). Callers must stamp `rung` / `lastModel` and persist
+ * so later verify-fail escalation and eval stats see them.
+ */
+export function prepareStepDispatchModel(
+	step: { agent: string; model?: string; rung?: number },
+	opts: {
+		ladder: ModelLadderConfig | null | undefined;
+		evalStats: EvalStatsIndex;
+		rememberedModel?: string;
+		cfg: LadderConfig;
+	},
+): PrepareStepDispatchResult {
+	const { ladder, evalStats, rememberedModel, cfg } = opts;
+	if (ladder && ladderApplies(ladder, step.agent, step.model, cfg)) {
+		const rungInitialized = step.rung === undefined;
+		const rung = rungInitialized
+			? pickStartRung(ladder, step.agent, evalStats, cfg)
+			: (step.rung as number);
+		const model = rungModel(ladder, rung);
+		return {
+			model,
+			source: "ladder",
+			rung,
+			rungInitialized,
+			lastModel: model,
+		};
+	}
+	const fromTask = step.model?.trim();
+	if (fromTask) {
+		return {
+			model: fromTask,
+			source: "task",
+			rungInitialized: false,
+			lastModel: fromTask,
+		};
+	}
+	const fromMemory = rememberedModel?.trim();
+	if (fromMemory) {
+		return {
+			model: fromMemory,
+			source: "memory",
+			rungInitialized: false,
+			lastModel: fromMemory,
+		};
+	}
+	return { rungInitialized: false };
+}
+
+/**
+ * Stamp {@link prepareStepDispatchModel} results onto a step. Returns whether
+ * any field changed so callers can skip a redundant persist.
+ */
+export function applyStepDispatchModel(
+	step: { rung?: number; lastModel?: string },
+	prepared: PrepareStepDispatchResult,
+): boolean {
+	let changed = false;
+	if (prepared.rung !== undefined && step.rung !== prepared.rung) {
+		step.rung = prepared.rung;
+		changed = true;
+	}
+	if (prepared.lastModel !== undefined && step.lastModel !== prepared.lastModel) {
+		step.lastModel = prepared.lastModel;
+		changed = true;
+	}
+	return changed;
+}
+
 // ── Adaptive start rung ──────────────────────────────────────────────────────
 
 /**

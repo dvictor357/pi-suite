@@ -18,7 +18,7 @@ import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 
 import type { Quest, QuestStep } from "./types";
-import { loadQuest, saveQuest } from "./storage";
+import { loadAgentModels, loadModelLadder, loadQuest, saveQuest } from "./storage";
 import { buildSteeringMessage, nextPendingStep } from "./steering";
 import {
 	createRunLedger,
@@ -49,7 +49,12 @@ import { QuestKanban, type KanbanActions } from "./kanban";
 import { hasCodebaseTool } from "./codebase";
 import { ActivityTracker } from "./activity-panel";
 import { buildStepContext, collectDependencyHandoffs } from "./context-broker";
-import { briefBudgetForModel, renderFailureBriefs } from "./ladder";
+import {
+	applyStepDispatchModel,
+	briefBudgetForModel,
+	prepareStepDispatchModel,
+	renderFailureBriefs,
+} from "./ladder";
 import { resolveSandboxProfile } from "./sandbox";
 import { WriteClaimRegistry } from "./write-claim";
 import { DispatchGuard, checkTimeout, resolvePhase, validateTransition } from "./phase-loop";
@@ -462,8 +467,19 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 			const base = captureBaseline(ctx.cwd);
 			if (base.sha) step.baselineSha = base.sha;
 		}
+		// First auto-pilot dispatch of a ladder-eligible step: pick start rung,
+		// resolve model, stamp lastModel so steering/evals/escalation all see them.
+		// Explicit step.model and judge roles bypass the ladder (prepareStepDispatchModel).
+		const prepared = prepareStepDispatchModel(step, {
+			ladder: loadModelLadder(ctx.cwd),
+			evalStats: getEvalStats(ctx.cwd),
+			rememberedModel: loadAgentModels(ctx.cwd)[step.agent]?.model,
+			cfg: LADDER,
+		});
+		applyStepDispatchModel(step, prepared);
 		quest.lastFiredStepIndex = index;
 		quest.stepsSincePause++;
+		// transitionStep → running persists rung/lastModel with the rest of the step.
 		if (!transitionStep(ctx, quest, index, "running")) {
 			dispatchGuard.release(ctx.cwd, index);
 			return;
@@ -616,6 +632,15 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 			step.startedAt = Date.now();
 			const base = captureBaseline(created);
 			if (base.sha) step.baselineSha = base.sha;
+			// Ladder init + lastModel stamp before batch steer so each step's model
+			// is persisted and buildBatchSteering can resolve via rung / lastModel.
+			const prepared = prepareStepDispatchModel(step, {
+				ladder: loadModelLadder(ctx.cwd),
+				evalStats: getEvalStats(ctx.cwd),
+				rememberedModel: loadAgentModels(ctx.cwd)[step.agent]?.model,
+				cfg: LADDER,
+			});
+			applyStepDispatchModel(step, prepared);
 			if (!transitionStep(ctx, quest, index, "running", "parallel subagent dispatched")) continue;
 			dispatched.push(index);
 		}
