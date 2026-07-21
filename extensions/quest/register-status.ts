@@ -6,7 +6,12 @@ import { formatQuestStatus } from "./steering";
 import { listArchives, saveQuest } from "./storage";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import type { QuestRuntime } from "./runtime";
-import { readAllEvalEntries, computeEvalTimeSeries } from "../../core";
+import {
+	readAllEvalEntries,
+	computeEvalStats,
+	computeEvalTimeSeries,
+	formatEvalStatsReport,
+} from "../../core";
 
 export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 	const { getQuest, persist, claims: claimReg } = rt;
@@ -418,49 +423,23 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 		name: "quest_eval_stats",
 		label: "Quest Eval Stats",
 		description: [
-			"Show time-series eval stats for this project: daily pass rates, average durations,",
-			"and model-ladder escalations aggregated from all past quest eval logs.",
-			"This reads the append-only eval JSONL trail so you can spot trends over time.",
+			"Show eval stats for this project: per-(agent, model) verified pass rates",
+			"and a daily time series of pass rates, average durations, and model-ladder",
+			"escalations, aggregated from all past quest eval logs.",
 		].join(" "),
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
 			const entries = readAllEvalEntries(ctx.cwd);
+			const roleStats = computeEvalStats(entries);
 			const series = computeEvalTimeSeries(entries);
-
-			if (series.buckets.length === 0) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: "No eval data recorded yet. Eval entries are written as quest tasks complete.",
-						},
-					],
-					details: { series },
-				};
-			}
-
-			const lines: string[] = [
-				`## Eval Time Series (${series.buckets.length} days)`,
-				"",
-				`| Date       | Samples | Pass % | Avg Dur | Escalations |`,
-				`|------------|---------|--------|---------|-------------|`,
-			];
-			for (const b of series.buckets) {
-				const pct = `${Math.round(b.passRate * 100)}%`.padStart(5);
-				const dur =
-					b.avgDurationMs >= 60_000
-						? `${(b.avgDurationMs / 60_000).toFixed(1)}min`
-						: b.avgDurationMs >= 1000
-							? `${(b.avgDurationMs / 1000).toFixed(1)}s`
-							: `${b.avgDurationMs}ms`;
-				lines.push(
-					`| ${b.date} | ${String(b.samples).padStart(7)} | ${pct} | ${dur.padStart(6)} | ${String(b.escalations).padStart(9)} |`,
-				);
-			}
+			const text = formatEvalStatsReport(roleStats, series);
 
 			return {
-				content: [{ type: "text", text: lines.join("\n") }],
-				details: { series },
+				content: [{ type: "text", text }],
+				details: {
+					roleStats: [...roleStats.values()],
+					series,
+				},
 			};
 		},
 	});

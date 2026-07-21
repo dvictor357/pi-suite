@@ -34,7 +34,7 @@ config and the quest auto-pilot loop.
 | **Task ledger**           | `todo_write` with delegation; `/todo` command; quest steps synced as todo items                                                                                                                           |
 | **Memory & conventions**  | `memory_status`, `memory_project`, `memory_user`; `/memory` command; auto-detected tech stack + saved conventions                                                                                         |
 | **Memory graph**          | `memory_graph` — list/add/link/remove typed nodes (loop-pattern, sandbox-log, artifact-set, design-decision, knowledge, eval-result) and edges on the project knowledge graph                             |
-| **Eval time-series**      | `quest_eval_stats` — reads the append-only eval JSONL trail and renders a per-day table of pass rates, average durations, and model-ladder escalations                                                    |
+| **Eval stats**            | `quest_eval_stats` — per-(agent, model) verified pass rates plus a daily table of pass rates, average durations, and model-ladder escalations from the eval JSONL trail                                   |
 | **Git tracking**          | `quest_commit` to record per-step commits; `quest_git_summary` for a PR-ready change log with auto-branch and auto-PR hints                                                                               |
 | **Research memory**       | `quest_memory_save` stores findings keyed by topic; mirrored to project memory for cross-quest awareness                                                                                                  |
 | **Decision points**       | `quest_decide` presents tradeoff options to the user during planning or execution                                                                                                                         |
@@ -48,26 +48,26 @@ inspection.
 
 ### Quest (pi-quest)
 
-| Tool                  | Purpose                                                       |
-| --------------------- | ------------------------------------------------------------- |
-| `quest_create`        | Create a new quest from a goal                                |
-| `quest_plan`          | Save a step breakdown; replace all existing steps             |
-| `quest_approve`       | Approve pending plan and start execution                      |
-| `quest_decide`        | Ask the user a tradeoff question (branch, ambiguity)          |
-| `quest_update`        | Mark a step done/failed/skipped with a result summary         |
-| `quest_delegate`      | Legacy guarded fallback for sandboxed Quest steps             |
-| `quest_assign_model`  | Approve a role's model and optional thinking level            |
-| `quest_assign_ladder` | Propose a cheap→frontier model ladder for execution roles     |
-| `quest_status`        | Show current quest, steps, and progress                       |
-| `quest_task_detail`   | Full detail for one step (context, result, attempts, timing)  |
-| `quest_step_detail`   | Alias for `quest_task_detail` (prefer `step` naming)          |
-| `quest_history`       | Browse recently completed quests                              |
-| `quest_abort`         | Permanently archive and clear the current quest               |
-| `quest_commit`        | Record a git commit as a deliverable for a step               |
-| `quest_git_summary`   | PR-ready change log with auto-branch/auto-PR hints            |
-| `quest_team`          | List available team configs                                   |
-| `quest_memory_save`   | Save a research finding keyed by topic                        |
-| `quest_eval_stats`    | Daily time-series table of pass rates, durations, escalations |
+| Tool                  | Purpose                                                      |
+| --------------------- | ------------------------------------------------------------ |
+| `quest_create`        | Create a new quest from a goal                               |
+| `quest_plan`          | Save a step breakdown; replace all existing steps            |
+| `quest_approve`       | Approve pending plan and start execution                     |
+| `quest_decide`        | Ask the user a tradeoff question (branch, ambiguity)         |
+| `quest_update`        | Mark a step done/failed/skipped with a result summary        |
+| `quest_delegate`      | Legacy guarded fallback for sandboxed Quest steps            |
+| `quest_assign_model`  | Approve a role's model and optional thinking level           |
+| `quest_assign_ladder` | Propose a cheap→frontier model ladder for execution roles    |
+| `quest_status`        | Show current quest, steps, and progress                      |
+| `quest_task_detail`   | Full detail for one step (context, result, attempts, timing) |
+| `quest_step_detail`   | Alias for `quest_task_detail` (prefer `step` naming)         |
+| `quest_history`       | Browse recently completed quests                             |
+| `quest_abort`         | Permanently archive and clear the current quest              |
+| `quest_commit`        | Record a git commit as a deliverable for a step              |
+| `quest_git_summary`   | PR-ready change log with auto-branch/auto-PR hints           |
+| `quest_team`          | List available team configs                                  |
+| `quest_memory_save`   | Save a research finding keyed by topic                       |
+| `quest_eval_stats`    | Role/model pass rates + daily time series from eval logs     |
 
 ### Todo (pi-todo)
 
@@ -215,8 +215,9 @@ The per-task eval audit trail (`core/eval-logging.ts`) records every terminal st
 reads that trail and produces two views:
 
 - **Per-role/model pass rates** (`computeEvalStats`) — powers the adaptive ladder start-rung
-  choice.
-- **Daily time-series** (`computeEvalTimeSeries`) — exposed via `quest_eval_stats`: a
+  choice, and is rendered by `quest_eval_stats` as a `(agent, model, samples, verified pass %)`
+  table.
+- **Daily time-series** (`computeEvalTimeSeries`) — also exposed via `quest_eval_stats`: a
   markdown table of per-day pass rates, average step durations, and total model-ladder
   escalations, so you can spot trends over time.
 

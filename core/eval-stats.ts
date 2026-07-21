@@ -243,3 +243,82 @@ export function computeEvalTimeSeries(entries: unknown[]): EvalTimeSeries {
 
 	return { buckets };
 }
+
+// ── Formatting (pure; unit-testable without tool registration) ───────────────
+
+/** Format a 0–1 rate as a rounded percentage string (e.g. "67%"). */
+function formatPassPct(rate: number): string {
+	return `${Math.round(rate * 100)}%`;
+}
+
+/** Compact wall-clock duration for table cells. */
+function formatDurationMs(ms: number): string {
+	if (ms >= 60_000) return `${(ms / 60_000).toFixed(1)}min`;
+	if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+	return `${ms}ms`;
+}
+
+/**
+ * Stable sort of role/model stats: agent ASC, then model ASC, then samples DESC.
+ * Deterministic so formatted output is snapshot-testable.
+ */
+export function sortRoleModelStats(index: EvalStatsIndex): RoleModelStats[] {
+	return [...index.values()].sort((a, b) => {
+		const byAgent = a.agent.localeCompare(b.agent);
+		if (byAgent !== 0) return byAgent;
+		const byModel = a.model.localeCompare(b.model);
+		if (byModel !== 0) return byModel;
+		return b.samples - a.samples;
+	});
+}
+
+/**
+ * Render markdown tables for role/model verified-pass rates and the daily
+ * time series. Empty when both views have no data — callers can surface a
+ * clear empty-project message from that.
+ *
+ * Pure: no I/O. Unit-testable without quest tool registration.
+ */
+export function formatEvalStatsReport(index: EvalStatsIndex, series: EvalTimeSeries): string {
+	const roleRows = sortRoleModelStats(index);
+	const hasRoles = roleRows.length > 0;
+	const hasSeries = series.buckets.length > 0;
+
+	if (!hasRoles && !hasSeries) {
+		return "No eval data recorded yet. Eval entries are written as quest tasks complete.";
+	}
+
+	const sections: string[] = [];
+
+	if (hasRoles) {
+		const lines: string[] = [
+			`## Role / Model Pass Rates (${roleRows.length} pairs)`,
+			"",
+			`| Agent | Model | Samples | Verified Pass % |`,
+			`|-------|-------|---------|-----------------|`,
+		];
+		for (const r of roleRows) {
+			lines.push(`| ${r.agent} | ${r.model} | ${r.samples} | ${formatPassPct(r.passRate)} |`);
+		}
+		sections.push(lines.join("\n"));
+	}
+
+	if (hasSeries) {
+		const lines: string[] = [
+			`## Eval Time Series (${series.buckets.length} days)`,
+			"",
+			`| Date       | Samples | Pass % | Avg Dur | Escalations |`,
+			`|------------|---------|--------|---------|-------------|`,
+		];
+		for (const b of series.buckets) {
+			const pct = formatPassPct(b.passRate).padStart(5);
+			const dur = formatDurationMs(b.avgDurationMs);
+			lines.push(
+				`| ${b.date} | ${String(b.samples).padStart(7)} | ${pct} | ${dur.padStart(6)} | ${String(b.escalations).padStart(9)} |`,
+			);
+		}
+		sections.push(lines.join("\n"));
+	}
+
+	return sections.join("\n\n");
+}

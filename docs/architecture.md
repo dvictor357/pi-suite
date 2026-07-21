@@ -89,21 +89,30 @@ rules, provides query/map/impact functions, and registers the `codebase` tool.
 This keeps scanner/cache/query/tool ownership in `pi-minions` while letting `pi-quest`
 use the stable cache/tool contract for orchestration decisions.
 
-## Eval time-series and memory graph
+## Eval stats and memory graph
 
 Two additive observability features built on the shared contract:
 
-- **Eval time-series** (`core/eval-stats.ts`): `computeEvalTimeSeries` reads the append-only
-  eval JSONL trail and produces daily buckets with pass rates, average durations, and
-  model-ladder escalation counts. Exposed via `quest_eval_stats` in the quest extension.
-  Pure Node — no new deps — reusing the existing `coerce` helpers for defensive reading
-  of untrusted eval rows.
+- **Eval stats** (`core/eval-stats.ts`): `computeEvalStats` aggregates per-(agent, model)
+  verified pass rates (used by the model ladder and shown in `quest_eval_stats`);
+  `computeEvalTimeSeries` produces daily buckets with pass rates, average durations, and
+  model-ladder escalation counts. Both views are formatted by `formatEvalStatsReport` and
+  exposed via `quest_eval_stats` in the quest extension. Pure Node — no new deps — reusing
+  the existing `coerce` helpers for defensive reading of untrusted eval rows.
 
 - **Memory graph** (`core/contract.ts` `MemoryGraph`): typed nodes (loop-pattern,
   sandbox-log, artifact-set, design-decision, knowledge, eval-result) and directed edges
   (supports, produced, derived-from, supersedes, relates-to) stored additively on `ProjectMemory.graph`.
   Managed via `memory_graph` (`list | add | link | remove`) in pi-memory. Preserved across
   rescans alongside other quest-owned foreign fields via `withForeignFromDisk`.
+
+  **Read path (pi-quest):** `extensions/quest/memory-graph-read.ts` selects a budgeted set of
+  non-eval nodes (`selectGraphNodesForPrompt`) and renders them with line-safe
+  `clampToBudget` (`renderGraphContextBlock`). Injected into:
+  - Project awareness (`compactAwarenessBlock` in `todo-sync.ts`) — top N recent preferred
+    kinds; constrained models get fewer nodes.
+  - `quest_plan` step context — 1–2 keyword-overlapping nodes via
+    `enrichStepsWithMemoryGraph`. Eval-result is excluded from prompt dumps by default.
 
 ### Retrieval ranking (read-side, owned by pi-quest)
 
@@ -237,10 +246,10 @@ Key boundaries:
   pi-minions can enforce Quest's sandbox policy at its own process/tool boundary.
 
 No default rung list ships in the repo; hard-coded model catalogs rot. The feature is inert
-until a project approves a ladder. `computeEvalTimeSeries` in `core/eval-stats.ts` provides
-a daily-view companion: per-day pass rates, average durations, and escalation counts —
-exposed via `quest_eval_stats` in the quest extension — so trends can be spotted without
-reading the raw JSONL lines.
+until a project approves a ladder. `quest_eval_stats` surfaces both the per-(agent, model)
+verified pass rates (`computeEvalStats`) that the ladder already uses and a daily time series
+(`computeEvalTimeSeries`: pass rates, average durations, escalation counts) so trends can be
+spotted without reading the raw JSONL lines.
 
 ## Task → Step rename (completed)
 
