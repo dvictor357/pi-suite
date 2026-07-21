@@ -5,9 +5,17 @@ import {
 	todoListPath as todoPath,
 	budgetForModel,
 	clampToBudget,
+	isConstrainedModel,
 	type BudgetModelInfo,
+	type MemoryGraph,
 } from "../../core";
 import type { Quest, QuestStep, SyncedTodoItem, SyncedTodoList } from "./types";
+import {
+	CONSTRAINED_MAX_AWARENESS_NODES,
+	DEFAULT_MAX_AWARENESS_NODES,
+	renderGraphContextBlock,
+	selectGraphNodesForPrompt,
+} from "./memory-graph-read";
 
 export { todoPath };
 
@@ -163,6 +171,27 @@ export function compactAwarenessBlock(cwd: string, model?: BudgetModelInfo): str
 			lines.push(
 				`Todo: ${completed}/${total} done${inProgress ? ` · ${inProgress} active` : ""}${delegated ? ` · ${delegated} delegated` : ""}`,
 			);
+		}
+
+		// Budgeted memory-graph retrieval: top N recent non-eval nodes (fewer on
+		// constrained models). Eval-result is excluded from the prompt dump.
+		const graph = memory?.graph as MemoryGraph | undefined;
+		if (graph?.nodes?.length) {
+			const maxNodes = isConstrainedModel(model)
+				? CONSTRAINED_MAX_AWARENESS_NODES
+				: DEFAULT_MAX_AWARENESS_NODES;
+			const selected = selectGraphNodesForPrompt(graph, {
+				maxNodes,
+				excludeEvalResults: true,
+			});
+			if (selected.length) {
+				// Reserve a slice of the total budget for the graph section; the
+				// whole awareness block is clamped again below.
+				const totalBudget = budgetForModel(model);
+				const graphBudget = Math.max(120, Math.floor(totalBudget * 0.35));
+				const graphBlock = renderGraphContextBlock(selected, graphBudget);
+				if (graphBlock) lines.push(graphBlock);
+			}
 		}
 
 		const block = lines.length ? `\n\n## Project Awareness\n${lines.join("\n")}` : "";
