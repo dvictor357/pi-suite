@@ -64,7 +64,7 @@ extensions/
     register-planning.ts  quest_plan, quest_update, quest_approve
     register-status.ts    quest_status/commit/git_summary/team/history/memory_save
     register-delegate.ts  quest_assign_model/delegate/abort/task_detail/step_detail
-    register-events.ts    agent_end auto-pilot adapter, session_start, model_select, sandbox tool_call hook
+    register-events.ts    agent_end auto-pilot adapter (handleAgentEnd + crash recovery), session_start, model_select, sandbox tool_call hook
     auto-pilot.ts     Pure decideAfterAgentEnd (abort/requeue/stall/burst/complete/escalate)
     register-command.ts   /quest command + kanban board
     sandbox-guard.ts  evaluateToolCall: per-call block/allow decision (real enforcement)

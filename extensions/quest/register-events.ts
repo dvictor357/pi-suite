@@ -35,85 +35,160 @@ import {
 	type UnresolvedAction,
 } from "./auto-pilot";
 
+/** Minimal shape of the pi `agent_end` event used by the auto-pilot adapter. */
+export type AgentEndEvent = {
+	messages?: readonly unknown[];
+};
+
+/**
+ * Optional test seam for {@link handleAgentEnd}. Production callers omit this;
+ * crash-path tests inject `runBody` that throws mid-handler.
+ */
+export type AgentEndOptions = {
+	/**
+	 * When set, replaces the normal auto-pilot body inside the try block.
+	 * Used by tests to force a throw without mocking pure decision helpers.
+	 */
+	runBody?: (
+		pi: ExtensionAPI,
+		rt: QuestRuntime,
+		event: AgentEndEvent,
+		ctx: ExtensionContext,
+	) => void | Promise<void>;
+};
+
+/**
+ * Crash-safe `agent_end` auto-pilot handler.
+ *
+ * On unexpected throw: pauses the quest, records `pauseReason`, persists
+ * best-effort, and never rethrows (no uncaught rejection on the event bus).
+ * Exported so R9 tests can drive the catch path with a forced mid-handler throw.
+ */
+export async function handleAgentEnd(
+	pi: ExtensionAPI,
+	rt: QuestRuntime,
+	event: AgentEndEvent,
+	ctx: ExtensionContext,
+	options?: AgentEndOptions,
+): Promise<void> {
+	if (rt.isAutoPilotLocked()) return;
+	try {
+		if (options?.runBody) {
+			await options.runBody(pi, rt, event, ctx);
+			return;
+		}
+		await runAgentEndAutoPilot(pi, rt, event, ctx);
+	} catch (e) {
+		recoverAgentEndCrash(rt, ctx, e);
+	}
+}
+
+/**
+ * Best-effort recovery after an unexpected throw in the agent_end body.
+ * Pauses the active quest (when present), persists, updates UI/session/todo.
+ * Does not rethrow — callers must remain crash-safe on the event bus.
+ */
+export function recoverAgentEndCrash(
+	rt: QuestRuntime,
+	ctx: ExtensionContext,
+	error: unknown,
+): void {
+	console.error("[pi-quest] agent_end handler crashed:", error);
+	const quest = rt.getQuest(ctx.cwd);
+	if (quest) {
+		quest.status = "paused";
+		quest.pauseReason = `Auto-pilot error: ${(error as Error)?.message || String(error)}`;
+		try {
+			saveQuest(quest, ctx.cwd);
+		} catch (persistErr) {
+			console.error("[pi-quest] agent_end crash persist failed:", persistErr);
+		}
+		rt.setQuest(quest);
+	}
+	try {
+		renderStatus(ctx, quest);
+		writeQuestSessionMeta(ctx.cwd, quest);
+		if (quest) syncQuestToTodo(quest, ctx.cwd);
+	} catch (sideErr) {
+		console.error("[pi-quest] agent_end crash side-effects failed:", sideErr);
+	}
+	if (quest && ctx.hasUI) {
+		ctx.ui.notify(
+			`Quest auto-pilot error: ${(error as Error)?.message || String(error)}. Quest paused.`,
+			"error",
+		);
+	}
+}
+
+/** Normal auto-pilot body (decision → apply I/O). Kept separate for the crash seam. */
+async function runAgentEndAutoPilot(
+	pi: ExtensionAPI,
+	rt: QuestRuntime,
+	event: AgentEndEvent,
+	ctx: ExtensionContext,
+): Promise<void> {
+	const { getQuest, persist } = rt;
+	const quest = getQuest(ctx.cwd);
+	if (!quest || quest.status !== "active") return;
+
+	// Pure decision first (abort / requeue plan / sequential tree). Adapter
+	// applies I/O below — see extensions/quest/auto-pilot.ts.
+	const ladderHint = loadModelLadder(ctx.cwd);
+	const decision = decideAfterAgentEnd({
+		wasAborted: wasTurnAborted(event.messages),
+		hasUI: !!ctx.hasUI,
+		quest: snapshotQuestForAutoPilot(quest),
+		nextStepLadderLength: ladderHint?.rungs.length ?? 0,
+	});
+
+	// ── Abort (Esc) ──────────────────────────────────────────────────
+	// User interrupt: halt auto-pilot so a single Esc stops the quest.
+	if (decision.kind === "abort_pause") {
+		rt.cancelActiveSteps(ctx, quest, "agent turn aborted");
+		quest.status = "paused";
+		quest.pauseReason = "Interrupted (Esc). /quest resume to continue.";
+		quest.lastFiredStepIndex = -1;
+		quest.sameStepCount = 0;
+		persist(ctx, quest);
+		if (ctx.hasUI) {
+			ctx.ui.notify(
+				`Quest "${quest.name}" paused — interrupted. /quest resume to continue.`,
+				"warning",
+			);
+		}
+		return;
+	}
+
+	// ── Unresolved dispatching/running → fail or requeue ─────────────
+	applyUnresolved(rt, ctx, quest, decision.unresolved);
+
+	// ── Parallel dispatch (opt-in) ────────────────────────────────────
+	// fireParallelBatch handles recovery, integration, batch selection.
+	// When it returns false, fall through to the shared sequential path.
+	if (decision.tryParallel) {
+		const dispatched = rt.fireParallelBatch(ctx, quest);
+		if (dispatched) return;
+	}
+
+	// Re-decide sequential from live state after requeue side effects
+	// (beginStepRetry may block some indices → phases differ from simulation).
+	const ladder = loadModelLadder(ctx.cwd);
+	const sequential = decideAfterAgentEnd({
+		wasAborted: false,
+		hasUI: !!ctx.hasUI,
+		quest: snapshotQuestForAutoPilot(quest),
+		nextStepLadderLength: ladder?.rungs.length ?? 0,
+	});
+	if (sequential.kind !== "proceed") return;
+
+	await applySequential(pi, rt, ctx, quest, sequential.sequential, ladder);
+}
+
 export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
-	const { getQuest, persist, claims: claimReg, dispatchGuard } = rt;
+	const { getQuest, claims: claimReg, dispatchGuard } = rt;
 
 	pi.on("agent_end", async (event, ctx) => {
-		if (rt.isAutoPilotLocked()) return;
-		try {
-			const quest = getQuest(ctx.cwd);
-			if (!quest || quest.status !== "active") return;
-
-			// Pure decision first (abort / requeue plan / sequential tree). Adapter
-			// applies I/O below — see extensions/quest/auto-pilot.ts.
-			const ladderHint = loadModelLadder(ctx.cwd);
-			const decision = decideAfterAgentEnd({
-				wasAborted: wasTurnAborted(event.messages),
-				hasUI: !!ctx.hasUI,
-				quest: snapshotQuestForAutoPilot(quest),
-				nextStepLadderLength: ladderHint?.rungs.length ?? 0,
-			});
-
-			// ── Abort (Esc) ──────────────────────────────────────────────────
-			// User interrupt: halt auto-pilot so a single Esc stops the quest.
-			if (decision.kind === "abort_pause") {
-				rt.cancelActiveSteps(ctx, quest, "agent turn aborted");
-				quest.status = "paused";
-				quest.pauseReason = "Interrupted (Esc). /quest resume to continue.";
-				quest.lastFiredStepIndex = -1;
-				quest.sameStepCount = 0;
-				persist(ctx, quest);
-				if (ctx.hasUI) {
-					ctx.ui.notify(
-						`Quest "${quest.name}" paused — interrupted. /quest resume to continue.`,
-						"warning",
-					);
-				}
-				return;
-			}
-
-			// ── Unresolved dispatching/running → fail or requeue ─────────────
-			applyUnresolved(rt, ctx, quest, decision.unresolved);
-
-			// ── Parallel dispatch (opt-in) ────────────────────────────────────
-			// fireParallelBatch handles recovery, integration, batch selection.
-			// When it returns false, fall through to the shared sequential path.
-			if (decision.tryParallel) {
-				const dispatched = rt.fireParallelBatch(ctx, quest);
-				if (dispatched) return;
-			}
-
-			// Re-decide sequential from live state after requeue side effects
-			// (beginStepRetry may block some indices → phases differ from simulation).
-			const ladder = loadModelLadder(ctx.cwd);
-			const sequential = decideAfterAgentEnd({
-				wasAborted: false,
-				hasUI: !!ctx.hasUI,
-				quest: snapshotQuestForAutoPilot(quest),
-				nextStepLadderLength: ladder?.rungs.length ?? 0,
-			});
-			if (sequential.kind !== "proceed") return;
-
-			await applySequential(pi, rt, ctx, quest, sequential.sequential, ladder);
-		} catch (e) {
-			console.error("[pi-quest] agent_end handler crashed:", e);
-			const quest = getQuest(ctx.cwd);
-			if (quest) {
-				quest.status = "paused";
-				quest.pauseReason = `Auto-pilot error: ${(e as Error)?.message || String(e)}`;
-				saveQuest(quest, ctx.cwd);
-				rt.setQuest(quest);
-			}
-			renderStatus(ctx, quest);
-			writeQuestSessionMeta(ctx.cwd, quest);
-			if (quest) syncQuestToTodo(quest, ctx.cwd);
-			if (ctx.hasUI) {
-				ctx.ui.notify(
-					`Quest auto-pilot error: ${(e as Error)?.message || String(e)}. Quest paused.`,
-					"error",
-				);
-			}
-		}
+		await handleAgentEnd(pi, rt, event, ctx);
 	});
 
 	// ── Lifecycle ─────────────────────────────────────────────────────────────
