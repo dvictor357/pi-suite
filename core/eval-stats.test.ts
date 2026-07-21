@@ -8,7 +8,9 @@ import {
 	computeEvalStats,
 	computeEvalTimeSeries,
 	coerceEvalStat,
+	formatEvalStatsReport,
 	readAllEvalEntries,
+	sortRoleModelStats,
 	statsFor,
 } from "./eval-stats";
 import { createEvalLog, evalsDir, type EvalEntry } from "./eval-logging";
@@ -194,6 +196,76 @@ describe("eval-stats", () => {
 			const ts = computeEvalTimeSeries([null, 42, "junk", [], entry({ timestamp: DAY_1 })]);
 			assert.equal(ts.buckets.length, 1);
 			assert.equal(ts.buckets[0].samples, 1);
+		});
+	});
+
+	describe("formatEvalStatsReport", () => {
+		const DAY_1 = 1_700_000_000_000; // 2023-11-14 UTC
+
+		it("returns a clear empty-project message when no data", () => {
+			const text = formatEvalStatsReport(new Map(), { buckets: [] });
+			assert.match(text, /No eval data recorded yet/);
+			assert.doesNotMatch(text, /## /);
+		});
+
+		it("renders role/model table with agent, model, samples, verified pass %", () => {
+			const index = computeEvalStats([
+				entry({ status: "done", verified: true }),
+				entry({ status: "done", verified: true }),
+				entry({ status: "failed", verified: false }),
+				entry({ agent: "scout", model: "mythos-5", status: "done", verified: true }),
+			]);
+			const text = formatEvalStatsReport(index, { buckets: [] });
+
+			assert.match(text, /## Role \/ Model Pass Rates \(2 pairs\)/);
+			assert.match(text, /\| Agent \| Model \| Samples \| Verified Pass % \|/);
+			assert.match(text, /\| scout \| mythos-5 \| 1 \| 100% \|/);
+			assert.match(text, /\| worker \| ornith-1\.0 \| 3 \| 67% \|/);
+			// Daily series section omitted when empty
+			assert.doesNotMatch(text, /Eval Time Series/);
+		});
+
+		it("retains daily time series alongside role/model table", () => {
+			const rows = [
+				entry({
+					timestamp: DAY_1,
+					status: "done",
+					verified: true,
+					durationMs: 2000,
+					escalations: 1,
+				}),
+				entry({
+					timestamp: DAY_1,
+					status: "failed",
+					verified: false,
+					durationMs: 1000,
+					escalations: 0,
+				}),
+			];
+			const index = computeEvalStats(rows);
+			const series = computeEvalTimeSeries(rows);
+			const text = formatEvalStatsReport(index, series);
+
+			assert.match(text, /## Role \/ Model Pass Rates/);
+			assert.match(text, /## Eval Time Series \(1 days\)/);
+			assert.match(text, /\| Date\s+\| Samples \| Pass % \| Avg Dur \| Escalations \|/);
+			assert.match(text, /2023-11-14/);
+			// avg of 2000ms + 1000ms = 1500ms → "1.5s"
+			assert.match(text, /1\.5s/);
+			assert.match(text, /\|\s*1\s*\|/); // 1 escalation total
+		});
+
+		it("sortRoleModelStats is stable: agent ASC, model ASC", () => {
+			const index = computeEvalStats([
+				entry({ agent: "worker", model: "z-model" }),
+				entry({ agent: "scout", model: "a-model" }),
+				entry({ agent: "worker", model: "a-model" }),
+			]);
+			const sorted = sortRoleModelStats(index);
+			assert.deepEqual(
+				sorted.map((r) => `${r.agent}/${r.model}`),
+				["scout/a-model", "worker/a-model", "worker/z-model"],
+			);
 		});
 	});
 });

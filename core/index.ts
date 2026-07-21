@@ -50,6 +50,8 @@ export {
 	statsFor,
 	statsKey,
 	computeEvalTimeSeries,
+	sortRoleModelStats,
+	formatEvalStatsReport,
 } from "./eval-stats";
 export type { RoleModelStats, EvalStatsIndex, EvalTimeBucket, EvalTimeSeries } from "./eval-stats";
 export { asRecord, strArray, boolOr, numOr, strOr, optStr, optNum, oneOf } from "./coerce";

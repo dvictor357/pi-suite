@@ -19,7 +19,7 @@ could be unit-tested in isolation.
 | `fs.ts`           | `readJSON` / `writeJSON` / `appendLine`, plus an optional `setErrorSink` so extensions can route I/O errors to their own logs.                                                   |
 | `session-meta.ts` | `readSessionMeta` / `writeSessionMeta(key, cwd, data)` — merges one extension's status blob into the shared file without clobbering the others.                                  |
 | `eval-logging.ts` | Per-task eval audit trail in JSONL format (`EvalEntry`, `createEvalLog`).                                                                                                        |
-| `eval-stats.ts`   | Pure readers over the eval trail: per-(agent, model) verified-pass rates (`computeEvalStats`) and daily time-series aggregations (`computeEvalTimeSeries`).                      |
+| `eval-stats.ts`   | Pure readers/formatters over the eval trail: per-(agent, model) rates (`computeEvalStats`), daily series (`computeEvalTimeSeries`), and `formatEvalStatsReport` markdown.        |
 | `index.ts`        | The public surface. Import from `@pi-suite/core` semantics via the relative path `../../core`.                                                                                   |
 
 ## Ownership rule
