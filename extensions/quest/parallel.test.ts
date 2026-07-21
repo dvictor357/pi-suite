@@ -239,9 +239,14 @@ describe("selectDispatchBatch", () => {
 	test("selects all dependency-ready non-conflicting steps", () => {
 		const quest = makeQuest({
 			steps: [
-				makeStep({ status: "pending", content: "Step 0" }),
-				makeStep({ status: "pending", content: "Step 1" }),
-				makeStep({ status: "pending", content: "Step 2", dependencies: [0] }),
+				makeStep({ status: "pending", content: "Step 0", writeClaim: ["src/a.ts"] }),
+				makeStep({ status: "pending", content: "Step 1", writeClaim: ["src/b.ts"] }),
+				makeStep({
+					status: "pending",
+					content: "Step 2",
+					dependencies: [0],
+					writeClaim: ["src/c.ts"],
+				}),
 			],
 		});
 		const guard = new DispatchGuard();
@@ -259,9 +264,9 @@ describe("selectDispatchBatch", () => {
 	test("respects maxConcurrent limit", () => {
 		const quest = makeQuest({
 			steps: [
-				makeStep({ status: "pending", content: "S0" }),
-				makeStep({ status: "pending", content: "S1" }),
-				makeStep({ status: "pending", content: "S2" }),
+				makeStep({ status: "pending", content: "S0", writeClaim: ["src/a.ts"] }),
+				makeStep({ status: "pending", content: "S1", writeClaim: ["src/b.ts"] }),
+				makeStep({ status: "pending", content: "S2", writeClaim: ["src/c.ts"] }),
 			],
 		});
 		const guard = new DispatchGuard();
@@ -293,8 +298,8 @@ describe("selectDispatchBatch", () => {
 	test("does not double-dispatch steps already in flight", () => {
 		const quest = makeQuest({
 			steps: [
-				makeStep({ status: "pending", content: "S0" }),
-				makeStep({ status: "pending", content: "S1" }),
+				makeStep({ status: "pending", content: "S0", writeClaim: ["src/a.ts"] }),
+				makeStep({ status: "pending", content: "S1", writeClaim: ["src/b.ts"] }),
 			],
 		});
 		const guard = new DispatchGuard();
@@ -315,7 +320,7 @@ describe("selectDispatchBatch", () => {
 					startedAt: Date.now() - 999_999,
 					writeClaim: ["src/a.ts"],
 				}),
-				makeStep({ status: "pending", content: "S1" }),
+				makeStep({ status: "pending", content: "S1", writeClaim: ["src/b.ts"] }),
 			],
 		});
 		const guard = new DispatchGuard();
@@ -331,8 +336,13 @@ describe("selectDispatchBatch", () => {
 	test("empty batch when all steps have unmet deps", () => {
 		const quest = makeQuest({
 			steps: [
-				makeStep({ status: "pending", content: "S0", dependencies: [1] }),
-				makeStep({ status: "pending", content: "S1" }),
+				makeStep({
+					status: "pending",
+					content: "S0",
+					dependencies: [1],
+					writeClaim: ["src/a.ts"],
+				}),
+				makeStep({ status: "pending", content: "S1", writeClaim: ["src/b.ts"] }),
 			],
 		});
 		const guard = new DispatchGuard();
@@ -347,9 +357,14 @@ describe("selectDispatchBatch", () => {
 	test("deterministic ordering: shallowest deps first", () => {
 		const quest = makeQuest({
 			steps: [
-				makeStep({ status: "pending", content: "S0", dependencies: [1] }),
-				makeStep({ status: "done", content: "S1" }),
-				makeStep({ status: "pending", content: "S2" }),
+				makeStep({
+					status: "pending",
+					content: "S0",
+					dependencies: [1],
+					writeClaim: ["src/a.ts"],
+				}),
+				makeStep({ status: "done", content: "S1", writeClaim: ["src/b.ts"] }),
+				makeStep({ status: "pending", content: "S2", writeClaim: ["src/c.ts"] }),
 			],
 		});
 		const guard = new DispatchGuard();
@@ -626,12 +641,16 @@ describe("Git worktree integration", () => {
 // ── Write claim conflict detection ─────────────────────────────────────────
 
 describe("Write claim conflict in batch selection", () => {
-	test("steps with no write claims never conflict", () => {
+	test("execution-role steps without write claims are excluded (R3)", () => {
 		const quest = makeQuest({
 			steps: [
-				makeStep({ status: "pending" }),
-				makeStep({ status: "pending" }),
-				makeStep({ status: "pending" }),
+				makeStep({ status: "pending", content: "writer no claim" }),
+				makeStep({ status: "pending", content: "writer empty", writeClaim: [] }),
+				makeStep({
+					status: "pending",
+					content: "writer ok",
+					writeClaim: ["src/a.ts"],
+				}),
 			],
 		});
 		const guard = new DispatchGuard();
@@ -639,7 +658,31 @@ describe("Write claim conflict in batch selection", () => {
 		const cfg: ParallelConfig = { enabled: true, maxConcurrent: 10 };
 
 		const batch = selectDispatchBatch(quest, guard, claims, "/project", cfg);
-		assert.equal(batch.indices.length, 3);
+		assert.deepEqual(batch.indices, [2]);
+		assert.equal(batch.conflicts.length, 2);
+		assert.deepEqual(
+			batch.conflicts.map((c) => c.index).sort((a, b) => a - b),
+			[0, 1],
+		);
+		assert.ok(batch.conflicts.every((c) => c.blockedBy === -1));
+	});
+
+	test("read-only roles may keep empty write claims", () => {
+		const quest = makeQuest({
+			steps: [
+				makeStep({ status: "pending", agent: "scout" }),
+				makeStep({ status: "pending", agent: "verifier", writeClaim: [] }),
+				makeStep({ status: "pending", agent: "reviewer" }),
+				makeStep({ status: "pending", agent: "planner" }),
+				makeStep({ status: "pending", agent: "worker", writeClaim: ["src/a.ts"] }),
+			],
+		});
+		const guard = new DispatchGuard();
+		const claims = new WriteClaimRegistry();
+		const cfg: ParallelConfig = { enabled: true, maxConcurrent: 10 };
+
+		const batch = selectDispatchBatch(quest, guard, claims, "/project", cfg);
+		assert.deepEqual(batch.indices, [0, 1, 2, 3, 4]);
 		assert.deepEqual(batch.conflicts, []);
 	});
 

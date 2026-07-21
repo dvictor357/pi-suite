@@ -27,7 +27,7 @@ import { detectDependencyCycle, getMaxDependencyDepth } from "./graph";
 import { enrichStepsWithMemoryGraph } from "./memory-graph-read";
 import { nextPendingStep } from "./steering";
 import { persistHandoff } from "./context-broker";
-import { normalizeClaims, validateClaims } from "./write-claim";
+import { normalizeClaims, validateClaims, validateParallelWriteClaims } from "./write-claim";
 import { resolveSandboxProfile } from "./sandbox";
 import type { QuestRuntime } from "./runtime";
 import { loadProjectMemory } from "./utils";
@@ -53,6 +53,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			"Each step needs: content, agent (sub-agent type), context (focused instructions).",
 			"Optionally: dependencies, readClaim, and writeClaim (cwd-relative path arrays).",
 			"Exploration/judge roles are read-only; concurrent writers need disjoint write claims.",
+			"When parallel is enabled, every execution-role step must declare a non-empty writeClaim.",
 			"Set autoStart: true to immediately begin auto-pilot execution.",
 			"When planningMode='approve' and running interactively, shows the plan to the user for approval.",
 		].join(" "),
@@ -255,6 +256,18 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 								text: `Invalid claims in step #${i + 1}: ${error instanceof Error ? error.message : String(error)}`,
 							},
 						],
+						details: {},
+					};
+				}
+			}
+
+			// Parallel writers must declare non-empty writeClaim so empty claims
+			// cannot silently overlap (R3). Read-only roles may keep empty claims.
+			if (quest.parallel?.enabled) {
+				const parallelClaimError = validateParallelWriteClaims(plannedSteps);
+				if (parallelClaimError) {
+					return {
+						content: [{ type: "text", text: parallelClaimError }],
 						details: {},
 					};
 				}
