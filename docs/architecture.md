@@ -125,18 +125,18 @@ field/exact boosts, roughly **doubled recall@1 (0.30 → 0.60)** and lifted **MR
 on raw token count and letting idf discriminate. The residual misses are the inherent
 ceiling of lexical retrieval when the query omits the discriminating term.
 
-**Semantic expansion — tried, measured, kept off.** A dependency-free "semantic" layer
-(`expandQuery`) was built to close that vocabulary gap: expand the query with terms that
-distinctively co-occur (PMI proxy) with query terms across the corpus, then score them at a
-soft weight. Measured on the same ground truth it **regressed** recall@1 (0.60 → 0.35) at
-every expansion weight. Root cause: quest's cache is **identifier-only** (symbol/export/path
-names, no file content), so co-occurrence is dominated by generic utility tokens
-(`ensure`, `available`, `stamp`, …) rather than real synonymy. The machinery is retained as a
-tested, configurable seam (`CODEBASE_RANKING.semantic`, default `enabled: false`) that a
-future content-based embedding provider can build on — but corpus co-occurrence over
-identifier-only documents is not the lever. Genuinely closing the gap needs content-based
-embeddings, which require a model (network provider or a bundled local model) and a decision
-about the suite's offline/no-dependency posture; that decision is deferred, not taken.
+**What is shipped.** The ranker is BM25 over the identifier token bag plus optional 1-hop
+dependency-graph expansion (`CODEBASE_RANKING.graphExpansion`). There is no semantic /
+PMI query expander and no `CODEBASE_RANKING.semantic` knobs in code today — a co-occurrence
+expansion experiment was measured against the same ground truth and **regressed** recall@1
+(0.60 → 0.35) at every expansion weight. Root cause: quest's cache is **identifier-only**
+(symbol/export/path names, no file content), so co-occurrence is dominated by generic
+utility tokens rather than real synonymy. That approach is not retained as a live seam.
+
+**Deferred — content embeddings.** Closing the vocabulary gap for prose queries that omit
+discriminating identifiers needs content-based embeddings (network provider or a bundled
+local model) and a decision about the suite's offline/no-dependency posture. That work is
+deferred, not claimed as present.
 
 ## Context budgeting (small-model / low-context efficiency)
 

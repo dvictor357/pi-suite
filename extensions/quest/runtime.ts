@@ -71,6 +71,39 @@ export function questSlug(name: string): string {
 	return name.replace(/[^a-z0-9-]+/gi, "-").toLowerCase();
 }
 
+/** Default cap for auto-mirrored eval-result nodes on the project memory graph. */
+export const EVAL_RESULT_NODE_CAP = 50;
+
+/**
+ * Keep only the newest `maxKeep` eval-result nodes in a memory graph.
+ * Drops the oldest eval-result nodes (by array order among that kind only).
+ * Never prunes design-decision, knowledge, or any other node kind.
+ * Pure: returns a new graph object when pruning occurs; identity when under cap.
+ */
+export function pruneEvalResultNodes(
+	graph: MemoryGraph,
+	maxKeep: number = EVAL_RESULT_NODE_CAP,
+): MemoryGraph {
+	if (!Array.isArray(graph.nodes) || maxKeep < 0) return graph;
+	let evalCount = 0;
+	for (const n of graph.nodes) {
+		if (n?.kind === "eval-result") evalCount++;
+	}
+	if (evalCount <= maxKeep) return graph;
+
+	const dropCount = evalCount - maxKeep;
+	let dropped = 0;
+	const nodes = graph.nodes.filter((n) => {
+		if (n?.kind !== "eval-result") return true;
+		if (dropped < dropCount) {
+			dropped++;
+			return false;
+		}
+		return true;
+	});
+	return { ...graph, nodes };
+}
+
 export interface QuestRuntime {
 	/** The pi extension API this runtime was created against. */
 	readonly pi: ExtensionAPI;
@@ -262,7 +295,9 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 						graph.nodes.push(node);
 					}
 
-					return { ...memory, graph, contractVersion: CONTRACT_VERSION };
+					// Cap auto-mirrored eval-result noise; leave manual/other kinds alone.
+					const pruned = pruneEvalResultNodes(graph, EVAL_RESULT_NODE_CAP);
+					return { ...memory, graph: pruned, contractVersion: CONTRACT_VERSION };
 				},
 				{},
 			);

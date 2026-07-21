@@ -332,3 +332,65 @@ test("buildSteeringMessage preserves legacy quest_delegate path for sandboxed st
 	assert.match(message, /pi-minions does not enforce this policy yet/);
 	assert.doesNotMatch(message, /subagent\(agent="worker"/);
 });
+
+test("buildSteeringMessage parent omits brief/awareness/format; minion task keeps them", () => {
+	const quest = emptyQuest("Slim steer", "no double injection");
+	const step: QuestStep = {
+		content: "Fix the flaky parser",
+		status: "running",
+		agent: "worker",
+		model: "claude-opus-4-5",
+		context: "Keep public API stable",
+		dependencies: [],
+		result: null,
+		attempts: 2,
+		startedAt: Date.now(),
+		completedAt: null,
+		verified: false,
+		verifyResult: null,
+		verifyRetries: 0,
+		commitHash: null,
+		branchName: null,
+		failureBriefs: [
+			{
+				attempt: 1,
+				model: "claude-haiku-4-5",
+				evidence: "tests fail on empty input in parseTokens",
+				attempted: "added null guard only",
+				inferred: false,
+				timestamp: Date.now() - 1000,
+			},
+		],
+	};
+	quest.steps = [step];
+
+	const message = buildSteeringMessage(quest, step, 0, process.cwd());
+
+	// Parent keeps progress / model / quest_update instructions.
+	assert.match(message, /## Quest: Slim steer/);
+	assert.match(message, /\*\*Current step:\*\* Fix the flaky parser/);
+	assert.match(message, /quest_update/);
+	assert.match(message, /subagent\(agent="worker"/);
+
+	// Extract parent body vs the JSON-encoded minion task payload.
+	const taskMatch = message.match(/task=("(?:\\.|[^"\\])*")/);
+	assert.ok(taskMatch, "expected minion task= JSON in subagent call");
+	const minionTask = JSON.parse(taskMatch![1]) as string;
+
+	// Parent must NOT dump failure briefs, project awareness, or format directive.
+	const parentOnly = message.slice(0, message.indexOf("task="));
+	assert.doesNotMatch(parentOnly, /Prior failed attempts/);
+	assert.doesNotMatch(parentOnly, /parseTokens/);
+	assert.doesNotMatch(parentOnly, /## Project Awareness/);
+	assert.doesNotMatch(parentOnly, /Before marking a code step done/);
+	assert.doesNotMatch(parentOnly, /Before done:/);
+
+	// Child minion task still carries full buildStepContext content.
+	assert.match(minionTask, /Fix the flaky parser/);
+	assert.match(minionTask, /Keep public API stable/);
+	assert.match(minionTask, /Prior failed attempts/);
+	assert.match(minionTask, /parseTokens/);
+	assert.match(minionTask, /Completion schema/);
+	// Format directive (full or compact) appears in the child task.
+	assert.match(minionTask, /Before (marking a code step done|done):/);
+});
