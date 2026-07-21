@@ -142,7 +142,62 @@ describe("fireNextTask", () => {
 
 			assert.equal(h.rt.fireNextTask(h.ctx), true);
 			assert.equal(h.steers.length, 1);
+			// Sequential quest_delegate path — never multi-task minion batch.
 			assert.match(h.steers[0], /quest_delegate/);
+			assert.doesNotMatch(h.steers[0], /Parallel Dispatch/);
+			assert.doesNotMatch(h.steers[0], /"tasks":/);
+		} finally {
+			h.cleanup();
+		}
+	});
+
+	test("falls back to sequential when quest-level sandbox is restricted with parallel enabled", () => {
+		const h = fakeRuntime();
+		try {
+			const quest = seedActive(h.rt, h.cwd, [
+				makeTask({ content: "worker step" }),
+				makeTask({ content: "another step" }),
+			]);
+			quest.parallel = { enabled: true, maxConcurrent: 2 };
+			quest.sandbox = {
+				mode: "restricted",
+				allowedPaths: ["src/**"],
+				deniedPaths: [],
+				allowCommands: [],
+				denyCommands: [],
+				allowNetwork: false,
+				allowPackageInstall: false,
+				worktree: null,
+			};
+
+			assert.equal(h.rt.fireNextTask(h.ctx), true);
+			assert.equal(h.steers.length, 1);
+			assert.match(h.steers[0], /quest_delegate/);
+			assert.doesNotMatch(h.steers[0], /Parallel Dispatch/);
+		} finally {
+			h.cleanup();
+		}
+	});
+
+	test("fireParallelBatch is a no-op when sandbox forbids parallel", () => {
+		const h = fakeRuntime();
+		try {
+			const quest = seedActive(h.rt, h.cwd, [makeTask({ content: "step" })]);
+			quest.parallel = { enabled: true, maxConcurrent: 2 };
+			quest.sandbox = {
+				mode: "isolated",
+				allowedPaths: ["src/**"],
+				deniedPaths: [],
+				allowCommands: [],
+				denyCommands: [],
+				allowNetwork: false,
+				allowPackageInstall: false,
+				worktree: null,
+			};
+
+			assert.equal(h.rt.fireParallelBatch(h.ctx, quest), false);
+			assert.equal(h.steers.length, 0);
+			assert.equal(quest.steps[0].status, "pending");
 		} finally {
 			h.cleanup();
 		}

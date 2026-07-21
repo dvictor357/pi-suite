@@ -50,11 +50,10 @@ import { hasCodebaseTool } from "./codebase";
 import { ActivityTracker } from "./activity-panel";
 import { buildStepContext, collectDependencyHandoffs } from "./context-broker";
 import { briefBudgetForModel, renderFailureBriefs } from "./ladder";
-import { isSandboxActive, resolveSandboxProfile } from "./sandbox";
+import { resolveSandboxProfile } from "./sandbox";
 import { WriteClaimRegistry } from "./write-claim";
 import { DispatchGuard, checkTimeout, resolvePhase, validateTransition } from "./phase-loop";
 import {
-	isDispatchable,
 	selectDispatchBatch,
 	buildBatchSteering,
 	integrateBatch,
@@ -62,6 +61,7 @@ import {
 	createStepWorktree,
 	removeStepWorktree,
 	isWorkingTreeClean,
+	parallelAllowedForQuest,
 	DEFAULT_PARALLEL_CONFIG,
 	type ParallelConfig,
 } from "./parallel";
@@ -448,15 +448,10 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		const quest = getQuest(ctx.cwd);
 		if (!quest || quest.status !== "active") return false;
 		const next = nextPendingStep(quest);
-		if (
-			quest.parallel?.enabled &&
-			next &&
-			!quest.steps.some(
-				(step, index) =>
-					isDispatchable(step, quest.steps) &&
-					isSandboxActive(resolveSandboxProfile(quest.sandbox, step.sandbox)),
-			)
-		) {
+		// Parallel multi-task minion batches skip Quest sandbox-guard (#21).
+		// When sandbox is restricted/isolated (quest- or step-level), force
+		// sequential quest_delegate instead of fireParallelBatch.
+		if (quest.parallel?.enabled && next && parallelAllowedForQuest(quest)) {
 			return fireParallelBatch(ctx, quest);
 		}
 		if (!next) return false;
@@ -469,6 +464,10 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 			? { ...DEFAULT_PARALLEL_CONFIG, ...quest.parallel }
 			: DEFAULT_PARALLEL_CONFIG;
 		if (!cfg.enabled || quest.status !== "active") return false;
+		// Defense in depth: never dispatch a multi-task minion batch when
+		// sandbox is active. Integration of already-dispatched worktrees is
+		// skipped too — sandboxed quests never create parallel worktrees.
+		if (!parallelAllowedForQuest(quest)) return false;
 
 		// Recover timed-out attempts before selecting more work. Dirty worktrees are
 		// retained and blocked; clean ones can be retried without losing evidence.

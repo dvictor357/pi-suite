@@ -20,6 +20,7 @@ import type { DispatchGuard } from "./phase-loop";
 import { DEFAULT_STEP_TIMEOUT_MS, checkTimeout, resolvePhase } from "./phase-loop";
 import { loadAgentModels, loadModelLadder } from "./storage";
 import { rungModel } from "./ladder";
+import { isSandboxActive, resolveSandboxProfile } from "./sandbox";
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,34 @@ export const DEFAULT_PARALLEL_CONFIG: ParallelConfig = {
 	maxConcurrent: 3,
 	stepTimeoutMs: DEFAULT_STEP_TIMEOUT_MS,
 };
+
+/**
+ * Whether multi-task pi-minions parallel batches are allowed for this quest.
+ *
+ * Parallel batches always steer via `subagent({ tasks })` with **no** Quest
+ * sandbox-guard. Combining parallel with restricted/isolated sandbox is a
+ * policy hole (#21). Policy: force sequential `quest_delegate` when:
+ * 1. Quest-level sandbox mode is restricted or isolated, OR
+ * 2. Any currently dispatchable step has an active sandbox profile.
+ *
+ * Sequential sandboxed path via quest_delegate is unaffected.
+ */
+export function parallelAllowedForQuest(quest: Quest): boolean {
+	// Quest-level restricted/isolated → never fire multi-task minion batches.
+	if (isSandboxActive(resolveSandboxProfile(quest.sandbox))) {
+		return false;
+	}
+	// Step-level sandbox on any ready step → force sequential for the batch.
+	for (const step of quest.steps) {
+		if (
+			isDispatchable(step, quest.steps) &&
+			isSandboxActive(resolveSandboxProfile(quest.sandbox, step.sandbox))
+		) {
+			return false;
+		}
+	}
+	return true;
+}
 
 // ── Worktree naming ─────────────────────────────────────────────────────────
 
