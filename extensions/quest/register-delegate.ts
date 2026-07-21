@@ -14,12 +14,11 @@ import {
 import { resolveTaskModel } from "./delegate";
 import { buildStepContext, collectDependencyHandoffs } from "./context-broker";
 import {
+	applyStepDispatchModel,
 	briefBudgetForModel,
 	isNeverLadderRole,
-	ladderApplies,
-	pickStartRung,
+	prepareStepDispatchModel,
 	renderFailureBriefs,
-	rungModel,
 } from "./ladder";
 import { clearQuestFromTodo } from "./todo-sync";
 import { loadTeams } from "./teams";
@@ -334,20 +333,23 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			// Approved ladder: initialize the step's rung from project history on
 			// first delegation, then resolve the rung's model. Every rung was
 			// approved with the ladder, so this path never re-prompts.
-			const ladder = loadModelLadder(ctx.cwd);
-			let ladderModel: string | undefined;
-			let rungInitialized = false;
-			if (ladder && ladderApplies(ladder, role, task.model, LADDER)) {
-				if (task.rung === undefined) {
-					task.rung = pickStartRung(ladder, role, rt.getEvalStats(ctx.cwd), LADDER);
-					rungInitialized = true;
-				}
-				ladderModel = rungModel(ladder, task.rung);
-			}
+			// Shared with auto-pilot fireStep / fireParallelBatch (prepareStepDispatchModel).
+			const prepared = prepareStepDispatchModel(task, {
+				ladder: loadModelLadder(ctx.cwd),
+				evalStats: rt.getEvalStats(ctx.cwd),
+				rememberedModel: remembered,
+				cfg: LADDER,
+			});
+			const rungInitialized = prepared.rungInitialized;
+			applyStepDispatchModel(task, {
+				// Stamp rung now; lastModel is set after the resolved registry model id is known.
+				...prepared,
+				lastModel: undefined,
+			});
 
 			const resolved = resolveTaskModel({
 				taskModel: task.model,
-				ladderModel,
+				ladderModel: prepared.source === "ladder" ? prepared.model : undefined,
 				rememberedModel: remembered,
 			});
 			let modelId = resolved.model;

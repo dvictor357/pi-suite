@@ -7,12 +7,14 @@ import {
 	type ModelLadderConfig,
 } from "../../core";
 import {
+	applyStepDispatchModel,
 	briefBudgetForModel,
 	buildFailureBrief,
 	coerceFailureBrief,
 	decideVerifyFailAction,
 	ladderApplies,
 	pickStartRung,
+	prepareStepDispatchModel,
 	renderFailureBriefs,
 	rungModel,
 	type FailureBrief,
@@ -207,6 +209,118 @@ describe("rungModel", () => {
 		assert.equal(rungModel(l, 0), "a");
 		assert.equal(rungModel(l, 5), "b");
 		assert.equal(rungModel(l, -1), "a");
+	});
+});
+
+describe("prepareStepDispatchModel", () => {
+	const l = ladder(["ornith-1.0", "opus-4.8", "mythos-5"]);
+	const emptyStats = statsWith([]);
+
+	it("empty history → starts rung 0 with the cheap model as lastModel", () => {
+		const prepared = prepareStepDispatchModel(
+			{ agent: "worker" },
+			{ ladder: l, evalStats: emptyStats, cfg: CFG },
+		);
+		assert.equal(prepared.rung, 0);
+		assert.equal(prepared.rungInitialized, true);
+		assert.equal(prepared.model, "ornith-1.0");
+		assert.equal(prepared.lastModel, "ornith-1.0");
+		assert.equal(prepared.source, "ladder");
+	});
+
+	it("proven-bad cheap rung → higher start", () => {
+		const rows = Array.from({ length: 5 }, () => evalRow("ornith-1.0", false));
+		const prepared = prepareStepDispatchModel(
+			{ agent: "worker" },
+			{ ladder: l, evalStats: statsWith(rows), cfg: CFG },
+		);
+		assert.equal(prepared.rung, 1);
+		assert.equal(prepared.model, "opus-4.8");
+		assert.equal(prepared.lastModel, "opus-4.8");
+		assert.equal(prepared.rungInitialized, true);
+	});
+
+	it("preserves an already-stamped rung (no re-pick)", () => {
+		const rows = Array.from({ length: 5 }, () => evalRow("ornith-1.0", false));
+		const prepared = prepareStepDispatchModel(
+			{ agent: "worker", rung: 0 },
+			{ ladder: l, evalStats: statsWith(rows), cfg: CFG },
+		);
+		assert.equal(prepared.rung, 0);
+		assert.equal(prepared.rungInitialized, false);
+		assert.equal(prepared.model, "ornith-1.0");
+	});
+
+	it("explicit step.model bypasses the ladder", () => {
+		const prepared = prepareStepDispatchModel(
+			{ agent: "worker", model: "claude-opus" },
+			{
+				ladder: l,
+				evalStats: emptyStats,
+				rememberedModel: "remembered-model",
+				cfg: CFG,
+			},
+		);
+		assert.equal(prepared.rung, undefined);
+		assert.equal(prepared.rungInitialized, false);
+		assert.equal(prepared.model, "claude-opus");
+		assert.equal(prepared.lastModel, "claude-opus");
+		assert.equal(prepared.source, "task");
+	});
+
+	it("scout/verifier (judge roles) are not laddered", () => {
+		for (const agent of ["scout", "verifier", "reviewer", "planner"]) {
+			const prepared = prepareStepDispatchModel(
+				{ agent },
+				{
+					ladder: l,
+					evalStats: emptyStats,
+					rememberedModel: "judge-model",
+					cfg: CFG,
+				},
+			);
+			assert.equal(prepared.rung, undefined, agent);
+			assert.equal(prepared.source, "memory", agent);
+			assert.equal(prepared.lastModel, "judge-model", agent);
+		}
+	});
+
+	it("falls back to remembered model when ladder does not apply", () => {
+		const prepared = prepareStepDispatchModel(
+			{ agent: "worker" },
+			{
+				ladder: null,
+				evalStats: emptyStats,
+				rememberedModel: "mem-model",
+				cfg: CFG,
+			},
+		);
+		assert.equal(prepared.source, "memory");
+		assert.equal(prepared.model, "mem-model");
+		assert.equal(prepared.lastModel, "mem-model");
+		assert.equal(prepared.rung, undefined);
+	});
+
+	it("returns empty when nothing is known", () => {
+		const prepared = prepareStepDispatchModel(
+			{ agent: "worker" },
+			{ ladder: null, evalStats: emptyStats, cfg: CFG },
+		);
+		assert.equal(prepared.model, undefined);
+		assert.equal(prepared.lastModel, undefined);
+		assert.equal(prepared.rungInitialized, false);
+	});
+
+	it("applyStepDispatchModel stamps rung and lastModel", () => {
+		const step: { rung?: number; lastModel?: string } = {};
+		const prepared = prepareStepDispatchModel(
+			{ agent: "worker" },
+			{ ladder: l, evalStats: emptyStats, cfg: CFG },
+		);
+		assert.equal(applyStepDispatchModel(step, prepared), true);
+		assert.equal(step.rung, 0);
+		assert.equal(step.lastModel, "ornith-1.0");
+		assert.equal(applyStepDispatchModel(step, prepared), false, "idempotent second apply");
 	});
 });
 
