@@ -1,6 +1,5 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { existsSync } from "node:fs";
-import { DEFAULT_RETRY_POLICY } from "../../core";
 import { MAX_BURST, MAX_RETRIES } from "./constants";
 import {
 	archiveQuest,
@@ -10,8 +9,8 @@ import {
 	saveQuest,
 	syncConventionsToMemory,
 } from "./storage";
-import { buildFailureBrief, decideVerifyFailAction, rungModel } from "./ladder";
-import { nextPendingStep, formatQuestStatus, wasTurnAborted } from "./steering";
+import { buildFailureBrief, rungModel } from "./ladder";
+import { formatQuestStatus, wasTurnAborted } from "./steering";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { clearQuestFromTodo, syncQuestToTodo } from "./todo-sync";
 import { isSandboxActive } from "./sandbox";
@@ -24,9 +23,17 @@ import {
 	buildActivityFooter,
 	buildActivityWorkingIndicator,
 } from "./activity-panel";
-import { recoverStaleRuns, resolvePhase } from "./phase-loop";
+import { recoverStaleRuns } from "./phase-loop";
 import { cleanStaleWorktrees } from "./parallel";
 import type { QuestRuntime } from "./runtime";
+import type { Quest } from "./types";
+import {
+	decideAfterAgentEnd,
+	snapshotQuestForAutoPilot,
+	type ReadyDecision,
+	type SequentialDecision,
+	type UnresolvedAction,
+} from "./auto-pilot";
 
 export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 	const { getQuest, persist, claims: claimReg, dispatchGuard } = rt;
@@ -37,14 +44,19 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 			const quest = getQuest(ctx.cwd);
 			if (!quest || quest.status !== "active") return;
 
-			// User interrupt (Esc). `agent_end` fires for an aborted turn just like a
-			// completed one, so without this guard the handler would steer in the
-			// *next* step on every abort — forcing repeated Escapes to stop the quest,
-			// and orphaning each fired step in `running` (nextPendingStep skips those).
-			// Treat one interrupt as "halt the auto-pilot": roll the in-flight step(s)
-			// back to pending and pause so a single Esc stops, and /quest resume picks
-			// up cleanly where it left off.
-			if (wasTurnAborted(event.messages)) {
+			// Pure decision first (abort / requeue plan / sequential tree). Adapter
+			// applies I/O below — see extensions/quest/auto-pilot.ts.
+			const ladderHint = loadModelLadder(ctx.cwd);
+			const decision = decideAfterAgentEnd({
+				wasAborted: wasTurnAborted(event.messages),
+				hasUI: !!ctx.hasUI,
+				quest: snapshotQuestForAutoPilot(quest),
+				nextStepLadderLength: ladderHint?.rungs.length ?? 0,
+			});
+
+			// ── Abort (Esc) ──────────────────────────────────────────────────
+			// User interrupt: halt auto-pilot so a single Esc stops the quest.
+			if (decision.kind === "abort_pause") {
 				rt.cancelActiveSteps(ctx, quest, "agent turn aborted");
 				quest.status = "paused";
 				quest.pauseReason = "Interrupted (Esc). /quest resume to continue.";
@@ -60,472 +72,29 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 				return;
 			}
 
-			// A completed orchestration turn cannot still own a live tool call. Any
-			// unresolved dispatch consumed its attempt; requeue it within the shared
-			// budget instead of leaving the quest permanently stuck in running.
-			for (let index = 0; index < quest.steps.length; index++) {
-				const step = quest.steps[index];
-				if (!["dispatching", "running"].includes(resolvePhase(step))) continue;
-				if (step.attempts > MAX_RETRIES) {
-					rt.transitionStep(ctx, quest, index, "failed", "dispatch turn ended unresolved");
-					step.completedAt = Date.now();
-					continue;
-				}
-				if (!rt.beginStepRetry(ctx, quest, index, "dispatch turn ended unresolved")) continue;
-				rt.transitionStep(ctx, quest, index, "queued", "bounded unresolved retry");
-			}
+			// ── Unresolved dispatching/running → fail or requeue ─────────────
+			applyUnresolved(rt, ctx, quest, decision.unresolved);
 
 			// ── Parallel dispatch (opt-in) ────────────────────────────────────
-			// When parallel is enabled, use batch dispatch instead of the sequential
-			// auto-pilot. fireParallelBatch handles recovery, integration, batch
-			// selection, and dispatch. When it returns false, no dispatchable steps
-			// remain — fall through to the shared completion logic.
-			const parallelEnabled = quest.parallel?.enabled;
-			if (parallelEnabled) {
+			// fireParallelBatch handles recovery, integration, batch selection.
+			// When it returns false, fall through to the shared sequential path.
+			if (decision.tryParallel) {
 				const dispatched = rt.fireParallelBatch(ctx, quest);
 				if (dispatched) return;
 			}
 
-			const next = nextPendingStep(quest);
-			if (!next) {
-				const verifyingTasks = quest.steps.filter((t) => t.status === "verifying");
-				if (verifyingTasks.length > 0) {
-					const allResolved = quest.steps.every(
-						(t) =>
-							t.status === "done" ||
-							t.status === "skipped" ||
-							t.status === "failed" ||
-							t.status === "verifying",
-					);
-					const vfyList = verifyingTasks
-						.map((t) => {
-							const idx = quest.steps.indexOf(t);
-							return `- #${idx + 1} **${t.content}**`;
-						})
-						.join("\n");
-					if (allResolved) {
-						if (ctx.hasUI) {
-							const action = await ctx.ui.select(
-								`${verifyingTasks.length} step(s) need verification. What now?`,
-								[
-									"Verify them now (agent will handle it)",
-									"Skip verification for all",
-									"Pause quest",
-								],
-							);
+			// Re-decide sequential from live state after requeue side effects
+			// (beginStepRetry may block some indices → phases differ from simulation).
+			const ladder = loadModelLadder(ctx.cwd);
+			const sequential = decideAfterAgentEnd({
+				wasAborted: false,
+				hasUI: !!ctx.hasUI,
+				quest: snapshotQuestForAutoPilot(quest),
+				nextStepLadderLength: ladder?.rungs.length ?? 0,
+			});
+			if (sequential.kind !== "proceed") return;
 
-							if (action === "Verify them now (agent will handle it)") {
-								rt.setAutoPilotLocked(true);
-								try {
-									pi.sendUserMessage(
-										[
-											`## Verification Pending ⏳`,
-											``,
-											`${verifyingTasks.length} step(s) awaiting verification:`,
-											verifyingTasks
-												.map((t) => {
-													const idx = quest.steps.indexOf(t);
-													return `- #${idx + 1} **${t.content}** — Use subagent(agent="verifier") then call quest_update(index=${idx}, verifyOutcome="PASS"|"FAIL", verifyEvidence=...)`;
-												})
-												.join("\n"),
-											``,
-											`After resolving verification, /quest resume.`,
-										].join("\n"),
-										{ deliverAs: "steer" },
-									);
-								} finally {
-									rt.setAutoPilotLocked(false);
-								}
-								return;
-							}
-
-							if (action === "Skip verification for all") {
-								for (const t of verifyingTasks) {
-									rt.transitionStep(
-										ctx,
-										quest,
-										quest.steps.indexOf(t),
-										"done",
-										"verification skipped by user",
-									);
-									t.verified = true;
-									t.verifyResult = "[SKIP] Verification skipped by user.";
-									t.completedAt = Date.now();
-								}
-								persist(ctx, quest);
-								ctx.ui.notify(
-									`${verifyingTasks.length} step(s) verified (skipped). Continuing...`,
-									"info",
-								);
-								return;
-							}
-						}
-
-						quest.status = "paused";
-						quest.pauseReason = `Waiting for verification on ${verifyingTasks.length} step(s): ${verifyingTasks.map((t) => t.content).join(", ")}. Resolve with quest_update(verifyOutcome=...).`;
-						quest.lastFiredStepIndex = -1;
-						quest.sameStepCount = 0;
-						persist(ctx, quest);
-
-						if (ctx.hasUI) {
-							ctx.ui.notify(
-								`Quest paused: ${verifyingTasks.length} step(s) need verification.\n${vfyList}`,
-								"warning",
-							);
-						} else {
-							rt.setAutoPilotLocked(true);
-							try {
-								pi.sendUserMessage(
-									[
-										`## Verification Pending ⏳`,
-										``,
-										`${verifyingTasks.length} step(s) awaiting verification:`,
-										verifyingTasks
-											.map((t) => {
-												const idx = quest.steps.indexOf(t);
-												return `- #${idx + 1} **${t.content}** — call quest_update(index=${idx}, verifyOutcome="PASS"|"FAIL", verifyEvidence=...)`;
-											})
-											.join("\n"),
-										``,
-										`/quest resume after resolving verification.`,
-									].join("\n"),
-									{ deliverAs: "steer" },
-								);
-							} finally {
-								rt.setAutoPilotLocked(false);
-							}
-						}
-						return;
-					} else {
-						// allResolved is false — some steps pending because deps are verifying
-						quest.status = "paused";
-						quest.pauseReason = `Verification pending on ${verifyingTasks.length} step(s): ${verifyingTasks.map((t) => t.content).join(", ")}. Complete verification to unblock dependent steps.`;
-						quest.lastFiredStepIndex = -1;
-						quest.sameStepCount = 0;
-						persist(ctx, quest);
-						if (ctx.hasUI) {
-							ctx.ui.notify(
-								`Quest paused: ${verifyingTasks.length} step(s) need verification before dependents can proceed.\n${vfyList}`,
-								"warning",
-							);
-						}
-						return;
-					}
-				}
-
-				const allDone = quest.steps.every((t) => t.status === "done" || t.status === "skipped");
-				const anyFailed = quest.steps.some((t) => t.status === "failed");
-
-				if (allDone && !anyFailed) {
-					quest.status = "done";
-					quest.completedAt = Date.now();
-					syncConventionsToMemory(quest, ctx.cwd);
-					if (archiveQuest(quest, ctx.cwd)) {
-						clearActiveQuest(ctx.cwd);
-						rt.setQuest(null);
-						renderStatus(ctx, null);
-						writeQuestSessionMeta(ctx.cwd, null);
-						clearQuestFromTodo(ctx.cwd);
-					} else {
-						persist(ctx, quest);
-					}
-
-					rt.setAutoPilotLocked(true);
-					try {
-						pi.sendUserMessage(buildQuestRecap(quest), { deliverAs: "steer" });
-					} finally {
-						rt.setAutoPilotLocked(false);
-					}
-				} else if (anyFailed) {
-					const failedTasks = quest.steps.filter((t) => t.status === "failed");
-					const failedList = failedTasks
-						.map((t) => {
-							const i = quest.steps.indexOf(t);
-							return `  #${i + 1}: ${t.content} — ${t.result || "no details"}`;
-						})
-						.join("\n");
-
-					if (ctx.hasUI) {
-						const action = await ctx.ui.select(
-							`${failedTasks.length} step(s) failed. What would you like to do?`,
-							["Retry failed steps", "Skip all failed", "Pause and review"],
-						);
-
-						if (action === "Retry failed steps") {
-							for (const t of failedTasks) {
-								const index = quest.steps.indexOf(t);
-								if (!rt.beginStepRetry(ctx, quest, index, "user retry")) continue;
-								t.attempts = 0;
-								t.startedAt = null;
-								t.completedAt = null;
-								t.result = null;
-								rt.transitionStep(ctx, quest, index, "queued", "user retry queued");
-							}
-							quest.status = "active";
-							quest.stepsSincePause = 0;
-							quest.lastFiredStepIndex = -1;
-							quest.sameStepCount = 0;
-							quest.pauseReason = null;
-							persist(ctx, quest);
-							ctx.ui.notify(
-								`${failedTasks.length} step(s) reset for retry. Auto-pilot resuming.`,
-								"info",
-							);
-							return;
-						}
-
-						if (action === "Skip all failed") {
-							for (const t of failedTasks) {
-								rt.transitionStep(ctx, quest, quest.steps.indexOf(t), "skipped", "user skipped");
-								t.result = `Skipped by user.`;
-								t.completedAt = Date.now();
-							}
-							quest.status = "active";
-							quest.stepsSincePause = 0;
-							quest.lastFiredStepIndex = -1;
-							quest.sameStepCount = 0;
-							quest.pauseReason = null;
-							persist(ctx, quest);
-							ctx.ui.notify(`${failedTasks.length} step(s) skipped. Auto-pilot resuming.`, "info");
-							return;
-						}
-					}
-
-					quest.status = "paused";
-					quest.pauseReason = "Some steps failed. Review and decide: retry, skip, or redefine.";
-					quest.lastFiredStepIndex = -1;
-					quest.sameStepCount = 0;
-					persist(ctx, quest);
-
-					if (ctx.hasUI) {
-						ctx.ui.notify(
-							`Quest paused: ${failedTasks.length} step(s) failed.\nFailed:\n${failedList}`,
-							"warning",
-						);
-					} else {
-						rt.setAutoPilotLocked(true);
-						try {
-							pi.sendUserMessage(
-								[
-									`## Quest Paused: ${quest.name} ⚠`,
-									``,
-									`Some steps failed. Review the status with quest_status and decide next steps:`,
-									`- Fix the issue and call quest_update to retry`,
-									`- Skip failed steps with quest_update(status="skipped")`,
-									`- /quest resume to continue`,
-								].join("\n"),
-								{ deliverAs: "steer" },
-							);
-						} finally {
-							rt.setAutoPilotLocked(false);
-						}
-					}
-				} else {
-					quest.status = "paused";
-					quest.pauseReason = "All remaining steps are blocked by unfinished dependencies.";
-					persist(ctx, quest);
-				}
-				return;
-			}
-
-			// Stall detection
-			if (next.index === quest.lastFiredStepIndex) {
-				quest.sameStepCount++;
-				if (quest.sameStepCount > 2) {
-					if (ctx.hasUI) {
-						const action = await ctx.ui.select(
-							`Step "${next.task.content}" stalled after ${quest.sameStepCount} attempts. What now?`,
-							["Skip this step", "Mark as failed", "Pause quest"],
-						);
-
-						if (action === "Skip this step") {
-							rt.transitionStep(ctx, quest, next.index, "skipped", "stalled step skipped");
-							next.task.result = `Skipped by user after stalling (${quest.sameStepCount} attempts).`;
-							next.task.completedAt = Date.now();
-							quest.lastFiredStepIndex = -1;
-							quest.sameStepCount = 0;
-							persist(ctx, quest);
-							ctx.ui.notify(`Step #${next.index + 1} skipped.`, "info");
-							return;
-						}
-
-						if (action === "Mark as failed") {
-							rt.transitionStep(ctx, quest, next.index, "failed", "stalled step failed");
-							next.task.result = `Failed by user after stalling (${quest.sameStepCount} attempts).`;
-							next.task.completedAt = Date.now();
-							quest.lastFiredStepIndex = -1;
-							quest.sameStepCount = 0;
-							persist(ctx, quest);
-							ctx.ui.notify(`Step #${next.index + 1} marked failed.`, "warning");
-							return;
-						}
-					}
-
-					quest.status = "paused";
-					quest.pauseReason = `Step #${next.index + 1} stalled (${quest.sameStepCount} attempts without progress).`;
-					quest.lastFiredStepIndex = -1;
-					quest.sameStepCount = 0;
-					persist(ctx, quest);
-
-					if (ctx.hasUI) {
-						ctx.ui.notify(`Quest paused: stalled step. /quest resume to continue.`, "warning");
-					} else {
-						rt.setAutoPilotLocked(true);
-						try {
-							pi.sendUserMessage(
-								`## Quest Paused: Stalled ⚠\n\nStep #${next.index + 1} "${next.task.content}" has been attempted ${quest.sameStepCount} times without completion.\nUse quest_update to mark it failed or skipped, then /quest resume.`,
-								{ deliverAs: "steer" },
-							);
-						} finally {
-							rt.setAutoPilotLocked(false);
-						}
-					}
-					return;
-				}
-			} else {
-				quest.sameStepCount = 1;
-			}
-
-			if (next.task.attempts > MAX_RETRIES) {
-				const ladder = next.task.rung !== undefined ? loadModelLadder(ctx.cwd) : null;
-				const decision = decideVerifyFailAction({
-					// Attempts are already exhausted here; use the shared decision tree
-					// only for escalation-vs-fail, not another same-rung retry.
-					verifyRetries: DEFAULT_RETRY_POLICY.maxVerifyRetries,
-					rung: next.task.rung,
-					escalations: next.task.escalations ?? 0,
-					ladderLength: ladder?.rungs.length ?? 0,
-				});
-
-				if (decision.action === "escalate" && decision.nextRung !== undefined && ladder) {
-					if (!rt.beginStepRetry(ctx, quest, next.index, "attempt budget escalation")) {
-						quest.status = "paused";
-						quest.pauseReason = `Step #${next.index + 1} retry is blocked by retained worktree evidence.`;
-						persist(ctx, quest);
-						return;
-					}
-					const fromRung = next.task.rung;
-					const fromModel =
-						next.task.lastModel ??
-						next.task.model ??
-						(fromRung !== undefined ? rungModel(ladder, fromRung) : undefined);
-					const toModel = rungModel(ladder, decision.nextRung);
-					const evidence = `Task attempt budget exhausted after ${MAX_RETRIES + 1} attempts.`;
-
-					next.task.failureBriefs = [
-						...(next.task.failureBriefs ?? []),
-						buildFailureBrief({
-							attempt: (next.task.failureBriefs?.length ?? 0) + 1,
-							model: fromModel,
-							rung: fromRung,
-							evidence,
-							attempted: next.task.result,
-							inferred: false,
-						}),
-					];
-					next.task.attempts = 0;
-					next.task.verifyRetries = 0;
-					next.task.rung = decision.nextRung;
-					next.task.escalations = (next.task.escalations ?? 0) + 1;
-					next.task.startedAt = null;
-					next.task.completedAt = null;
-					next.task.result = `${evidence} Escalating from ${fromModel ?? "previous model"} to rung ${decision.nextRung} (${toModel}).`;
-					rt.transitionStep(ctx, quest, next.index, "queued", "escalated retry queued");
-					quest.lastFiredStepIndex = -1;
-					quest.sameStepCount = 0;
-					persist(ctx, quest);
-					rt.recordRun(ctx.cwd, {
-						kind: "escalate",
-						taskIndex: next.index,
-						taskContent: next.task.content,
-						agent: next.task.agent,
-						model: fromModel,
-						fromModel,
-						toModel,
-						rung: decision.nextRung,
-						timestamp: Date.now(),
-						evidence,
-					});
-				} else {
-					rt.transitionStep(ctx, quest, next.index, "failed", "attempt budget exhausted");
-					next.task.result = `Auto-failed after ${MAX_RETRIES + 1} attempts.`;
-					quest.lastFiredStepIndex = -1;
-					quest.sameStepCount = 0;
-					persist(ctx, quest);
-					return;
-				}
-			}
-
-			if (quest.stepsSincePause >= MAX_BURST) {
-				const done = quest.steps.filter((t) => t.status === "done").length;
-				const total = quest.steps.length;
-
-				if (ctx.hasUI) {
-					const cont = await ctx.ui.confirm(
-						"Quest Checkpoint",
-						[
-							`**${quest.stepsSincePause} steps** completed in this burst.`,
-							``,
-							`Progress: **${done}/${total}** done`,
-							`Next: **${next.task.content}** [${next.task.agent}]`,
-							``,
-							`Continue to next step?`,
-						].join("\n"),
-					);
-
-					if (cont) {
-						quest.stepsSincePause = 0;
-						quest.lastFiredStepIndex = -1;
-						quest.sameStepCount = 0;
-						persist(ctx, quest);
-					} else {
-						quest.status = "paused";
-						quest.pauseReason = `User paused at checkpoint after ${quest.stepsSincePause} steps. /quest resume to continue.`;
-						quest.lastFiredStepIndex = -1;
-						quest.sameStepCount = 0;
-						persist(ctx, quest);
-						ctx.ui.notify(`Quest paused. /quest resume to continue.`, "info");
-						return;
-					}
-				} else {
-					quest.status = "paused";
-					quest.pauseReason = `Auto-paused after ${MAX_BURST} steps. /quest resume to continue.`;
-					quest.lastFiredStepIndex = -1;
-					quest.sameStepCount = 0;
-					persist(ctx, quest);
-
-					rt.setAutoPilotLocked(true);
-					try {
-						pi.sendUserMessage(
-							`## Quest Paused: Checkpoint ⏸\n\n${quest.stepsSincePause}/${MAX_BURST} steps completed. Progress:\n${formatQuestStatus(quest)}\n\n/quest resume to continue.`,
-							{ deliverAs: "steer" },
-						);
-					} finally {
-						rt.setAutoPilotLocked(false);
-					}
-					return;
-				}
-			}
-
-			// Fire the next step (sequential path only — parallel dispatch was handled above).
-			if (parallelEnabled) {
-				// In parallel mode, a step that nextPendingStep found but selectDispatchBatch
-				// skipped means there's a write-claim conflict or guard slot contention.
-				// Don't fire it sequentially — pause so the user can investigate.
-				quest.status = "paused";
-				quest.pauseReason = `Step #${next.index + 1} ("${next.task.content}") is ready but was not dispatched by the parallel selector. Possible write-claim conflict. Check quest_claims() or /quest resume.`;
-				quest.lastFiredStepIndex = -1;
-				quest.sameStepCount = 0;
-				persist(ctx, quest);
-				if (ctx.hasUI) {
-					ctx.ui.notify?.(
-						`Quest paused: parallel dispatch could not fire step #${next.index + 1}. Check claim conflicts.`,
-						"warning",
-					);
-				}
-			} else {
-				rt.fireStep(ctx, quest, next.task, next.index);
-			}
+			await applySequential(pi, rt, ctx, quest, sequential.sequential, ladder);
 		} catch (e) {
 			console.error("[pi-quest] agent_end handler crashed:", e);
 			const quest = getQuest(ctx.cwd);
@@ -757,6 +326,518 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 			}
 		}
 	});
+}
+
+// ── Auto-pilot adapter helpers (I/O for pure decisions) ──────────────────────
+
+function applyUnresolved(
+	rt: QuestRuntime,
+	ctx: ExtensionContext,
+	quest: Quest,
+	unresolved: readonly UnresolvedAction[],
+): void {
+	for (const u of unresolved) {
+		const step = quest.steps[u.index];
+		if (!step) continue;
+		if (u.action === "fail") {
+			rt.transitionStep(ctx, quest, u.index, "failed", "dispatch turn ended unresolved");
+			step.completedAt = Date.now();
+			continue;
+		}
+		if (!rt.beginStepRetry(ctx, quest, u.index, "dispatch turn ended unresolved")) continue;
+		rt.transitionStep(ctx, quest, u.index, "queued", "bounded unresolved retry");
+	}
+}
+
+async function applySequential(
+	pi: ExtensionAPI,
+	rt: QuestRuntime,
+	ctx: ExtensionContext,
+	quest: Quest,
+	decision: SequentialDecision,
+	ladder: ReturnType<typeof loadModelLadder>,
+): Promise<void> {
+	const { persist } = rt;
+
+	switch (decision.kind) {
+		case "complete": {
+			quest.status = "done";
+			quest.completedAt = Date.now();
+			syncConventionsToMemory(quest, ctx.cwd);
+			if (archiveQuest(quest, ctx.cwd)) {
+				clearActiveQuest(ctx.cwd);
+				rt.setQuest(null);
+				renderStatus(ctx, null);
+				writeQuestSessionMeta(ctx.cwd, null);
+				clearQuestFromTodo(ctx.cwd);
+			} else {
+				persist(ctx, quest);
+			}
+			rt.setAutoPilotLocked(true);
+			try {
+				pi.sendUserMessage(buildQuestRecap(quest), { deliverAs: "steer" });
+			} finally {
+				rt.setAutoPilotLocked(false);
+			}
+			return;
+		}
+
+		case "verifying": {
+			await applyVerifying(pi, rt, ctx, quest, decision);
+			return;
+		}
+
+		case "failed_steps": {
+			await applyFailedSteps(pi, rt, ctx, quest, decision);
+			return;
+		}
+
+		case "blocked": {
+			quest.status = "paused";
+			quest.pauseReason = "All remaining steps are blocked by unfinished dependencies.";
+			persist(ctx, quest);
+			return;
+		}
+
+		case "stall": {
+			await applyStall(pi, rt, ctx, quest, decision);
+			return;
+		}
+
+		case "fail_budget": {
+			const step = quest.steps[decision.index];
+			if (!step) return;
+			rt.transitionStep(ctx, quest, decision.index, "failed", "attempt budget exhausted");
+			step.result = `Auto-failed after ${MAX_RETRIES + 1} attempts.`;
+			quest.lastFiredStepIndex = -1;
+			quest.sameStepCount = 0;
+			persist(ctx, quest);
+			return;
+		}
+
+		case "escalate": {
+			const applied = applyEscalate(rt, ctx, quest, decision.index, decision.nextRung, ladder);
+			if (!applied) return;
+			// Fall through to burst/fire (pre-extract: no return after successful escalate).
+			await applyReady(pi, rt, ctx, quest, decision.then);
+			return;
+		}
+
+		case "ready": {
+			// Stamp stall counter before burst/fire (pre-extract mutated quest.sameStepCount).
+			quest.sameStepCount = decision.sameStepCount;
+			await applyReady(pi, rt, ctx, quest, decision);
+			return;
+		}
+	}
+}
+
+async function applyVerifying(
+	pi: ExtensionAPI,
+	rt: QuestRuntime,
+	ctx: ExtensionContext,
+	quest: Quest,
+	decision: Extract<SequentialDecision, { kind: "verifying" }>,
+): Promise<void> {
+	const { persist } = rt;
+	const verifyingTasks = decision.indices.map((i) => quest.steps[i]).filter(Boolean);
+	const vfyList = decision.indices
+		.map((idx) => `- #${idx + 1} **${quest.steps[idx]?.content ?? ""}**`)
+		.join("\n");
+
+	if (decision.allResolved) {
+		if (decision.offerPrompt && ctx.hasUI) {
+			const action = await ctx.ui.select(
+				`${verifyingTasks.length} step(s) need verification. What now?`,
+				["Verify them now (agent will handle it)", "Skip verification for all", "Pause quest"],
+			);
+
+			if (action === "Verify them now (agent will handle it)") {
+				rt.setAutoPilotLocked(true);
+				try {
+					pi.sendUserMessage(
+						[
+							`## Verification Pending ⏳`,
+							``,
+							`${verifyingTasks.length} step(s) awaiting verification:`,
+							decision.indices
+								.map(
+									(idx) =>
+										`- #${idx + 1} **${quest.steps[idx]?.content ?? ""}** — Use subagent(agent="verifier") then call quest_update(index=${idx}, verifyOutcome="PASS"|"FAIL", verifyEvidence=...)`,
+								)
+								.join("\n"),
+							``,
+							`After resolving verification, /quest resume.`,
+						].join("\n"),
+						{ deliverAs: "steer" },
+					);
+				} finally {
+					rt.setAutoPilotLocked(false);
+				}
+				return;
+			}
+
+			if (action === "Skip verification for all") {
+				for (const idx of decision.indices) {
+					const t = quest.steps[idx];
+					if (!t) continue;
+					rt.transitionStep(ctx, quest, idx, "done", "verification skipped by user");
+					t.verified = true;
+					t.verifyResult = "[SKIP] Verification skipped by user.";
+					t.completedAt = Date.now();
+				}
+				persist(ctx, quest);
+				ctx.ui.notify(`${verifyingTasks.length} step(s) verified (skipped). Continuing...`, "info");
+				return;
+			}
+		}
+
+		quest.status = "paused";
+		quest.pauseReason = `Waiting for verification on ${verifyingTasks.length} step(s): ${verifyingTasks.map((t) => t.content).join(", ")}. Resolve with quest_update(verifyOutcome=...).`;
+		quest.lastFiredStepIndex = -1;
+		quest.sameStepCount = 0;
+		persist(ctx, quest);
+
+		if (ctx.hasUI) {
+			ctx.ui.notify(
+				`Quest paused: ${verifyingTasks.length} step(s) need verification.\n${vfyList}`,
+				"warning",
+			);
+		} else {
+			rt.setAutoPilotLocked(true);
+			try {
+				pi.sendUserMessage(
+					[
+						`## Verification Pending ⏳`,
+						``,
+						`${verifyingTasks.length} step(s) awaiting verification:`,
+						decision.indices
+							.map(
+								(idx) =>
+									`- #${idx + 1} **${quest.steps[idx]?.content ?? ""}** — call quest_update(index=${idx}, verifyOutcome="PASS"|"FAIL", verifyEvidence=...)`,
+							)
+							.join("\n"),
+						``,
+						`/quest resume after resolving verification.`,
+					].join("\n"),
+					{ deliverAs: "steer" },
+				);
+			} finally {
+				rt.setAutoPilotLocked(false);
+			}
+		}
+		return;
+	}
+
+	// allResolved is false — some steps pending because deps are verifying
+	quest.status = "paused";
+	quest.pauseReason = `Verification pending on ${verifyingTasks.length} step(s): ${verifyingTasks.map((t) => t.content).join(", ")}. Complete verification to unblock dependent steps.`;
+	quest.lastFiredStepIndex = -1;
+	quest.sameStepCount = 0;
+	persist(ctx, quest);
+	if (ctx.hasUI) {
+		ctx.ui.notify(
+			`Quest paused: ${verifyingTasks.length} step(s) need verification before dependents can proceed.\n${vfyList}`,
+			"warning",
+		);
+	}
+}
+
+async function applyFailedSteps(
+	pi: ExtensionAPI,
+	rt: QuestRuntime,
+	ctx: ExtensionContext,
+	quest: Quest,
+	decision: Extract<SequentialDecision, { kind: "failed_steps" }>,
+): Promise<void> {
+	const { persist } = rt;
+	const failedTasks = decision.indices.map((i) => quest.steps[i]).filter(Boolean);
+	const failedList = decision.indices
+		.map((i) => {
+			const t = quest.steps[i];
+			return `  #${i + 1}: ${t?.content ?? ""} — ${t?.result || "no details"}`;
+		})
+		.join("\n");
+
+	if (decision.offerPrompt && ctx.hasUI) {
+		const action = await ctx.ui.select(
+			`${failedTasks.length} step(s) failed. What would you like to do?`,
+			["Retry failed steps", "Skip all failed", "Pause and review"],
+		);
+
+		if (action === "Retry failed steps") {
+			for (const index of decision.indices) {
+				const t = quest.steps[index];
+				if (!t) continue;
+				if (!rt.beginStepRetry(ctx, quest, index, "user retry")) continue;
+				t.attempts = 0;
+				t.startedAt = null;
+				t.completedAt = null;
+				t.result = null;
+				rt.transitionStep(ctx, quest, index, "queued", "user retry queued");
+			}
+			quest.status = "active";
+			quest.stepsSincePause = 0;
+			quest.lastFiredStepIndex = -1;
+			quest.sameStepCount = 0;
+			quest.pauseReason = null;
+			persist(ctx, quest);
+			ctx.ui.notify(`${failedTasks.length} step(s) reset for retry. Auto-pilot resuming.`, "info");
+			return;
+		}
+
+		if (action === "Skip all failed") {
+			for (const index of decision.indices) {
+				const t = quest.steps[index];
+				if (!t) continue;
+				rt.transitionStep(ctx, quest, index, "skipped", "user skipped");
+				t.result = `Skipped by user.`;
+				t.completedAt = Date.now();
+			}
+			quest.status = "active";
+			quest.stepsSincePause = 0;
+			quest.lastFiredStepIndex = -1;
+			quest.sameStepCount = 0;
+			quest.pauseReason = null;
+			persist(ctx, quest);
+			ctx.ui.notify(`${failedTasks.length} step(s) skipped. Auto-pilot resuming.`, "info");
+			return;
+		}
+	}
+
+	quest.status = "paused";
+	quest.pauseReason = "Some steps failed. Review and decide: retry, skip, or redefine.";
+	quest.lastFiredStepIndex = -1;
+	quest.sameStepCount = 0;
+	persist(ctx, quest);
+
+	if (ctx.hasUI) {
+		ctx.ui.notify(
+			`Quest paused: ${failedTasks.length} step(s) failed.\nFailed:\n${failedList}`,
+			"warning",
+		);
+	} else {
+		rt.setAutoPilotLocked(true);
+		try {
+			pi.sendUserMessage(
+				[
+					`## Quest Paused: ${quest.name} ⚠`,
+					``,
+					`Some steps failed. Review the status with quest_status and decide next steps:`,
+					`- Fix the issue and call quest_update to retry`,
+					`- Skip failed steps with quest_update(status="skipped")`,
+					`- /quest resume to continue`,
+				].join("\n"),
+				{ deliverAs: "steer" },
+			);
+		} finally {
+			rt.setAutoPilotLocked(false);
+		}
+	}
+}
+
+async function applyStall(
+	pi: ExtensionAPI,
+	rt: QuestRuntime,
+	ctx: ExtensionContext,
+	quest: Quest,
+	decision: Extract<SequentialDecision, { kind: "stall" }>,
+): Promise<void> {
+	const { persist } = rt;
+	const step = quest.steps[decision.index];
+	if (!step) return;
+
+	if (decision.offerPrompt && ctx.hasUI) {
+		const action = await ctx.ui.select(
+			`Step "${decision.content}" stalled after ${decision.sameStepCount} attempts. What now?`,
+			["Skip this step", "Mark as failed", "Pause quest"],
+		);
+
+		if (action === "Skip this step") {
+			rt.transitionStep(ctx, quest, decision.index, "skipped", "stalled step skipped");
+			step.result = `Skipped by user after stalling (${decision.sameStepCount} attempts).`;
+			step.completedAt = Date.now();
+			quest.lastFiredStepIndex = -1;
+			quest.sameStepCount = 0;
+			persist(ctx, quest);
+			ctx.ui.notify(`Step #${decision.index + 1} skipped.`, "info");
+			return;
+		}
+
+		if (action === "Mark as failed") {
+			rt.transitionStep(ctx, quest, decision.index, "failed", "stalled step failed");
+			step.result = `Failed by user after stalling (${decision.sameStepCount} attempts).`;
+			step.completedAt = Date.now();
+			quest.lastFiredStepIndex = -1;
+			quest.sameStepCount = 0;
+			persist(ctx, quest);
+			ctx.ui.notify(`Step #${decision.index + 1} marked failed.`, "warning");
+			return;
+		}
+	}
+
+	quest.status = "paused";
+	quest.pauseReason = `Step #${decision.index + 1} stalled (${decision.sameStepCount} attempts without progress).`;
+	quest.lastFiredStepIndex = -1;
+	quest.sameStepCount = 0;
+	persist(ctx, quest);
+
+	if (ctx.hasUI) {
+		ctx.ui.notify(`Quest paused: stalled step. /quest resume to continue.`, "warning");
+	} else {
+		rt.setAutoPilotLocked(true);
+		try {
+			pi.sendUserMessage(
+				`## Quest Paused: Stalled ⚠\n\nStep #${decision.index + 1} "${decision.content}" has been attempted ${decision.sameStepCount} times without completion.\nUse quest_update to mark it failed or skipped, then /quest resume.`,
+				{ deliverAs: "steer" },
+			);
+		} finally {
+			rt.setAutoPilotLocked(false);
+		}
+	}
+}
+
+function applyEscalate(
+	rt: QuestRuntime,
+	ctx: ExtensionContext,
+	quest: Quest,
+	index: number,
+	nextRung: number,
+	ladder: ReturnType<typeof loadModelLadder>,
+): boolean {
+	const { persist } = rt;
+	const step = quest.steps[index];
+	if (!step || !ladder) return false;
+
+	if (!rt.beginStepRetry(ctx, quest, index, "attempt budget escalation")) {
+		quest.status = "paused";
+		quest.pauseReason = `Step #${index + 1} retry is blocked by retained worktree evidence.`;
+		persist(ctx, quest);
+		return false;
+	}
+
+	const fromRung = step.rung;
+	const fromModel =
+		step.lastModel ??
+		step.model ??
+		(fromRung !== undefined ? rungModel(ladder, fromRung) : undefined);
+	const toModel = rungModel(ladder, nextRung);
+	const evidence = `Task attempt budget exhausted after ${MAX_RETRIES + 1} attempts.`;
+
+	step.failureBriefs = [
+		...(step.failureBriefs ?? []),
+		buildFailureBrief({
+			attempt: (step.failureBriefs?.length ?? 0) + 1,
+			model: fromModel,
+			rung: fromRung,
+			evidence,
+			attempted: step.result,
+			inferred: false,
+		}),
+	];
+	step.attempts = 0;
+	step.verifyRetries = 0;
+	step.rung = nextRung;
+	step.escalations = (step.escalations ?? 0) + 1;
+	step.startedAt = null;
+	step.completedAt = null;
+	step.result = `${evidence} Escalating from ${fromModel ?? "previous model"} to rung ${nextRung} (${toModel}).`;
+	rt.transitionStep(ctx, quest, index, "queued", "escalated retry queued");
+	quest.lastFiredStepIndex = -1;
+	quest.sameStepCount = 0;
+	persist(ctx, quest);
+	rt.recordRun(ctx.cwd, {
+		kind: "escalate",
+		taskIndex: index,
+		taskContent: step.content,
+		agent: step.agent,
+		model: fromModel,
+		fromModel,
+		toModel,
+		rung: nextRung,
+		timestamp: Date.now(),
+		evidence,
+	});
+	return true;
+}
+
+async function applyReady(
+	pi: ExtensionAPI,
+	rt: QuestRuntime,
+	ctx: ExtensionContext,
+	quest: Quest,
+	ready: ReadyDecision,
+): Promise<void> {
+	const { persist } = rt;
+	const step = quest.steps[ready.index];
+	if (!step) return;
+
+	if (ready.burst.hit) {
+		if (ready.burst.offerConfirm && ctx.hasUI) {
+			const cont = await ctx.ui.confirm(
+				"Quest Checkpoint",
+				[
+					`**${ready.burst.stepsSincePause} steps** completed in this burst.`,
+					``,
+					`Progress: **${ready.doneCount}/${ready.totalCount}** done`,
+					`Next: **${ready.content}** [${ready.agent}]`,
+					``,
+					`Continue to next step?`,
+				].join("\n"),
+			);
+
+			if (cont) {
+				quest.stepsSincePause = 0;
+				quest.lastFiredStepIndex = -1;
+				quest.sameStepCount = 0;
+				persist(ctx, quest);
+			} else {
+				quest.status = "paused";
+				quest.pauseReason = `User paused at checkpoint after ${ready.burst.stepsSincePause} steps. /quest resume to continue.`;
+				quest.lastFiredStepIndex = -1;
+				quest.sameStepCount = 0;
+				persist(ctx, quest);
+				ctx.ui.notify(`Quest paused. /quest resume to continue.`, "info");
+				return;
+			}
+		} else {
+			quest.status = "paused";
+			quest.pauseReason = `Auto-paused after ${MAX_BURST} steps. /quest resume to continue.`;
+			quest.lastFiredStepIndex = -1;
+			quest.sameStepCount = 0;
+			persist(ctx, quest);
+
+			rt.setAutoPilotLocked(true);
+			try {
+				pi.sendUserMessage(
+					`## Quest Paused: Checkpoint ⏸\n\n${ready.burst.stepsSincePause}/${MAX_BURST} steps completed. Progress:\n${formatQuestStatus(quest)}\n\n/quest resume to continue.`,
+					{ deliverAs: "steer" },
+				);
+			} finally {
+				rt.setAutoPilotLocked(false);
+			}
+			return;
+		}
+	}
+
+	if (ready.fire === "parallel_conflict") {
+		// Parallel mode: nextPendingStep found a step selectDispatchBatch skipped
+		// (write-claim conflict or guard slot contention). Pause for investigation.
+		quest.status = "paused";
+		quest.pauseReason = `Step #${ready.index + 1} ("${ready.content}") is ready but was not dispatched by the parallel selector. Possible write-claim conflict. Check quest_claims() or /quest resume.`;
+		quest.lastFiredStepIndex = -1;
+		quest.sameStepCount = 0;
+		persist(ctx, quest);
+		if (ctx.hasUI) {
+			ctx.ui.notify?.(
+				`Quest paused: parallel dispatch could not fire step #${ready.index + 1}. Check claim conflicts.`,
+				"warning",
+			);
+		}
+		return;
+	}
+
+	rt.fireStep(ctx, quest, step, ready.index);
 }
 
 // ── Activity UI helpers ──────────────────────────────────────────────────────
