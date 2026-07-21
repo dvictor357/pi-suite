@@ -6,14 +6,8 @@ import type { FailureCode } from "../../core";
 import { LADDER, MAX_DEPENDENCY_DEPTH, MAX_VERIFY_RETRIES, VERIFICATION } from "./constants";
 import { loadModelLadder } from "./storage";
 import { loadTeams } from "./teams";
-import { buildSandboxComplianceChecks, parseVerifyOutcome } from "./verifier";
-import {
-	briefBudgetForModel,
-	buildFailureBrief,
-	decideVerifyFailAction,
-	renderFailureBriefs,
-	rungModel,
-} from "./ladder";
+import { buildSandboxComplianceChecks } from "./verifier";
+import { briefBudgetForModel } from "./ladder";
 import {
 	failureCodeForCheck,
 	firstFailure,
@@ -32,6 +26,19 @@ import { resolveSandboxProfile } from "./sandbox";
 import type { QuestRuntime } from "./runtime";
 import { loadProjectMemory } from "./utils";
 import type { MemoryGraph } from "../../core";
+import {
+	applyVerifyFailBookkeeping,
+	formatTerminalUpdateMessage,
+	formatVerifyPassMessage,
+	planCheckFail,
+	planTerminalUpdate,
+	planVerifyFail,
+	planVerifyPass,
+	resolveEffectiveOutcome,
+	snapshotStepForVerify,
+	type PlanVerifyFailResult,
+	type VerifyRunEvent,
+} from "./verify-outcome";
 
 export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 	const {
@@ -500,233 +507,122 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 
 			const task = quest.steps[params.index];
 
-			// Shared verified-failure handling: distil a failure brief, then retry
-			// on the same rung, escalate to the next, or auto-fail per the ladder
-			// policy. Called both by the manual LLM verdict path below and by the
-			// deterministic check gate (which passes a taxonomy `failureCode`), so
-			// the two failure sources share one retry/escalation machine.
-			const applyVerifyFail = (
-				evidence: string | undefined,
-				inferred: boolean,
-				failureCode?: FailureCode,
-			) => {
-				task.verifyResult = `[FAIL] ${evidence || ""}`.trim();
-				task.verified = true;
-				task.verifyRetries++;
+			const emitRunEvents = (events: readonly VerifyRunEvent[]) => {
+				for (const e of events) recordRun(ctx.cwd, e);
+			};
 
-				task.failureBriefs = [
-					...(task.failureBriefs ?? []),
-					buildFailureBrief({
-						attempt: (task.failureBriefs?.length ?? 0) + 1,
-						model: task.lastModel ?? task.model,
-						rung: task.rung,
-						evidence: evidence ?? "",
-						attempted: task.result,
-						inferred,
-					}),
-				];
+			// Adapter for the pure verify-fail plan (LLM FAIL + deterministic checks).
+			// I/O only: beginStepRetry, transitionStep, ledger, claims, persist.
+			const applyVerifyFailPlan = (plan: PlanVerifyFailResult) => {
+				applyVerifyFailBookkeeping(task, plan.bookkeeping);
 
-				const ladder = task.rung !== undefined ? loadModelLadder(ctx.cwd) : null;
-				const decision = decideVerifyFailAction({
-					verifyRetries: task.verifyRetries,
-					rung: task.rung,
-					escalations: task.escalations ?? 0,
-					ladderLength: ladder?.rungs.length ?? 0,
-				});
-				const retriesLeft = decision.retriesLeft;
-
-				if (decision.action === "retry") {
-					if (!rt.beginStepRetry(ctx, quest, params.index, "verification failed")) {
+				if (plan.kind === "retry") {
+					if (!rt.beginStepRetry(ctx, quest, params.index, plan.beginRetryReason)) {
 						return textResult("Retry blocked; the owned worktree was retained as evidence.");
 					}
-					task.attempts = 0;
-					task.startedAt = null;
-					task.result = `Verification FAIL #${task.verifyRetries}: ${evidence || "no details"}. Fix and retry (${retriesLeft} retries left).`;
-					task.completedAt = null;
-					rt.transitionStep(ctx, quest, params.index, "queued", "bounded verification retry");
-
-					recordRun(ctx.cwd, {
-						kind: "verify_fail",
-						taskIndex: params.index,
-						taskContent: task.content,
-						agent: "verifier",
-						timestamp: Date.now(),
-						evidence,
-						verifyRetriesLeft: retriesLeft,
-						failureCode,
-					});
+					task.attempts = plan.patches.attempts;
+					task.startedAt = plan.patches.startedAt;
+					task.completedAt = plan.patches.completedAt;
+					task.result = plan.patches.result;
+					rt.transitionStep(ctx, quest, params.index, plan.nextPhase, plan.transitionReason);
+					emitRunEvents(plan.events);
 					quest.lastFiredStepIndex = -1;
 					quest.sameStepCount = 0;
 					persist(ctx, quest);
-
 					return {
-						content: [
-							{
-								type: "text" as const,
-								text: [
-									`❌ Step #${params.index + 1} **VERIFICATION FAIL**: ${task.content}`,
-									evidence ? `  Evidence: ${evidence}` : "",
-									``,
-									`Retry ${task.verifyRetries}/${MAX_VERIFY_RETRIES}. Step reset to pending with fix context.`,
-									`${retriesLeft} verification retries remaining before auto-fail.`,
-								].join("\n"),
-							},
-						],
-						details: { task, verified: false, outcome: "FAIL", retriesLeft, failureCode },
+						content: [{ type: "text" as const, text: plan.messageLines.join("\n") }],
+						details: { task, ...plan.details },
 					};
 				}
 
-				if (decision.action === "escalate" && decision.nextRung !== undefined && ladder) {
-					const fromRung = task.rung;
-					const fromModel =
-						task.lastModel ??
-						task.model ??
-						(fromRung !== undefined ? rungModel(ladder, fromRung) : undefined);
-					const toModel = rungModel(ladder, decision.nextRung);
-
-					if (!rt.beginStepRetry(ctx, quest, params.index, "model escalation")) {
+				if (plan.kind === "escalate") {
+					if (!rt.beginStepRetry(ctx, quest, params.index, plan.beginRetryReason)) {
 						return textResult("Escalation blocked; the owned worktree was retained as evidence.");
 					}
-					task.attempts = 0;
-					task.verifyRetries = 0;
-					task.rung = decision.nextRung;
-					task.escalations = (task.escalations ?? 0) + 1;
-					task.startedAt = null;
-					task.completedAt = null;
-					task.result = `Verification FAIL on ${fromModel ?? "previous model"}: ${evidence || "no details"}. Escalating to rung ${decision.nextRung} (${toModel}).`;
-					rt.transitionStep(ctx, quest, params.index, "queued", "escalated retry queued");
-
-					recordRun(ctx.cwd, {
-						kind: "verify_fail",
-						taskIndex: params.index,
-						taskContent: task.content,
-						agent: "verifier",
-						timestamp: Date.now(),
-						evidence,
-						verifyRetriesLeft: 0,
-						failureCode,
-					});
-					recordRun(ctx.cwd, {
-						kind: "escalate",
-						taskIndex: params.index,
-						taskContent: task.content,
-						agent: task.agent,
-						model: fromModel,
-						fromModel,
-						toModel,
-						rung: decision.nextRung,
-						timestamp: Date.now(),
-						evidence,
-					});
-
+					task.attempts = plan.patches.attempts;
+					task.verifyRetries = plan.patches.verifyRetries;
+					task.rung = plan.patches.rung;
+					task.escalations = plan.patches.escalations;
+					task.startedAt = plan.patches.startedAt;
+					task.completedAt = plan.patches.completedAt;
+					task.result = plan.patches.result;
+					rt.transitionStep(ctx, quest, params.index, plan.nextPhase, plan.transitionReason);
+					emitRunEvents(plan.events);
 					quest.lastFiredStepIndex = -1;
 					quest.sameStepCount = 0;
 					persist(ctx, quest);
-
 					return {
-						content: [
-							{
-								type: "text" as const,
-								text: [
-									`⬆️ Step #${params.index + 1} **VERIFICATION FAIL — ESCALATING**: ${task.content}`,
-									evidence ? `  Evidence: ${evidence}` : "",
-									``,
-									`Rung ${fromRung ?? "?"} (${fromModel ?? "unknown"}) exhausted. Next delegation will use rung ${decision.nextRung}/${ladder.rungs.length - 1} (${toModel}).`,
-									`Per-rung verification retry budget reset; failure briefs will be included in the next prompt.`,
-								].join("\n"),
-							},
-						],
-						details: {
-							task,
-							verified: false,
-							outcome: "FAIL",
-							escalated: true,
-							fromRung,
-							nextRung: decision.nextRung,
-							fromModel,
-							toModel,
-							escalations: task.escalations,
-							failureCode,
-						},
+						content: [{ type: "text" as const, text: plan.messageLines.join("\n") }],
+						details: { task, ...plan.details },
 					};
 				}
 
-				// No retries/escalations left: auto-fail.
-				if (!rt.transitionStep(ctx, quest, params.index, "failed", "retry budget exhausted")) {
+				// plan.kind === "fail"
+				if (!rt.transitionStep(ctx, quest, params.index, plan.nextPhase, plan.transitionReason)) {
 					return textResult("Cannot mark failed from the current phase.");
 				}
-				const failureTrail = renderFailureBriefs(
-					task.failureBriefs,
-					briefBudgetForModel(
-						task.lastModel || task.model ? { id: task.lastModel ?? task.model } : undefined,
-						LADDER,
-					),
-					LADDER.maxBriefs,
-				);
-				task.completedAt = Date.now();
-				task.result = [
-					`Verification FAIL after ${MAX_VERIFY_RETRIES} retries${task.escalations ? ` and ${task.escalations} escalation(s)` : ""}: ${evidence || "no details"}`,
-					failureTrail,
-				]
-					.filter(Boolean)
-					.join("\n\n");
-
-				recordRun(ctx.cwd, {
-					kind: "verify_fail",
-					taskIndex: params.index,
-					taskContent: task.content,
-					agent: "verifier",
-					timestamp: Date.now(),
-					evidence,
-					verifyRetriesLeft: 0,
-					failureCode,
-				});
+				task.completedAt = plan.patches.completedAt;
+				task.result = plan.patches.result;
+				emitRunEvents(plan.events);
 				recordEval(
 					ctx.cwd,
-					makeEval(quest, task, params.index, "failed", false, task.result, failureCode),
+					makeEval(
+						quest,
+						task,
+						params.index,
+						plan.evalIntent.status,
+						plan.evalIntent.verified,
+						plan.evalIntent.evidence,
+						plan.evalIntent.failureCode,
+					),
 				);
-
 				quest.lastFiredStepIndex = -1;
 				quest.sameStepCount = 0;
 				claimReg.unregister(ctx.cwd, params.index);
 				rt.dispatchGuard.release(ctx.cwd, params.index);
 				persist(ctx, quest);
-
 				return {
-					content: [
-						{
-							type: "text" as const,
-							text: [
-								`❌ Step #${params.index + 1} **AUTO-FAILED** (${MAX_VERIFY_RETRIES} verification retries exhausted): ${task.content}`,
-								evidence ? `  Last evidence: ${evidence}` : "",
-								failureTrail,
-							]
-								.filter(Boolean)
-								.join("\n"),
-						},
-					],
-					details: { task, verified: false, outcome: "FAIL", exhausted: true, failureCode },
+					content: [{ type: "text" as const, text: plan.messageLines.join("\n") }],
+					details: { task, ...plan.details },
 				};
 			};
 
+			const planFailFrom = (
+				evidence: string | undefined,
+				inferred: boolean,
+				failureCode?: FailureCode,
+			) => {
+				const ladder = task.rung !== undefined ? loadModelLadder(ctx.cwd) : null;
+				return planVerifyFail({
+					step: snapshotStepForVerify(task),
+					stepIndex: params.index,
+					evidence,
+					inferred,
+					failureCode,
+					ladderLength: ladder?.rungs.length ?? 0,
+					ladderRungs: ladder?.rungs,
+					briefBudget: briefBudgetForModel(
+						task.lastModel || task.model ? { id: task.lastModel ?? task.model } : undefined,
+						LADDER,
+					),
+					maxBriefs: LADDER.maxBriefs,
+				});
+			};
+
 			// ── Verification outcome ──────────────────────────────────────────
-			// The explicit verifyOutcome flag wins. Otherwise, when the step is
-			// already awaiting verification, infer the verdict deterministically
-			// from the reported result text (parseVerifyOutcome tolerates markdown,
-			// labels, emoji, and trailing verdicts). This keeps the quality gate
-			// working when a smaller orchestrator states the verdict in prose but
-			// omits the structured flag — without it, such a call would bounce the
-			// step back into verification instead of resolving it.
-			let effectiveOutcome: "PASS" | "FAIL" | undefined = params.verifyOutcome;
-			if (!effectiveOutcome && task.status === "verifying") {
-				const parsed = parseVerifyOutcome(params.result ?? "");
-				if (parsed === "pass") effectiveOutcome = "PASS";
-				else if (parsed === "fail") effectiveOutcome = "FAIL";
-			}
-			const inferredOutcome = !params.verifyOutcome && effectiveOutcome !== undefined;
-			// When inferred from prose, use the result text itself as the evidence.
-			const effectiveEvidence =
-				params.verifyEvidence ?? (inferredOutcome ? params.result : undefined);
+			// Explicit verifyOutcome wins; otherwise prose-infer while verifying
+			// (see resolveEffectiveOutcome / parseVerifyOutcome).
+			const resolved = resolveEffectiveOutcome({
+				verifyOutcome: params.verifyOutcome,
+				stepStatus: task.status,
+				resultText: params.result,
+				verifyEvidence: params.verifyEvidence,
+			});
+			const {
+				outcome: effectiveOutcome,
+				inferred: inferredOutcome,
+				evidence: effectiveEvidence,
+			} = resolved;
 
 			if (effectiveOutcome) {
 				if (task.status !== "verifying") {
@@ -742,39 +638,35 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				}
 
 				if (effectiveOutcome === "PASS") {
-					const awaitingIntegration = Boolean(
-						quest.parallel?.enabled && task.sandboxArtifacts?.worktreePath,
-					);
-					if (
-						!rt.transitionStep(
-							ctx,
-							quest,
-							params.index,
-							awaitingIntegration ? "checking" : "done",
-							awaitingIntegration
-								? "verification passed; awaiting integration"
-								: "verification passed",
-						)
-					) {
+					const plan = planVerifyPass({
+						step: snapshotStepForVerify(task),
+						stepIndex: params.index,
+						evidence: effectiveEvidence,
+						parallelEnabled: Boolean(quest.parallel?.enabled),
+					});
+					if (!rt.transitionStep(ctx, quest, params.index, plan.nextPhase, plan.transitionReason)) {
 						return textResult("Cannot complete from the current phase.");
 					}
-					task.verifyResult = `[PASS] ${effectiveEvidence || ""}`.trim();
-					task.verified = true;
-					task.completedAt = Date.now();
+					task.verifyResult = plan.patches.verifyResult;
+					task.verified = plan.patches.verified;
+					task.completedAt = plan.patches.completedAt;
 
-					recordRun(ctx.cwd, {
-						kind: "verify_pass",
-						taskIndex: params.index,
-						taskContent: task.content,
-						agent: "verifier",
-						timestamp: Date.now(),
-						evidence: effectiveEvidence,
-					});
-					recordEval(ctx.cwd, makeEval(quest, task, params.index, "done", true, effectiveEvidence));
+					emitRunEvents(plan.events);
+					recordEval(
+						ctx.cwd,
+						makeEval(
+							quest,
+							task,
+							params.index,
+							plan.evalIntent.status,
+							plan.evalIntent.verified,
+							plan.evalIntent.evidence,
+						),
+					);
 
 					quest.lastFiredStepIndex = -1;
 					quest.sameStepCount = 0;
-					if (!awaitingIntegration) {
+					if (plan.releaseClaims) {
 						claimReg.unregister(ctx.cwd, params.index);
 						rt.dispatchGuard.release(ctx.cwd, params.index);
 					}
@@ -793,24 +685,19 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 						content: [
 							{
 								type: "text",
-								text: [
-									`✅ Step #${params.index + 1} **VERIFIED PASS**: ${task.content}`,
-									effectiveEvidence ? `  Evidence: ${effectiveEvidence}` : "",
-									``,
-									`Step marked done. Progress: ${done}/${quest.steps.length} done`,
-									next
-										? `Next: ${next.task.content} [${next.task.agent}]`
-										: "All steps done or blocked!",
+								text: formatVerifyPassMessage({
+									stepIndex: params.index,
+									content: task.content,
+									evidence: effectiveEvidence,
+									progress: `${done}/${quest.steps.length}`,
+									nextLabel: next ? `${next.task.content} [${next.task.agent}]` : null,
 									gitPrompt,
-								]
-									.filter(Boolean)
-									.join("\n"),
+								}),
 							},
 						],
 						details: {
 							task,
-							verified: true,
-							outcome: "PASS",
+							...plan.details,
 							progress: `${done}/${quest.steps.length}`,
 						},
 					};
@@ -819,7 +706,9 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				// FAIL — shared retry/escalate/auto-fail machine (LLM verdict source).
 				// No deterministic check failed: attribute to model quality so eval
 				// stats can distinguish soft quality fails from hard check failures.
-				return applyVerifyFail(effectiveEvidence, inferredOutcome, "MODEL_QUALITY");
+				return applyVerifyFailPlan(
+					planFailFrom(effectiveEvidence, inferredOutcome, "MODEL_QUALITY"),
+				);
 			}
 
 			// Persist the child completion payload at the quest_update boundary. Keep
@@ -891,7 +780,22 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 						]
 							.filter(Boolean)
 							.join("\n");
-						return applyVerifyFail(evidenceText, false, failureCodeForCheck(failed.kind));
+						const ladder = task.rung !== undefined ? loadModelLadder(ctx.cwd) : null;
+						return applyVerifyFailPlan(
+							planCheckFail({
+								step: snapshotStepForVerify(task),
+								stepIndex: params.index,
+								evidence: evidenceText,
+								failureCode: failureCodeForCheck(failed.kind),
+								ladderLength: ladder?.rungs.length ?? 0,
+								ladderRungs: ladder?.rungs,
+								briefBudget: briefBudgetForModel(
+									task.lastModel || task.model ? { id: task.lastModel ?? task.model } : undefined,
+									LADDER,
+								),
+								maxBriefs: LADDER.maxBriefs,
+							}),
+						);
 					}
 
 					if (!rt.transitionStep(ctx, quest, params.index, "verifying", "checks passed")) {
@@ -956,21 +860,25 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				}
 			}
 
-			// Parallel branches finish in checking until deterministic integration.
-			const nextPhase =
-				params.status === "done" && quest.parallel?.enabled && task.sandboxArtifacts?.worktreePath
-					? "checking"
-					: params.status;
-			if (!rt.transitionStep(ctx, quest, params.index, nextPhase, "quest_update")) {
+			// Terminal status without verification gate (or verification disabled).
+			const terminal = planTerminalUpdate({
+				step: snapshotStepForVerify(task),
+				stepIndex: params.index,
+				status: params.status,
+				result: params.result,
+				parallelEnabled: Boolean(quest.parallel?.enabled),
+			});
+			if (
+				!rt.transitionStep(ctx, quest, params.index, terminal.nextPhase, terminal.transitionReason)
+			) {
 				return textResult(`Invalid phase transition for step #${params.index + 1}.`);
 			}
 
-			if (params.result) task.result = params.result;
-			if (params.status === "done" || params.status === "failed") {
-				task.completedAt = Date.now();
+			if (terminal.patches.result !== undefined) task.result = terminal.patches.result;
+			if (terminal.patches.completedAt !== undefined) {
+				task.completedAt = terminal.patches.completedAt;
 			}
-			// Release write claims on terminal states.
-			if (task.phase === "done" || task.phase === "failed" || task.phase === "skipped") {
+			if (terminal.releaseClaims) {
 				claimReg.unregister(ctx.cwd, params.index);
 				rt.dispatchGuard.release(ctx.cwd, params.index);
 			}
@@ -1015,22 +923,16 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				content: [
 					{
 						type: "text",
-						text: [
-							`Step #${params.index + 1} → **${params.status.toUpperCase()}**: ${task.content}`,
-							params.result ? `  Result: ${params.result}` : "",
-							``,
-							`Progress: ${done}/${total} done`,
-							next
-								? `Next: ${next.task.content} [${next.task.agent}]`
-								: "All steps done or blocked!",
-							``,
-							quest.status === "active"
-								? "Auto-pilot will fire the next step."
-								: "Quest is paused. /quest resume to continue.",
+						text: formatTerminalUpdateMessage({
+							stepIndex: params.index,
+							content: task.content,
+							status: params.status,
+							result: params.result,
+							progress: `${done}/${total}`,
+							nextLabel: next ? `${next.task.content} [${next.task.agent}]` : null,
+							questActive: quest.status === "active",
 							gitPrompt,
-						]
-							.filter(Boolean)
-							.join("\n"),
+						}),
 					},
 				],
 				details: {

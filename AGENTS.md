@@ -61,11 +61,12 @@ extensions/
     index.ts          Thin entry point: builds QuestRuntime, calls register-* modules
     runtime.ts        createQuestRuntime: shared quest cache, auto-pilot lock, ledgers, helpers
     register-create.ts    quest_create, quest_decide
-    register-planning.ts  quest_plan, quest_update, quest_approve
+    register-planning.ts  quest_plan, quest_update, quest_approve (adapter)
     register-status.ts    quest_status/commit/git_summary/team/history/memory_save
     register-delegate.ts  quest_assign_model/delegate/abort/task_detail/step_detail
     register-events.ts    agent_end auto-pilot adapter (handleAgentEnd + crash recovery), session_start, model_select, sandbox tool_call hook
     auto-pilot.ts     Pure decideAfterAgentEnd (abort/requeue/stall/burst/complete/escalate)
+    verify-outcome.ts Pure quest_update completion / verify-fail plans (PASS/FAIL/checks/terminal)
     register-command.ts   /quest command + kanban board
     sandbox-guard.ts  evaluateToolCall: per-call block/allow decision (real enforcement)
     storage.ts        Quest load/save/archive; sync quest conventions + agent-model choices to memory
