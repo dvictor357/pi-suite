@@ -7,6 +7,7 @@ import { clearQuestFromTodo, compactAwarenessBlock } from "./todo-sync";
 import { ensureBuiltInTeams, loadTeams, teamInstallFromGit } from "./teams";
 import { formatQuestStatus, nextPendingStep } from "./steering";
 import { renderStatus, writeQuestSessionMeta } from "./status";
+import { listBlockedWithWorktree } from "./phase-loop";
 import type { QuestRuntime } from "./runtime";
 
 export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
@@ -238,9 +239,15 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 
 					const done = quest.steps.filter((t) => t.status === "done").length;
 					const next = nextPendingStep(quest);
+					// Blocked steps are not pending — surface them so resume is not silent.
+					const blockedWt = listBlockedWithWorktree(quest.steps);
+					const blockedNote =
+						blockedWt.length > 0
+							? ` ${blockedWt.length} blocked with worktree (quest_recover_step to requeue).`
+							: "";
 					ctx.ui.notify(
-						`Quest "${quest.name}" resumed. ${done}/${quest.steps.length} done.${next ? ` Next: ${next.task.content}` : ""}`,
-						"info",
+						`Quest "${quest.name}" resumed. ${done}/${quest.steps.length} done.${next ? ` Next: ${next.task.content}` : ""}${blockedNote}`,
+						blockedWt.length && !next ? "warning" : "info",
 					);
 					rt.fireNextTask(ctx);
 					return;

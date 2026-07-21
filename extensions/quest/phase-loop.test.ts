@@ -7,6 +7,8 @@ import {
 	recoverStaleRuns,
 	DispatchGuard,
 	checkTimeout,
+	listBlockedWithWorktree,
+	decideBlockedRecovery,
 } from "./phase-loop";
 import type { QuestStep } from "./types";
 
@@ -354,5 +356,106 @@ describe("checkTimeout", () => {
 	test("uses DEFAULT_STEP_TIMEOUT_MS when no timeout arg given", () => {
 		const step = makeStep({ status: "running", startedAt: Date.now() - 1000 });
 		assert.equal(checkTimeout(step), 0); // 1s < 600s default
+	});
+
+	test("uses phaseChangedAt over startedAt when both set", () => {
+		const now = 1_000_000;
+		const step = makeStep({
+			status: "running",
+			phase: "running",
+			startedAt: now - 999_000,
+			phaseChangedAt: now - 5_000,
+		});
+		assert.equal(checkTimeout(step, 10_000, now), 0);
+		assert.ok(checkTimeout(step, 1_000, now) > 0);
+	});
+});
+
+// ── Blocked worktree recovery (R6) ─────────────────────────────────────────
+
+describe("listBlockedWithWorktree", () => {
+	test("lists only blocked steps that retain a worktree path", () => {
+		const steps = [
+			makeStep({
+				status: "pending",
+				phase: "blocked",
+				content: "with-wt",
+				sandboxArtifacts: {
+					calls: [],
+					touchedPaths: [],
+					worktreePath: "/tmp/.pi-worktrees/x/step-0",
+				},
+			}),
+			makeStep({ status: "pending", phase: "blocked", content: "no-wt" }),
+			makeStep({
+				status: "pending",
+				phase: "queued",
+				content: "queued-with-path",
+				sandboxArtifacts: {
+					calls: [],
+					touchedPaths: [],
+					worktreePath: "/tmp/other",
+				},
+			}),
+		];
+		const listed = listBlockedWithWorktree(steps);
+		assert.equal(listed.length, 1);
+		assert.equal(listed[0].index, 0);
+		assert.equal(listed[0].worktreePath, "/tmp/.pi-worktrees/x/step-0");
+		assert.equal(listed[0].content, "with-wt");
+	});
+});
+
+describe("decideBlockedRecovery", () => {
+	test("force requeue detaches worktree path", () => {
+		const d = decideBlockedRecovery({
+			phase: "blocked",
+			hasWorktreePath: true,
+			mode: "force",
+		});
+		assert.equal(d.action, "requeue");
+		if (d.action !== "requeue") return;
+		assert.equal(d.clearWorktreePath, true);
+		assert.match(d.reason, /force/i);
+	});
+
+	test("safe requeue when remove succeeded", () => {
+		const d = decideBlockedRecovery({
+			phase: "blocked",
+			hasWorktreePath: true,
+			mode: "safe",
+			removeSucceeded: true,
+		});
+		assert.equal(d.action, "requeue");
+		if (d.action !== "requeue") return;
+		assert.equal(d.clearWorktreePath, true);
+	});
+
+	test("safe stays blocked when remove fails", () => {
+		const d = decideBlockedRecovery({
+			phase: "blocked",
+			hasWorktreePath: true,
+			mode: "safe",
+			removeSucceeded: false,
+		});
+		assert.equal(d.action, "stay_blocked");
+	});
+
+	test("safe requeues blocked step with no worktree path", () => {
+		const d = decideBlockedRecovery({
+			phase: "blocked",
+			hasWorktreePath: false,
+			mode: "safe",
+		});
+		assert.equal(d.action, "requeue");
+	});
+
+	test("rejects non-blocked phase", () => {
+		const d = decideBlockedRecovery({
+			phase: "queued",
+			hasWorktreePath: false,
+			mode: "force",
+		});
+		assert.equal(d.action, "reject");
 	});
 });

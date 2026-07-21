@@ -4,7 +4,9 @@ import { DEFAULT_RETRY_POLICY } from "../../core";
 import {
 	decideAfterAgentEnd,
 	decideForNextStep,
+	DEFAULT_STEP_TIMEOUT_MS,
 	nextPendingFromSnapshot,
+	planTimeoutActions,
 	planUnresolvedRequeues,
 	simulateAfterUnresolved,
 	snapshotQuestForAutoPilot,
@@ -27,6 +29,8 @@ function step(
 		rung: partial.rung,
 		escalations: partial.escalations,
 		result: partial.result,
+		phaseChangedAt: partial.phaseChangedAt,
+		startedAt: partial.startedAt,
 	};
 }
 
@@ -445,6 +449,158 @@ describe("decideForNextStep", () => {
 		assert.equal(d.kind, "ready");
 		if (d.kind !== "ready") return;
 		assert.equal(d.sameStepCount, 1);
+	});
+});
+
+describe("planTimeoutActions + sequential timeout (R7)", () => {
+	const now = 10_000_000;
+	const timeoutMs = 60_000;
+
+	test("requeues running step past phaseChangedAt deadline", () => {
+		const plan = planTimeoutActions(
+			[
+				step({
+					status: "running",
+					phase: "running",
+					attempts: 1,
+					phaseChangedAt: now - timeoutMs - 1,
+				}),
+			],
+			policy.maxRetries,
+			timeoutMs,
+			now,
+		);
+		assert.equal(plan.length, 1);
+		assert.equal(plan[0].action, "requeue");
+		assert.ok(plan[0].elapsedMs > timeoutMs);
+	});
+
+	test("includes verifying steps (unlike unresolved requeue)", () => {
+		const plan = planTimeoutActions(
+			[
+				step({
+					status: "verifying",
+					phase: "verifying",
+					attempts: 0,
+					phaseChangedAt: now - timeoutMs - 5_000,
+				}),
+			],
+			policy.maxRetries,
+			timeoutMs,
+			now,
+		);
+		assert.equal(plan.length, 1);
+		assert.equal(plan[0].action, "requeue");
+	});
+
+	test("fails when attempts already past maxRetries", () => {
+		const plan = planTimeoutActions(
+			[
+				step({
+					status: "running",
+					phase: "running",
+					attempts: policy.maxRetries + 1,
+					phaseChangedAt: now - timeoutMs - 1,
+				}),
+			],
+			policy.maxRetries,
+			timeoutMs,
+			now,
+		);
+		assert.deepEqual(plan, [{ index: 0, action: "fail", elapsedMs: plan[0].elapsedMs }]);
+	});
+
+	test("ignores steps within window or without timestamps", () => {
+		const plan = planTimeoutActions(
+			[
+				step({
+					status: "running",
+					phase: "running",
+					phaseChangedAt: now - 1_000,
+				}),
+				step({ status: "running", phase: "running" }),
+				step({ status: "pending", phase: "queued", phaseChangedAt: now - 999_999 }),
+			],
+			policy.maxRetries,
+			timeoutMs,
+			now,
+		);
+		assert.deepEqual(plan, []);
+	});
+
+	test("decideAfterAgentEnd applies timeout before unresolved and requeues to fire", () => {
+		const d = decideAfterAgentEnd({
+			wasAborted: false,
+			hasUI: false,
+			now,
+			quest: quest(
+				[
+					step({
+						status: "running",
+						phase: "running",
+						attempts: 1,
+						content: "hung",
+						phaseChangedAt: now - DEFAULT_STEP_TIMEOUT_MS - 100,
+					}),
+				],
+				{ stepTimeoutMs: DEFAULT_STEP_TIMEOUT_MS },
+			),
+		});
+		assert.equal(d.kind, "proceed");
+		if (d.kind !== "proceed") return;
+		assert.equal(d.timeouts.length, 1);
+		assert.equal(d.timeouts[0].action, "requeue");
+		// Timed-out index is not also in unresolved.
+		assert.deepEqual(d.unresolved, []);
+		assert.equal(d.sequential.kind, "ready");
+		if (d.sequential.kind !== "ready") return;
+		assert.equal(d.sequential.index, 0);
+	});
+
+	test("decideAfterAgentEnd timeout fail when budget exhausted", () => {
+		const d = decideAfterAgentEnd({
+			wasAborted: false,
+			hasUI: false,
+			now,
+			quest: quest([
+				step({
+					status: "verifying",
+					phase: "verifying",
+					attempts: policy.maxRetries + 1,
+					phaseChangedAt: now - 700_000,
+				}),
+			]),
+		});
+		assert.equal(d.kind, "proceed");
+		if (d.kind !== "proceed") return;
+		assert.equal(d.timeouts[0]?.action, "fail");
+		// After timeout fail simulation, no next pending → failed_steps
+		assert.equal(d.sequential.kind, "failed_steps");
+	});
+
+	test("snapshotQuestForAutoPilot carries phaseChangedAt and stepTimeoutMs", () => {
+		const snap = snapshotQuestForAutoPilot({
+			name: "Q",
+			lastFiredStepIndex: -1,
+			sameStepCount: 0,
+			stepsSincePause: 0,
+			parallel: { enabled: false, stepTimeoutMs: 12_000 },
+			steps: [
+				{
+					content: "s",
+					status: "running",
+					phase: "running",
+					agent: "worker",
+					attempts: 1,
+					dependencies: [],
+					phaseChangedAt: 42,
+					startedAt: 40,
+				},
+			],
+		});
+		assert.equal(snap.stepTimeoutMs, 12_000);
+		assert.equal(snap.steps[0].phaseChangedAt, 42);
+		assert.equal(snap.steps[0].startedAt, 40);
 	});
 });
 

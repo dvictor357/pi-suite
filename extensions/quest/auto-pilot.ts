@@ -1,16 +1,36 @@
 /**
  * Pure auto-pilot decisions for the `agent_end` handler.
  *
- * Keeps the sequential decision tree (abort, unresolved requeue, completion,
- * stall, attempt-budget, burst, fire) free of SDK / I/O so every branch is
- * unit-testable. `register-events.ts` is the adapter: load state → decide →
- * apply side effects (persist, UI, fireStep, fireParallelBatch, …).
+ * Keeps the sequential decision tree (abort, timeout, unresolved requeue,
+ * completion, stall, attempt-budget, burst, fire) free of SDK / I/O so every
+ * branch is unit-testable. `register-events.ts` is the adapter: load state →
+ * decide → apply side effects (persist, UI, fireStep, fireParallelBatch, …).
  *
- * Behavior-preserving extract of the agent_end tree — no intentional policy change.
+ * ## Attempt semantics (turn-ended-without-update vs true failure)
+ *
+ * - `fireStep` / parallel dispatch increment `step.attempts` when a step enters
+ *   `dispatching`/`running`. That count is the attempt budget unit.
+ * - When a turn ends without `quest_update` leaving a step in
+ *   `dispatching`/`running`, {@link planUnresolvedRequeues} requeues (or fails
+ *   if `attempts > maxRetries`). Requeue itself does **not** increment attempts;
+ *   the **next** fire does. So an orchestrator that ends the turn without
+ *   updating the step burns one attempt per fire→unresolved→requeue cycle until
+ *   the budget is exhausted (`fail_budget` / ledger fail).
+ * - This is intentional fairness: the first unresolved requeue does not
+ *   immediately fail the step — remaining budget is available for easy recovery
+ *   if the model simply forgot to call `quest_update`. Full budget burn only
+ *   happens after repeated unresolved turns.
+ * - Wall-clock timeouts ({@link planTimeoutActions}) use the same requeue/fail
+ *   budget and record a ledger `timeout` event. Verifying steps are included
+ *   (unlike unresolved requeue, which only covers dispatching/running).
+ * - True verified failures go through the verifier/ladder path, not this tree.
  */
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "../../core";
 import { decideVerifyFailAction } from "./ladder";
+import { checkTimeout, DEFAULT_STEP_TIMEOUT_MS } from "./phase-loop";
 import type { StepPhase, StepStatus } from "./types";
+
+export { DEFAULT_STEP_TIMEOUT_MS };
 
 /** Resolve phase from snapshot fields only (mirrors phase-loop.resolvePhase). */
 function phaseOf(step: { status: StepStatus; phase?: StepPhase }): StepPhase {
@@ -40,6 +60,10 @@ export interface AutoPilotStepSnapshot {
 	rung?: number;
 	escalations?: number;
 	result?: string | null;
+	/** Epoch-ms when phase last changed — used for sequential timeout sweep. */
+	phaseChangedAt?: number;
+	/** Epoch-ms when the current attempt started — timeout fallback. */
+	startedAt?: number | null;
 }
 
 /** Minimal quest fields the decision tree reads. */
@@ -51,6 +75,11 @@ export interface AutoPilotQuestSnapshot {
 	steps: readonly AutoPilotStepSnapshot[];
 	/** When true, sequential fire is replaced by parallel-batch fall-through handling. */
 	parallelEnabled: boolean;
+	/**
+	 * Wall-clock budget for a sequential step in dispatching/running/verifying.
+	 * Defaults to {@link DEFAULT_STEP_TIMEOUT_MS} when omitted.
+	 */
+	stepTimeoutMs?: number;
 }
 
 export interface AutoPilotInput {
@@ -64,6 +93,8 @@ export interface AutoPilotInput {
 	 */
 	nextStepLadderLength?: number;
 	policy?: RetryPolicy;
+	/** Injected clock for timeout tests (defaults to Date.now()). */
+	now?: number;
 }
 
 // ── Decision variants ────────────────────────────────────────────────────────
@@ -73,8 +104,13 @@ export type UnresolvedAction =
 	| { index: number; action: "fail" }
 	| { index: number; action: "requeue" };
 
+/** Timed-out dispatching/running/verifying steps to fail or requeue. */
+export type TimeoutAction =
+	| { index: number; action: "fail"; elapsedMs: number }
+	| { index: number; action: "requeue"; elapsedMs: number };
+
 /**
- * Terminal outcome after unresolved requeues (and optional parallel try).
+ * Terminal outcome after timeout/unresolved requeues (and optional parallel try).
  * Adapter applies I/O for each kind; pure function never touches disk/UI.
  */
 export type SequentialDecision =
@@ -140,6 +176,8 @@ export type AutoPilotDecision =
 	| { kind: "abort_pause" }
 	| {
 			kind: "proceed";
+			/** Wall-clock timeouts applied before unresolved requeues. */
+			timeouts: TimeoutAction[];
 			unresolved: UnresolvedAction[];
 			/**
 			 * When true, adapter calls `fireParallelBatch`. If that returns true,
@@ -171,6 +209,30 @@ export function planUnresolvedRequeues(
 }
 
 /**
+ * Plan fail/requeue for steps past the wall-clock phase deadline.
+ * Covers dispatching/running/verifying (same phases as {@link checkTimeout}).
+ */
+export function planTimeoutActions(
+	steps: readonly AutoPilotStepSnapshot[],
+	maxRetries: number,
+	timeoutMs: number = DEFAULT_STEP_TIMEOUT_MS,
+	now: number = Date.now(),
+): TimeoutAction[] {
+	const plan: TimeoutAction[] = [];
+	for (let index = 0; index < steps.length; index++) {
+		const step = steps[index];
+		const elapsedMs = checkTimeout(step, timeoutMs, now);
+		if (!elapsedMs) continue;
+		if (step.attempts > maxRetries) {
+			plan.push({ index, action: "fail", elapsedMs });
+		} else {
+			plan.push({ index, action: "requeue", elapsedMs });
+		}
+	}
+	return plan;
+}
+
+/**
  * Simulate post-requeue step statuses so nextPendingStep can be computed purely.
  * Requeued → pending/queued; failed → failed. Does not mutate the input.
  */
@@ -191,6 +253,19 @@ export function simulateAfterUnresolved(
 		}
 	}
 	return out;
+}
+
+/** Apply timeout plan then unresolved plan onto a snapshot (pure). */
+export function simulateAfterTimeoutsAndUnresolved(
+	steps: readonly AutoPilotStepSnapshot[],
+	timeouts: readonly TimeoutAction[],
+	unresolved: readonly UnresolvedAction[],
+): AutoPilotStepSnapshot[] {
+	const afterTimeouts = simulateAfterUnresolved(
+		steps,
+		timeouts.map((t) => ({ index: t.index, action: t.action })),
+	);
+	return simulateAfterUnresolved(afterTimeouts, unresolved);
 }
 
 /** Pure next-pending selection over a snapshot (mirrors steering.nextPendingStep). */
@@ -359,19 +434,27 @@ export function decideForNextStep(
 export function decideAfterAgentEnd(input: AutoPilotInput): AutoPilotDecision {
 	const policy = input.policy ?? DEFAULT_RETRY_POLICY;
 	const { quest, hasUI, wasAborted } = input;
+	const now = input.now ?? Date.now();
+	const timeoutMs = quest.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
 
 	if (wasAborted) {
 		return { kind: "abort_pause" };
 	}
 
-	const unresolved = planUnresolvedRequeues(quest.steps, policy.maxRetries);
-	const simulated = simulateAfterUnresolved(quest.steps, unresolved);
+	// Wall-clock timeouts first; unresolved requeue skips indices already timed out.
+	const timeouts = planTimeoutActions(quest.steps, policy.maxRetries, timeoutMs, now);
+	const timedOut = new Set(timeouts.map((t) => t.index));
+	const unresolved = planUnresolvedRequeues(quest.steps, policy.maxRetries).filter(
+		(u) => !timedOut.has(u.index),
+	);
+	const simulated = simulateAfterTimeoutsAndUnresolved(quest.steps, timeouts, unresolved);
 	const tryParallel = quest.parallelEnabled;
 
 	const next = nextPendingFromSnapshot(simulated);
 	if (!next) {
 		return {
 			kind: "proceed",
+			timeouts,
 			unresolved,
 			tryParallel,
 			sequential: decideWhenNoNext(simulated, hasUI),
@@ -388,6 +471,7 @@ export function decideAfterAgentEnd(input: AutoPilotInput): AutoPilotDecision {
 
 	return {
 		kind: "proceed",
+		timeouts,
 		unresolved,
 		tryParallel,
 		sequential,
@@ -410,8 +494,10 @@ export function snapshotQuestForAutoPilot(quest: {
 		rung?: number;
 		escalations?: number;
 		result?: string | null;
+		phaseChangedAt?: number;
+		startedAt?: number | null;
 	}[];
-	parallel?: { enabled?: boolean } | null;
+	parallel?: { enabled?: boolean; stepTimeoutMs?: number } | null;
 }): AutoPilotQuestSnapshot {
 	return {
 		name: quest.name,
@@ -419,6 +505,8 @@ export function snapshotQuestForAutoPilot(quest: {
 		sameStepCount: quest.sameStepCount,
 		stepsSincePause: quest.stepsSincePause,
 		parallelEnabled: !!quest.parallel?.enabled,
+		// Honor parallel.stepTimeoutMs when set; sequential path uses the same default.
+		stepTimeoutMs: quest.parallel?.stepTimeoutMs,
 		steps: quest.steps.map((s) => ({
 			content: s.content,
 			status: s.status,
@@ -429,6 +517,8 @@ export function snapshotQuestForAutoPilot(quest: {
 			rung: s.rung,
 			escalations: s.escalations,
 			result: s.result,
+			phaseChangedAt: s.phaseChangedAt,
+			startedAt: s.startedAt,
 		})),
 	};
 }

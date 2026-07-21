@@ -144,6 +144,7 @@ Tools registered by quest:
 
 - `quest_create`, `quest_plan`, `quest_update`, `quest_approve`
 - `quest_status`, `quest_task_detail` / `quest_step_detail`, `quest_history`, `quest_abort`
+- `quest_recover_step` — requeue a blocked step (`safe` clean worktree remove, or `force` detach)
 - `quest_commit`, `quest_git_summary`
 - `quest_team`, `quest_decide`, `quest_memory_save`
 - `quest_assign_model`, `quest_assign_ladder`, `quest_delegate` — orchestrator-driven sub-agent model assignment, approved escalation ladders, and isolated sub-agent spawn

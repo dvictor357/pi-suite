@@ -4,7 +4,7 @@ import { loadAgentModels, loadModelLadder } from "./storage";
 import { briefBudgetForModel, renderFailureBriefs, rungModel } from "./ladder";
 import { resolveSandboxProfile } from "./sandbox";
 import { buildStepContext, collectDependencyHandoffs } from "./context-broker";
-import { resolvePhase } from "./phase-loop";
+import { listBlockedWithWorktree, resolvePhase } from "./phase-loop";
 
 /**
  * Whether the just-ended turn was aborted by the user (Esc), as opposed to
@@ -48,7 +48,15 @@ export function formatStepTime(t: QuestStep): string {
 
 export function formatQuestStatus(quest: Quest): string {
 	const total = quest.steps.length;
-	const todo = quest.steps.filter((t) => t.status === "pending");
+	// Blocked steps project status=pending but are not runnable until recovered.
+	const blockedWithWt = listBlockedWithWorktree(quest.steps);
+	const blockedSet = new Set(
+		quest.steps.map((t, i) => (resolvePhase(t) === "blocked" ? i : -1)).filter((i) => i >= 0),
+	);
+	const todo = quest.steps.filter(
+		(t, i) => t.status === "pending" && resolvePhase(t) !== "blocked" && !blockedSet.has(i),
+	);
+	const blockedSteps = quest.steps.filter((t) => resolvePhase(t) === "blocked");
 	const doing = quest.steps.filter((t) => t.status === "running" || t.status === "verifying");
 	const completed = quest.steps.filter((t) => t.status === "done");
 	const done = completed.length;
@@ -75,7 +83,7 @@ export function formatQuestStatus(quest: Quest): string {
 		`Goal: ${quest.goal}`,
 		``,
 		`\`${pbar}\`  ${done}/${total} done${verified > 0 ? ` (${verified} verified)` : ""}`,
-		`${todo.length} todo · ${doing.length} in progress · ${failed.length} failed · ${skipped.length} skipped`,
+		`${todo.length} todo · ${doing.length} in progress · ${blockedSteps.length} blocked · ${failed.length} failed · ${skipped.length} skipped`,
 	];
 
 	if (quest.steps.length === 0) {
@@ -102,7 +110,27 @@ export function formatQuestStatus(quest: Quest): string {
 			return parts.length ? ` ${parts.join(" ")}` : "";
 		};
 
-		// TODO
+		// BLOCKED (with retained worktrees — not pending, not auto-fired)
+		if (blockedSteps.length > 0) {
+			lines.push(
+				``,
+				`━━━ ⛔ BLOCKED (${blockedSteps.length}${blockedWithWt.length ? `, ${blockedWithWt.length} with worktree` : ""}) ━━━━━━━━━`,
+			);
+			for (const t of blockedSteps) {
+				const i = quest.steps.indexOf(t);
+				const wt = t.sandboxArtifacts?.worktreePath;
+				const wtStr = wt ? `  🌳 \`${wt}\`` : "";
+				const snippet = t.result ? ` — ${t.result.slice(0, 60)}` : "";
+				lines.push(
+					`⛔ #${i + 1} ${t.content}  [${t.agent}]${sbMark(t)}${wtStr}${snippet}${fmtDep(t)}`,
+				);
+			}
+			lines.push(
+				`  Recover: quest_recover_step stepIndex=<n> mode=safe|force  (safe removes clean worktree; force detaches path)`,
+			);
+		}
+
+		// TODO (excludes blocked — those are not runnable)
 		if (todo.length > 0) {
 			lines.push(``, `━━━ 📋 TODO (${todo.length}) ━━━━━━━━━━━━━━━━━━━━━━━`);
 			for (const t of todo) {
