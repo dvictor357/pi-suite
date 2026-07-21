@@ -9,7 +9,8 @@
  *   - register-create.ts    quest_create, quest_decide
  *   - register-planning.ts  quest_plan, quest_update, quest_approve
  *   - register-status.ts    quest_status, quest_commit, quest_git_summary,
- *                           quest_team, quest_history, quest_memory_save
+ *                           quest_team, quest_history, quest_memory_save,
+ *                           quest_recover_step
  *   - register-delegate.ts  quest_assign_model, quest_delegate, quest_abort,
  *                           quest_task_detail
  *   - register-events.ts    agent_end auto-pilot, session_start, model_select

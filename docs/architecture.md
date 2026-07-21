@@ -216,6 +216,38 @@ claims as defense in depth. Checks and verification run in that worktree, then v
 branches integrate in stable dependency/index order. Merge conflicts pause the quest with
 the branch/worktree retained as evidence; cleanup removes only clean worktrees.
 
+### Blocked worktree recovery (R6)
+
+Abort, pause, and session restart deliberately retain dirty or unintegrated owned worktrees
+as evidence and leave the step in phase `blocked` (coarse `status` still projects to
+`pending`). Auto-pilot and `/quest resume` only fire `queued` steps, so blocked steps would
+otherwise look like todos and stay silent-stuck.
+
+- **Status:** `quest_status` / `formatQuestStatus` list blocked steps separately (count +
+  worktree paths) and exclude them from the TODO column.
+- **Recover:** `quest_recover_step` with `mode=safe` (remove a clean owned worktree, then
+  `blocked → queued`) or `mode=force` (detach the path without deleting disk evidence, then
+  requeue). Ledger records the phase transition. Pure decision: `decideBlockedRecovery` in
+  `phase-loop.ts`; I/O: `runtime.recoverBlockedStep`.
+
+### Sequential timeout + attempt fairness (R7)
+
+Parallel already sweeps `dispatching`/`running`/`verifying` against
+`stepTimeoutMs` / `DEFAULT_STEP_TIMEOUT_MS` (10 minutes). Sequential auto-pilot now does
+the same via pure `planTimeoutActions` in `auto-pilot.ts` (adapter records ledger
+`timeout`, then requeues or fails). `fireNextTask` also runs `recoverTimedOutSteps` before
+selecting work.
+
+**Attempt semantics (turn-ended-without-update):**
+
+- Dispatch (`fireStep` / parallel batch) increments `step.attempts`.
+- When a turn ends without `quest_update` while a step is still `dispatching`/`running`,
+  unresolved requeue does **not** increment attempts again; the next fire does. One
+  unresolved cycle therefore costs one attempt of budget — the first miss does not burn
+  the full budget; repeated misses eventually hit `fail_budget`.
+- Wall-clock timeouts use the same requeue/fail budget and always write a ledger
+  `timeout` event. Verifying steps are covered by timeout (not by unresolved requeue).
+
 ## Verified escalation ladder
 
 Quest can spend cheap tokens first without lowering the quality bar. The user approves an

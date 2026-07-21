@@ -57,7 +57,15 @@ import {
 } from "./ladder";
 import { resolveSandboxProfile } from "./sandbox";
 import { WriteClaimRegistry } from "./write-claim";
-import { DispatchGuard, checkTimeout, resolvePhase, validateTransition } from "./phase-loop";
+import {
+	DispatchGuard,
+	checkTimeout,
+	decideBlockedRecovery,
+	DEFAULT_STEP_TIMEOUT_MS,
+	resolvePhase,
+	validateTransition,
+	type RecoverBlockedMode,
+} from "./phase-loop";
 import {
 	selectDispatchBatch,
 	buildBatchSteering,
@@ -211,6 +219,26 @@ export interface QuestRuntime {
 	beginStepRetry(ctx: ExtensionContext, quest: Quest, index: number, reason: string): boolean;
 	/** Cancel active attempts, retaining isolated worktrees as blocked evidence. */
 	cancelActiveSteps(ctx: ExtensionContext, quest: Quest, reason: string): void;
+	/**
+	 * Recover a blocked step: safe clean-worktree remove, or force requeue that
+	 * detaches the worktree path without destroying evidence on disk.
+	 */
+	recoverBlockedStep(
+		ctx: ExtensionContext,
+		quest: Quest,
+		index: number,
+		mode: RecoverBlockedMode,
+	): { ok: boolean; message: string };
+	/**
+	 * Sweep dispatching/running/verifying steps past the wall-clock deadline.
+	 * Records ledger `timeout` events; requeues within attempt budget or fails.
+	 */
+	recoverTimedOutSteps(
+		ctx: ExtensionContext,
+		quest: Quest,
+		timeoutMs?: number,
+		now?: number,
+	): number;
 }
 
 export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
@@ -450,6 +478,115 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		dispatchGuard.clear(ctx.cwd);
 	}
 
+	function recoverBlockedStep(
+		ctx: ExtensionContext,
+		quest: Quest,
+		index: number,
+		mode: RecoverBlockedMode,
+	): { ok: boolean; message: string } {
+		const step = quest.steps[index];
+		if (!step) {
+			return { ok: false, message: `Invalid step index ${index}.` };
+		}
+		const phase = resolvePhase(step);
+		const worktreePath = step.sandboxArtifacts?.worktreePath?.trim() || undefined;
+		const ownedPath = stepWorktreePath(ctx.cwd, quest.name, index);
+
+		let removeSucceeded = false;
+		if (mode === "safe" && worktreePath) {
+			if (worktreePath !== ownedPath) {
+				return {
+					ok: false,
+					message: `Safe recover refused: worktree ${worktreePath} is not the owned path ${ownedPath}. Use mode=force to detach.`,
+				};
+			}
+			removeSucceeded = removeStepWorktree(worktreePath, ctx.cwd);
+		}
+
+		const decision = decideBlockedRecovery({
+			phase,
+			hasWorktreePath: !!worktreePath,
+			mode,
+			removeSucceeded,
+		});
+
+		if (decision.action === "reject" || decision.action === "stay_blocked") {
+			return { ok: false, message: decision.reason };
+		}
+
+		// blocked → queued (allowed). Clear path before/with transition so status is honest.
+		if (decision.clearWorktreePath && step.sandboxArtifacts) {
+			const retained = step.sandboxArtifacts.worktreePath;
+			delete step.sandboxArtifacts.worktreePath;
+			if (mode === "force" && retained) {
+				step.result =
+					`${step.result ?? ""}\n[RECOVERY] Force requeue; worktree detached (retained on disk at ${retained}).`.trim();
+			} else if (mode === "safe" && retained) {
+				step.result =
+					`${step.result ?? ""}\n[RECOVERY] Clean worktree removed at ${retained}; requeued.`.trim();
+			}
+		}
+		step.startedAt = null;
+		step.dispatchId = undefined;
+		step.branchName = mode === "force" ? step.branchName : null;
+
+		if (!transitionStep(ctx, quest, index, "queued", decision.reason)) {
+			return {
+				ok: false,
+				message: `Could not requeue step #${index + 1} from phase ${phase}.`,
+			};
+		}
+		return {
+			ok: true,
+			message: `Step #${index + 1} "${step.content}" recovered → queued (${mode}).`,
+		};
+	}
+
+	/**
+	 * Shared timeout sweep used by sequential fire and parallel batch.
+	 * Returns how many steps were requeued or failed.
+	 */
+	function recoverTimedOutSteps(
+		ctx: ExtensionContext,
+		quest: Quest,
+		timeoutMs: number = DEFAULT_STEP_TIMEOUT_MS,
+		now: number = Date.now(),
+	): number {
+		let recovered = 0;
+		for (let index = 0; index < quest.steps.length; index++) {
+			const step = quest.steps[index];
+			const elapsed = checkTimeout(step, timeoutMs, now);
+			if (!elapsed) continue;
+			recordRun(ctx.cwd, {
+				kind: "timeout",
+				taskIndex: index,
+				taskContent: step.content,
+				agent: step.agent,
+				timestamp: now,
+				dispatchId: step.dispatchId,
+				durationMs: elapsed,
+				reason: `step exceeded ${timeoutMs}ms in ${resolvePhase(step)}`,
+			});
+			if (!beginStepRetry(ctx, quest, index, "step timeout")) {
+				// Dirty/unowned worktree: beginStepRetry already blocked the step.
+				recovered++;
+				continue;
+			}
+			if (step.attempts > MAX_RETRIES) {
+				transitionStep(ctx, quest, index, "failed", "attempt budget exhausted after timeout");
+				step.result =
+					`${step.result ?? ""}\n[TIMEOUT] Auto-failed after ${MAX_RETRIES + 1} attempts (${elapsed}ms elapsed).`.trim();
+				step.completedAt = Date.now();
+			} else {
+				transitionStep(ctx, quest, index, "queued", "timeout retry");
+				step.result =
+					`${step.result ?? ""}\n[TIMEOUT] Requeued after ${elapsed}ms in phase.`.trim();
+			}
+			recovered++;
+		}
+		return recovered;
+	}
+
 	function fireStep(ctx: ExtensionContext, quest: Quest, step: QuestStep, index: number): void {
 		if (resolvePhase(step) !== "queued") return;
 		if (!dispatchGuard.acquire(ctx.cwd, index)) return;
@@ -498,6 +635,13 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 	function fireNextTask(ctx: ExtensionContext): boolean {
 		const quest = getQuest(ctx.cwd);
 		if (!quest || quest.status !== "active") return false;
+		// Sequential timeout sweep before selecting work (parallel path does this
+		// inside fireParallelBatch via the same helper).
+		const timeoutMs =
+			quest.parallel?.stepTimeoutMs ??
+			DEFAULT_PARALLEL_CONFIG.stepTimeoutMs ??
+			DEFAULT_STEP_TIMEOUT_MS;
+		recoverTimedOutSteps(ctx, quest, timeoutMs);
 		const next = nextPendingStep(quest);
 		// Parallel multi-task minion batches skip Quest sandbox-guard (#21).
 		// When sandbox is restricted/isolated (quest- or step-level), force
@@ -522,24 +666,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 
 		// Recover timed-out attempts before selecting more work. Dirty worktrees are
 		// retained and blocked; clean ones can be retried without losing evidence.
-		for (let index = 0; index < quest.steps.length; index++) {
-			const step = quest.steps[index];
-			if (!checkTimeout(step, cfg.stepTimeoutMs)) continue;
-			recordRun(ctx.cwd, {
-				kind: "timeout",
-				taskIndex: index,
-				taskContent: step.content,
-				agent: step.agent,
-				timestamp: Date.now(),
-				dispatchId: step.dispatchId,
-			});
-			if (!beginStepRetry(ctx, quest, index, "step timeout")) continue;
-			if (step.attempts > MAX_RETRIES) {
-				transitionStep(ctx, quest, index, "failed", "attempt budget exhausted");
-			} else {
-				transitionStep(ctx, quest, index, "queued", "timeout retry");
-			}
-		}
+		recoverTimedOutSteps(ctx, quest, cfg.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS);
 
 		// Verification finishes in the owned worktree. Integrate completed branches
 		// in deterministic dependency/index order before dispatching the next batch.
@@ -862,5 +989,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		transitionStep,
 		beginStepRetry,
 		cancelActiveSteps,
+		recoverBlockedStep,
+		recoverTimedOutSteps,
 	};
 }

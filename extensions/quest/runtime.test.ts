@@ -110,6 +110,140 @@ describe("retry lifecycle", () => {
 	});
 });
 
+describe("recoverBlockedStep (R6)", () => {
+	test("force requeue: blocked → queued and clears worktree path", () => {
+		const h = fakeRuntime();
+		try {
+			const wt = join(h.cwd, "retained-worktree");
+			const quest = seedActive(h.rt, h.cwd, [
+				makeTask({
+					status: "pending",
+					phase: "blocked",
+					content: "stuck evidence",
+					sandboxArtifacts: {
+						calls: [],
+						touchedPaths: ["src/a.ts"],
+						worktreePath: wt,
+					},
+					result: "[RECOVERY] Owned worktree retained",
+				}),
+			]);
+
+			const result = h.rt.recoverBlockedStep(h.ctx, quest, 0, "force");
+			assert.equal(result.ok, true);
+			assert.equal(quest.steps[0].phase, "queued");
+			assert.equal(quest.steps[0].status, "pending");
+			assert.equal(quest.steps[0].sandboxArtifacts?.worktreePath, undefined);
+			assert.match(quest.steps[0].result ?? "", /Force requeue/);
+			assert.match(result.message, /queued/);
+		} finally {
+			h.cleanup();
+		}
+	});
+
+	test("safe recover without worktree path requeues", () => {
+		const h = fakeRuntime();
+		try {
+			const quest = seedActive(h.rt, h.cwd, [
+				makeTask({
+					status: "pending",
+					phase: "blocked",
+					content: "blocked no path",
+				}),
+			]);
+
+			const result = h.rt.recoverBlockedStep(h.ctx, quest, 0, "safe");
+			assert.equal(result.ok, true);
+			assert.equal(quest.steps[0].phase, "queued");
+		} finally {
+			h.cleanup();
+		}
+	});
+
+	test("safe recover refuses dirty/missing unowned worktree path", () => {
+		const h = fakeRuntime();
+		try {
+			const quest = seedActive(h.rt, h.cwd, [
+				makeTask({
+					status: "pending",
+					phase: "blocked",
+					sandboxArtifacts: {
+						calls: [],
+						touchedPaths: [],
+						worktreePath: join(h.cwd, "not-owned-path"),
+					},
+				}),
+			]);
+
+			const result = h.rt.recoverBlockedStep(h.ctx, quest, 0, "safe");
+			assert.equal(result.ok, false);
+			assert.equal(quest.steps[0].phase, "blocked");
+			assert.match(result.message, /not the owned path|Safe recover/i);
+		} finally {
+			h.cleanup();
+		}
+	});
+
+	test("rejects non-blocked step", () => {
+		const h = fakeRuntime();
+		try {
+			const quest = seedActive(h.rt, h.cwd, [makeTask({ status: "pending", phase: "queued" })]);
+			const result = h.rt.recoverBlockedStep(h.ctx, quest, 0, "force");
+			assert.equal(result.ok, false);
+			assert.equal(quest.steps[0].phase, "queued");
+		} finally {
+			h.cleanup();
+		}
+	});
+});
+
+describe("recoverTimedOutSteps (R7)", () => {
+	test("requeues running step past timeout with ledger-eligible phase", () => {
+		const h = fakeRuntime();
+		try {
+			const now = Date.now();
+			const quest = seedActive(h.rt, h.cwd, [
+				makeTask({
+					status: "running",
+					phase: "running",
+					attempts: 1,
+					phaseChangedAt: now - 120_000,
+					startedAt: now - 120_000,
+				}),
+			]);
+
+			const n = h.rt.recoverTimedOutSteps(h.ctx, quest, 60_000, now);
+			assert.equal(n, 1);
+			assert.equal(quest.steps[0].phase, "queued");
+			assert.match(quest.steps[0].result ?? "", /TIMEOUT/);
+		} finally {
+			h.cleanup();
+		}
+	});
+
+	test("fails when attempts exceed budget after timeout", () => {
+		const h = fakeRuntime();
+		try {
+			const now = Date.now();
+			const quest = seedActive(h.rt, h.cwd, [
+				makeTask({
+					status: "running",
+					phase: "running",
+					attempts: 99,
+					phaseChangedAt: now - 999_000,
+					startedAt: now - 999_000,
+				}),
+			]);
+
+			const n = h.rt.recoverTimedOutSteps(h.ctx, quest, 60_000, now);
+			assert.equal(n, 1);
+			assert.equal(quest.steps[0].phase, "failed");
+		} finally {
+			h.cleanup();
+		}
+	});
+});
+
 describe("fireNextTask", () => {
 	test("fires the first eligible pending step and steers exactly once", () => {
 		const h = fakeRuntime();

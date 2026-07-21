@@ -32,6 +32,7 @@ import {
 	snapshotQuestForAutoPilot,
 	type ReadyDecision,
 	type SequentialDecision,
+	type TimeoutAction,
 	type UnresolvedAction,
 } from "./auto-pilot";
 
@@ -159,6 +160,9 @@ async function runAgentEndAutoPilot(
 		return;
 	}
 
+	// ── Sequential timeouts → requeue or fail (ledger timeout) ───────
+	applyTimeouts(rt, ctx, quest, decision.timeouts);
+
 	// ── Unresolved dispatching/running → fail or requeue ─────────────
 	applyUnresolved(rt, ctx, quest, decision.unresolved);
 
@@ -180,6 +184,10 @@ async function runAgentEndAutoPilot(
 		nextStepLadderLength: ladder?.rungs.length ?? 0,
 	});
 	if (sequential.kind !== "proceed") return;
+
+	// Second pass may surface new timeouts after requeues (usually empty).
+	applyTimeouts(rt, ctx, quest, sequential.timeouts);
+	applyUnresolved(rt, ctx, quest, sequential.unresolved);
 
 	await applySequential(pi, rt, ctx, quest, sequential.sequential, ladder);
 }
@@ -404,6 +412,39 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 }
 
 // ── Auto-pilot adapter helpers (I/O for pure decisions) ──────────────────────
+
+function applyTimeouts(
+	rt: QuestRuntime,
+	ctx: ExtensionContext,
+	quest: Quest,
+	timeouts: readonly TimeoutAction[],
+): void {
+	for (const t of timeouts) {
+		const step = quest.steps[t.index];
+		if (!step) continue;
+		rt.recordRun(ctx.cwd, {
+			kind: "timeout",
+			taskIndex: t.index,
+			taskContent: step.content,
+			agent: step.agent,
+			timestamp: Date.now(),
+			dispatchId: step.dispatchId,
+			durationMs: t.elapsedMs,
+			reason: "sequential step timeout",
+		});
+		if (!rt.beginStepRetry(ctx, quest, t.index, "step timeout")) continue;
+		if (t.action === "fail") {
+			rt.transitionStep(ctx, quest, t.index, "failed", "attempt budget exhausted after timeout");
+			step.result =
+				`${step.result ?? ""}\n[TIMEOUT] Auto-failed after ${MAX_RETRIES + 1} attempts (${t.elapsedMs}ms elapsed).`.trim();
+			step.completedAt = Date.now();
+		} else {
+			rt.transitionStep(ctx, quest, t.index, "queued", "timeout retry");
+			step.result =
+				`${step.result ?? ""}\n[TIMEOUT] Requeued after ${t.elapsedMs}ms in phase.`.trim();
+		}
+	}
+}
 
 function applyUnresolved(
 	rt: QuestRuntime,

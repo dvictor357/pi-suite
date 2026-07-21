@@ -30,7 +30,7 @@ export function toCanonicalStatus(phase: StepPhase | "pending"): StepStatus {
 	return "pending";
 }
 
-export function resolvePhase(step: QuestStep): StepPhase {
+export function resolvePhase(step: Pick<QuestStep, "status"> & { phase?: StepPhase }): StepPhase {
 	if (step.phase) return step.phase;
 	if (
 		step.status === "done" ||
@@ -135,7 +135,11 @@ export class DispatchGuard {
 export const DEFAULT_STEP_TIMEOUT_MS = 600_000;
 
 export function checkTimeout(
-	step: QuestStep,
+	step: Pick<QuestStep, "status"> & {
+		phase?: StepPhase;
+		phaseChangedAt?: number;
+		startedAt?: number | null;
+	},
 	timeoutMs: number = DEFAULT_STEP_TIMEOUT_MS,
 	now: number = Date.now(),
 ): number {
@@ -145,4 +149,98 @@ export function checkTimeout(
 	if (!since) return 0;
 	const elapsed = now - since;
 	return elapsed > timeoutMs ? elapsed : 0;
+}
+
+// ── Blocked worktree recovery (R6) ───────────────────────────────────────────
+
+/** Step stuck in `blocked` with a retained owned worktree path. */
+export interface BlockedWorktreeInfo {
+	index: number;
+	content: string;
+	worktreePath: string;
+}
+
+/** Minimal step fields for {@link listBlockedWithWorktree}. */
+export interface BlockedWorktreeStepSnapshot {
+	content: string;
+	status: StepStatus;
+	phase?: StepPhase;
+	sandboxArtifacts?: { worktreePath?: string } | null;
+}
+
+/**
+ * List steps in phase `blocked` that still record a worktree path.
+ * Resume/auto-pilot only fire `queued` steps, so these are silent-stuck without
+ * an explicit recover action.
+ */
+export function listBlockedWithWorktree(
+	steps: readonly BlockedWorktreeStepSnapshot[],
+): BlockedWorktreeInfo[] {
+	const out: BlockedWorktreeInfo[] = [];
+	for (let index = 0; index < steps.length; index++) {
+		const step = steps[index];
+		if (resolvePhase(step) !== "blocked") continue;
+		const worktreePath = step.sandboxArtifacts?.worktreePath?.trim();
+		if (!worktreePath) continue;
+		out.push({ index, content: step.content, worktreePath });
+	}
+	return out;
+}
+
+export type RecoverBlockedMode = "safe" | "force";
+
+/**
+ * Pure decision for recovering a blocked step after optional worktree I/O.
+ *
+ * - `safe`: requeue only when there is no worktree path, or when a clean
+ *   `removeStepWorktree` already succeeded (`removeSucceeded: true`). Dirty or
+ *   unowned worktrees stay blocked as evidence.
+ * - `force`: requeue and clear the worktree path without requiring removal
+ *   (directory may remain on disk as evidence; the step detaches and re-runs).
+ */
+export function decideBlockedRecovery(input: {
+	phase: StepPhase;
+	hasWorktreePath: boolean;
+	mode: RecoverBlockedMode;
+	/** Outcome of safe remove when a path was present; ignored for force. */
+	removeSucceeded?: boolean;
+}):
+	| { action: "requeue"; clearWorktreePath: boolean; reason: string }
+	| { action: "stay_blocked"; reason: string }
+	| { action: "reject"; reason: string } {
+	if (input.phase !== "blocked") {
+		return {
+			action: "reject",
+			reason: `Step is not blocked (phase=${input.phase}); nothing to recover.`,
+		};
+	}
+
+	if (input.mode === "force") {
+		return {
+			action: "requeue",
+			clearWorktreePath: input.hasWorktreePath,
+			reason: "force requeue; worktree detached without removal",
+		};
+	}
+
+	// safe
+	if (!input.hasWorktreePath) {
+		return {
+			action: "requeue",
+			clearWorktreePath: false,
+			reason: "blocked without worktree path; requeue",
+		};
+	}
+	if (input.removeSucceeded) {
+		return {
+			action: "requeue",
+			clearWorktreePath: true,
+			reason: "safe worktree remove succeeded; requeue",
+		};
+	}
+	return {
+		action: "stay_blocked",
+		reason:
+			"Safe recover refused: worktree is dirty, missing, or not removable. Use mode=force to detach and requeue, or clean the worktree first.",
+	};
 }

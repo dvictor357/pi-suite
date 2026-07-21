@@ -1,10 +1,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { StringEnum } from "@earendil-works/pi-ai";
 import { updateJSON, projectMemoryPath, CONTRACT_VERSION, isFutureContract } from "./utils";
 import { ensureBuiltInTeams, loadTeams } from "./teams";
 import { formatQuestStatus } from "./steering";
 import { listArchives, saveQuest } from "./storage";
 import { renderStatus, writeQuestSessionMeta } from "./status";
+import { listBlockedWithWorktree, type RecoverBlockedMode } from "./phase-loop";
 import type { QuestRuntime } from "./runtime";
 import {
 	readAllEvalEntries,
@@ -479,5 +481,87 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 		},
 	});
 
-	// ── Additional tools ────────────────────────────────────────────────────
+	// ── quest_recover_step ──────────────────────────────────────────────────
+
+	pi.registerTool({
+		name: "quest_recover_step",
+		label: "Quest Recover Step",
+		description: [
+			"Recover a blocked step so auto-pilot can fire it again.",
+			"mode=safe: remove a clean owned worktree then requeue; dirty worktrees stay blocked.",
+			"mode=force: detach the worktree path and requeue without deleting evidence on disk.",
+			"Use quest_status to list blocked-with-worktree steps and paths.",
+		].join(" "),
+		parameters: Type.Object({
+			stepIndex: Type.Optional(
+				Type.Number({ description: "0-based step index to recover (prefer this)" }),
+			),
+			taskIndex: Type.Optional(
+				Type.Number({ description: "Legacy alias for stepIndex (0-based)" }),
+			),
+			mode: Type.Optional(
+				StringEnum(["safe", "force"] as const, {
+					description:
+						"safe = clean worktree remove then requeue; force = detach path and requeue (default: safe)",
+				}),
+			),
+		}),
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const index = params.stepIndex ?? params.taskIndex;
+			if (index === undefined) {
+				const quest = getQuest(ctx.cwd);
+				const blocked = quest ? listBlockedWithWorktree(quest.steps) : [];
+				const hint =
+					blocked.length > 0
+						? `\nBlocked with worktree:\n${blocked
+								.map((b) => `  #${b.index + 1} ${b.content} → ${b.worktreePath}`)
+								.join("\n")}`
+						: "";
+				return {
+					content: [
+						{
+							type: "text",
+							text: `stepIndex is required.${hint}`,
+						},
+					],
+					details: { blocked },
+				};
+			}
+
+			const quest = getQuest(ctx.cwd);
+			if (!quest) {
+				return {
+					content: [{ type: "text", text: "No active quest." }],
+					details: {},
+				};
+			}
+			if (index < 0 || index >= quest.steps.length) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Invalid step index ${index}. Valid: 0-${quest.steps.length - 1}.`,
+						},
+					],
+					details: {},
+				};
+			}
+
+			const mode = (params.mode ?? "safe") as RecoverBlockedMode;
+			const result = rt.recoverBlockedStep(ctx, quest, index, mode);
+			if (result.ok) {
+				persist(ctx, quest);
+			}
+			return {
+				content: [{ type: "text", text: result.message }],
+				details: {
+					ok: result.ok,
+					stepIndex: index,
+					mode,
+					phase: quest.steps[index]?.phase,
+					status: quest.steps[index]?.status,
+				},
+			};
+		},
+	});
 }
