@@ -58,6 +58,12 @@ export interface QuestStep {
 	verified: boolean;
 	verifyResult: string | null;
 	verifyRetries: number;
+	/**
+	 * How many inconclusive verifier replies this step has consumed while
+	 * verifying. After one re-prompt (count reaches 1), the gate auto-fails
+	 * with MODEL_QUALITY. Optional for legacy steps.
+	 */
+	verifyInconclusives?: number;
 	commitHash: string | null;
 	branchName: string | null;
 	/**

@@ -18,7 +18,7 @@ import {
 	rungModel,
 	type FailureBrief,
 } from "./ladder";
-import { parseVerifyOutcome } from "./verifier";
+import { MAX_VERIFY_INCONCLUSIVES, parseVerifyReport } from "./verifier";
 import type { StepPhase, StepStatus } from "./types";
 
 // ── Snapshot inputs (plain / serializable) ───────────────────────────────────
@@ -33,6 +33,8 @@ export interface VerifyStepSnapshot {
 	verified: boolean;
 	verifyResult: string | null;
 	verifyRetries: number;
+	/** Inconclusive verifier replies while in verifying (see MAX_VERIFY_INCONCLUSIVES). */
+	verifyInconclusives?: number;
 	attempts: number;
 	startedAt: number | null;
 	completedAt: number | null;
@@ -74,18 +76,26 @@ export interface ResolvedOutcome {
 
 /**
  * Resolve an effective verification verdict from the structured flag or,
- * when the step is already verifying, from deterministic prose parsing of
- * the result text (see parseVerifyOutcome).
+ * when the step is already verifying, from machine-readable / prose parsing
+ * of the result text (see parseVerifyReport; parseVerifyOutcome is the prose
+ * fallback inside that helper).
  */
 export function resolveEffectiveOutcome(input: ResolveOutcomeInput): ResolvedOutcome {
 	let outcome: VerifyVerdict | undefined = input.verifyOutcome;
+	let structuredEvidence: string | undefined;
 	if (!outcome && input.stepStatus === "verifying") {
-		const parsed = parseVerifyOutcome(input.resultText ?? "");
-		if (parsed === "pass") outcome = "PASS";
-		else if (parsed === "fail") outcome = "FAIL";
+		const report = parseVerifyReport(input.resultText ?? "");
+		if (report.outcome === "pass") outcome = "PASS";
+		else if (report.outcome === "fail") outcome = "FAIL";
+		if (report.evidence) {
+			structuredEvidence = report.impact
+				? `${report.evidence} | impact: ${report.impact}`
+				: report.evidence;
+		}
 	}
 	const inferred = !input.verifyOutcome && outcome !== undefined;
-	const evidence = input.verifyEvidence ?? (inferred ? input.resultText : undefined);
+	const evidence =
+		input.verifyEvidence ?? structuredEvidence ?? (inferred ? input.resultText : undefined);
 	return { outcome, inferred, evidence };
 }
 
@@ -610,6 +620,135 @@ export function formatVerifyPassMessage(opts: {
 		.join("\n");
 }
 
+// ── Inconclusive verify plan (one re-prompt, then fail) ───────────────────────
+
+export interface PlanVerifyInconclusiveInput {
+	step: VerifyStepSnapshot;
+	stepIndex: number;
+	/** Unclear verifier text that triggered this decision. */
+	resultText?: string;
+	now?: number;
+	/** Override default MAX_VERIFY_INCONCLUSIVES (tests). */
+	maxInconclusives?: number;
+}
+
+export type PlanVerifyInconclusiveResult =
+	| {
+			kind: "reprompt";
+			/** verifyInconclusives after this attempt. */
+			nextInconclusives: number;
+			details: {
+				verifying: true;
+				inconclusive: true;
+				rePrompt: true;
+				verifyInconclusives: number;
+			};
+	  }
+	| {
+			kind: "fail";
+			nextPhase: "failed";
+			transitionReason: "inconclusive verification exhausted";
+			patches: {
+				verifyResult: string;
+				verified: true;
+				verifyInconclusives: number;
+				completedAt: number;
+				result: string;
+			};
+			events: VerifyRunEvent[];
+			evalIntent: VerifyEvalIntent;
+			releaseClaims: true;
+			resetFireCounters: true;
+			details: {
+				verified: false;
+				outcome: "INCONCLUSIVE";
+				exhausted: true;
+				failureCode: FailureCode;
+			};
+			messageLines: string[];
+			failureCode: FailureCode;
+	  };
+
+/**
+ * Plan the inconclusive path: first unclear reply → re-prompt once; second
+ * (or beyond) → auto-fail with MODEL_QUALITY. Does not consume the
+ * verifyRetries budget (that budget is for explicit FAIL verdicts).
+ */
+export function planVerifyInconclusive(
+	input: PlanVerifyInconclusiveInput,
+): PlanVerifyInconclusiveResult {
+	const now = input.now ?? Date.now();
+	const max = input.maxInconclusives ?? MAX_VERIFY_INCONCLUSIVES;
+	const current = input.step.verifyInconclusives ?? 0;
+	const nextInconclusives = current + 1;
+	const unclear = (input.resultText ?? "").trim().slice(0, 500);
+
+	if (current < max) {
+		return {
+			kind: "reprompt",
+			nextInconclusives,
+			details: {
+				verifying: true,
+				inconclusive: true,
+				rePrompt: true,
+				verifyInconclusives: nextInconclusives,
+			},
+		};
+	}
+
+	const failureCode: FailureCode = "MODEL_QUALITY";
+	const evidence = [
+		`Verifier reply inconclusive after ${nextInconclusives} attempt(s) (max re-prompts: ${max}).`,
+		unclear ? `Last unclear output: ${unclear}` : "No verifier output provided.",
+	].join(" ");
+	const result = `Verification INCONCLUSIVE after re-prompt: ${evidence}`;
+
+	return {
+		kind: "fail",
+		nextPhase: "failed",
+		transitionReason: "inconclusive verification exhausted",
+		patches: {
+			verifyResult: `[INCONCLUSIVE] ${evidence}`.trim(),
+			verified: true,
+			verifyInconclusives: nextInconclusives,
+			completedAt: now,
+			result,
+		},
+		events: [
+			{
+				kind: "verify_fail",
+				taskIndex: input.stepIndex,
+				taskContent: input.step.content,
+				agent: "verifier",
+				timestamp: now,
+				evidence,
+				verifyRetriesLeft: 0,
+				failureCode,
+			},
+		],
+		evalIntent: {
+			status: "failed",
+			verified: false,
+			evidence: result,
+			failureCode,
+		},
+		releaseClaims: true,
+		resetFireCounters: true,
+		details: {
+			verified: false,
+			outcome: "INCONCLUSIVE",
+			exhausted: true,
+			failureCode,
+		},
+		messageLines: [
+			`❌ Step #${input.stepIndex + 1} **AUTO-FAILED** (inconclusive verification after re-prompt): ${input.step.content}`,
+			`  FailureCode: ${failureCode}`,
+			unclear ? `  Last unclear output: ${unclear}` : "",
+		].filter(Boolean),
+		failureCode,
+	};
+}
+
 // ── Terminal non-verify update plan ──────────────────────────────────────────
 
 export interface PlanTerminalUpdateInput {
@@ -700,6 +839,7 @@ export function snapshotStepForVerify(step: {
 	verified: boolean;
 	verifyResult: string | null;
 	verifyRetries: number;
+	verifyInconclusives?: number;
 	attempts: number;
 	startedAt: number | null;
 	completedAt: number | null;
@@ -719,6 +859,7 @@ export function snapshotStepForVerify(step: {
 		verified: step.verified,
 		verifyResult: step.verifyResult,
 		verifyRetries: step.verifyRetries,
+		verifyInconclusives: step.verifyInconclusives,
 		attempts: step.attempts,
 		startedAt: step.startedAt,
 		completedAt: step.completedAt,
