@@ -14,8 +14,9 @@ import { buildFailureBrief, decideVerifyFailAction, rungModel } from "./ladder";
 import { nextPendingStep, formatQuestStatus, wasTurnAborted } from "./steering";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { clearQuestFromTodo, syncQuestToTodo } from "./todo-sync";
-import { resolveSandboxProfile } from "./sandbox";
+import { isSandboxActive } from "./sandbox";
 import { evaluateToolCall } from "./sandbox-guard";
+import { effectiveSandboxProfile, resolveSubagentClaimTargets } from "./tool-call-guard";
 import { normalizeClaims, validateClaims } from "./write-claim";
 import { buildQuestRecap } from "./recap";
 import {
@@ -686,56 +687,72 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 	pi.on("tool_call", (event, ctx) => {
 		const quest = getQuest(ctx.cwd);
 
-		// ── Sandbox enforcement ───────────────────────────────────────────
-		if (quest && quest.status === "active" && quest.sandbox) {
-			const profile = resolveSandboxProfile(quest.sandbox);
-			const decision = evaluateToolCall(
-				profile,
-				event.toolName,
-				event.input as unknown as Record<string, unknown>,
-			);
-			if (decision.block) {
-				ctx.ui.notify?.(decision.reason ?? "Sandbox: tool call blocked.", "warning");
-				return { block: true, reason: decision.reason };
+		// ── Sandbox enforcement (R8: max of quest + guard-active steps) ───
+		if (quest && quest.status === "active") {
+			const profile = effectiveSandboxProfile(quest);
+			if (isSandboxActive(profile)) {
+				const decision = evaluateToolCall(
+					profile,
+					event.toolName,
+					event.input as unknown as Record<string, unknown>,
+				);
+				if (decision.block) {
+					ctx.ui.notify?.(decision.reason ?? "Sandbox: tool call blocked.", "warning");
+					return { block: true, reason: decision.reason };
+				}
 			}
 		}
 
-		// ── Write-claim enforcement: pi-minions subagent spawn ────────────
+		// ── Write-claim enforcement: pi-minions subagent spawn (R2) ───────
+		// Resolves single-agent and multi-task `tasks[]` forms; does not rely
+		// solely on lastFiredStepIndex so parallel batches are fully enforced.
 		if (event.toolName === "subagent" && quest?.status === "active") {
-			const input = event.input as Record<string, unknown> | undefined;
-			const agent = typeof input?.agent === "string" ? input.agent.trim() : "";
-			if (!agent) return;
+			const input = (event.input as Record<string, unknown> | undefined) ?? {};
+			const targets = resolveSubagentClaimTargets(quest, input);
+			if (targets.length === 0) return;
 
-			const firedIdx = quest.lastFiredStepIndex;
-			if (firedIdx < 0 || firedIdx >= quest.steps.length) return;
-			const fired = quest.steps[firedIdx];
-			if (fired.status !== "running" || fired.agent !== agent) return;
+			// Only roll back claims this call newly acquired — never drop claims
+			// already held (e.g. parallel selectDispatchBatch pre-registration).
+			const alreadyHeld = new Set(claimReg.active(ctx.cwd).map((c) => c.stepIndex));
+			const newlyRegistered: number[] = [];
+			const rollback = () => {
+				for (const idx of newlyRegistered) claimReg.unregister(ctx.cwd, idx);
+			};
 
-			const claimErr = validateClaims(agent, fired.writeClaim, fired.readClaim);
-			if (claimErr) {
-				ctx.ui.notify?.(claimErr, "error");
-				return { block: true, reason: claimErr };
-			}
+			for (const target of targets) {
+				const step = quest.steps[target.stepIndex];
+				const claimErr = validateClaims(target.agent, target.writeClaim, target.readClaim);
+				if (claimErr) {
+					rollback();
+					ctx.ui.notify?.(claimErr, "error");
+					return { block: true, reason: claimErr };
+				}
 
-			let normalized: string[];
-			try {
-				normalizeClaims(fired.readClaim, ctx.cwd);
-				normalized = normalizeClaims(fired.writeClaim, ctx.cwd);
-			} catch (error) {
-				const reason = error instanceof Error ? error.message : String(error);
-				ctx.ui.notify?.(reason, "error");
-				return { block: true, reason };
-			}
-			if (normalized.length > 0) {
-				const conflict = claimReg.register(ctx.cwd, firedIdx, fired.content, normalized);
+				let normalized: string[];
+				try {
+					normalizeClaims(target.readClaim, ctx.cwd);
+					normalized = normalizeClaims(target.writeClaim, ctx.cwd);
+				} catch (error) {
+					rollback();
+					const reason = error instanceof Error ? error.message : String(error);
+					ctx.ui.notify?.(reason, "error");
+					return { block: true, reason };
+				}
+				if (normalized.length === 0) continue;
+
+				const conflict = claimReg.register(ctx.cwd, target.stepIndex, step.content, normalized);
 				if (conflict) {
+					rollback();
 					const msg =
-						`Write-claim conflict: step #${firedIdx + 1} ("${fired.content}") ` +
+						`Write-claim conflict: step #${target.stepIndex + 1} ("${step.content}") ` +
 						`wants to write to paths that step #${conflict.stepIndex + 1} ` +
 						`("${conflict.stepContent}") already holds. ` +
 						`Wait for step #${conflict.stepIndex + 1} to complete or abort it first.`;
 					ctx.ui.notify?.(msg, "error");
 					return { block: true, reason: msg };
+				}
+				if (!alreadyHeld.has(target.stepIndex)) {
+					newlyRegistered.push(target.stepIndex);
 				}
 			}
 		}
