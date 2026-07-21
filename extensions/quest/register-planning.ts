@@ -6,7 +6,7 @@ import type { FailureCode } from "../../core";
 import { LADDER, MAX_DEPENDENCY_DEPTH, MAX_VERIFY_RETRIES, VERIFICATION } from "./constants";
 import { loadModelLadder } from "./storage";
 import { loadTeams } from "./teams";
-import { buildSandboxComplianceChecks } from "./verifier";
+import { buildSandboxComplianceChecks, buildVerifierHandoff } from "./verifier";
 import { briefBudgetForModel } from "./ladder";
 import {
 	failureCodeForCheck,
@@ -15,7 +15,7 @@ import {
 	runChecks,
 	summarizeChecks,
 } from "./checks";
-import { collectDiffEvidence, renderEvidenceBlock, type StepEvidence } from "./evidence";
+import { collectDiffEvidence, type StepEvidence } from "./evidence";
 import { buildVerificationImpactContext, enrichPlanningContext } from "./codebase";
 import { detectDependencyCycle, getMaxDependencyDepth } from "./graph";
 import { enrichStepsWithMemoryGraph } from "./memory-graph-read";
@@ -33,6 +33,7 @@ import {
 	planCheckFail,
 	planTerminalUpdate,
 	planVerifyFail,
+	planVerifyInconclusive,
 	planVerifyPass,
 	resolveEffectiveOutcome,
 	snapshotStepForVerify,
@@ -711,10 +712,103 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				);
 			}
 
+			// ── Inconclusive while verifying: one re-prompt, then auto-fail ───
+			// No structured/prose PASS|FAIL. Prefer machine-readable re-handoff
+			// over free-form "try again"; second inconclusive exhausts the budget.
+			if (task.status === "verifying") {
+				const inconclusivePlan = planVerifyInconclusive({
+					step: snapshotStepForVerify(task),
+					stepIndex: params.index,
+					resultText: params.result,
+				});
+
+				if (inconclusivePlan.kind === "reprompt") {
+					task.verifyInconclusives = inconclusivePlan.nextInconclusives;
+					persist(ctx, quest);
+
+					const team = quest.team ? loadTeams()[quest.team] : null;
+					const verifierAgent =
+						team?.members.find((m) => m.agent === "verifier" || m.role === "tester")?.agent ??
+						"verifier";
+					const verificationCwd = task.sandboxArtifacts?.worktreePath ?? ctx.cwd;
+					const impactContext = buildVerificationImpactContext(
+						ctx.cwd,
+						`${task.content}\n${task.context}\n${params.result || task.result || ""}`,
+					);
+					const sandboxProfile = resolveSandboxProfile(quest.sandbox, task.sandbox);
+					const sandboxChecks = buildSandboxComplianceChecks(sandboxProfile);
+					const checksSummary = task.evidence ? summarizeChecks(task.evidence.checks) : undefined;
+					const handoff = buildVerifierHandoff({
+						stepIndex: params.index,
+						stepContent: task.content,
+						stepContext: task.context,
+						stepResult: task.result,
+						verifierAgent,
+						verificationCwd: task.sandboxArtifacts?.worktreePath ? verificationCwd : undefined,
+						evidence: task.evidence,
+						impactContext,
+						sandboxChecks,
+						checksSummary,
+						maxVerifyRetries: MAX_VERIFY_RETRIES,
+						rePrompt: true,
+						previousInconclusive: params.result,
+					});
+					return {
+						content: [{ type: "text" as const, text: handoff.message }],
+						details: {
+							task,
+							...inconclusivePlan.details,
+							verifierAgent,
+							handoff: handoff.payload,
+						},
+					};
+				}
+
+				// Exhausted re-prompt budget — fail with MODEL_QUALITY.
+				if (
+					!rt.transitionStep(
+						ctx,
+						quest,
+						params.index,
+						inconclusivePlan.nextPhase,
+						inconclusivePlan.transitionReason,
+					)
+				) {
+					return textResult("Cannot mark failed from the current phase.");
+				}
+				task.verifyResult = inconclusivePlan.patches.verifyResult;
+				task.verified = inconclusivePlan.patches.verified;
+				task.verifyInconclusives = inconclusivePlan.patches.verifyInconclusives;
+				task.completedAt = inconclusivePlan.patches.completedAt;
+				task.result = inconclusivePlan.patches.result;
+				emitRunEvents(inconclusivePlan.events);
+				recordEval(
+					ctx.cwd,
+					makeEval(
+						quest,
+						task,
+						params.index,
+						inconclusivePlan.evalIntent.status,
+						inconclusivePlan.evalIntent.verified,
+						inconclusivePlan.evalIntent.evidence,
+						inconclusivePlan.evalIntent.failureCode,
+					),
+				);
+				quest.lastFiredStepIndex = -1;
+				quest.sameStepCount = 0;
+				claimReg.unregister(ctx.cwd, params.index);
+				rt.dispatchGuard.release(ctx.cwd, params.index);
+				persist(ctx, quest);
+				return {
+					content: [{ type: "text" as const, text: inconclusivePlan.messageLines.join("\n") }],
+					details: { task, ...inconclusivePlan.details },
+				};
+			}
+
 			// Persist the child completion payload at the quest_update boundary. Keep
 			// task.result unchanged for legacy consumers while downstream steps receive
-			// only the bounded structured handoff.
-			if (params.result && task.status !== "verifying") {
+			// only the bounded structured handoff. (Verifying steps return above.)
+			if (params.result) {
 				persistHandoff(quest, params.index, params.result);
 			}
 
@@ -805,6 +899,8 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					// resets it explicitly, so the budget stays per-rung.
 					task.verified = false;
 					task.verifyResult = null;
+					// Fresh verify entry clears inconclusive re-prompt counter.
+					task.verifyInconclusives = 0;
 
 					persist(ctx, quest);
 
@@ -817,45 +913,28 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					const verifierAgent =
 						team?.members.find((m) => m.agent === "verifier" || m.role === "tester")?.agent ??
 						"verifier";
-					const evidenceBlock = renderEvidenceBlock(task.evidence);
+					const handoff = buildVerifierHandoff({
+						stepIndex: params.index,
+						stepContent: task.content,
+						stepContext: task.context,
+						stepResult: params.result || task.result,
+						verifierAgent,
+						verificationCwd: task.sandboxArtifacts?.worktreePath ? verificationCwd : undefined,
+						evidence,
+						impactContext,
+						sandboxChecks,
+						checksSummary: checkResults.length > 0 ? checksSummary : undefined,
+						maxVerifyRetries: MAX_VERIFY_RETRIES,
+					});
 					return {
-						content: [
-							{
-								type: "text",
-								text: [
-									`🔍 Step #${params.index + 1} **entered verification**: ${task.content}`,
-									checkResults.length > 0
-										? `Deterministic checks passed (${checksSummary}).`
-										: evidence.changedFiles.length === 0
-											? `This step changed no files — confirm whether that is expected for this step before PASS.`
-											: `No deterministic checks were applicable for this project — judge more carefully.`,
-									``,
-									`**Step result to verify:**`,
-									`> ${params.result || task.result || "(no result provided)"}`,
-									``,
-									evidenceBlock,
-									``,
-									`**Verification step:** Spawn a \`subagent(agent="${verifierAgent}"${task.sandboxArtifacts?.worktreePath ? `, cwd=${JSON.stringify(verificationCwd)}` : ""})\` to verify this task.`,
-									`The verifier should check:`,
-									`1. Does the result match the step requirements?`,
-									`2. Is the implementation correct and complete for the domain?`,
-									`3. Are there issues or missing pieces the deterministic checks cannot catch?`,
-									`4. Is the change architecturally sound and readable? (Type/lint/format/test were already gated deterministically — do not re-run or re-litigate them.)`,
-									`5. Review dependency impact for the changed files listed above before PASS.`,
-									...(sandboxChecks.length > 0 ? [``, ...sandboxChecks] : []),
-									``,
-									impactContext,
-									``,
-									`**After verification, call quest_update with:**`,
-									`- **verifyOutcome="PASS"** and verifyEvidence if the result is correct`,
-									`- **verifyOutcome="FAIL"** and verifyEvidence explaining what needs fixing`,
-									``,
-									`Step context: ${task.context}`,
-									`${MAX_VERIFY_RETRIES} verification retries available before auto-fail.`,
-								].join("\n"),
-							},
-						],
-						details: { task, verifying: true, verifierAgent, checksSummary },
+						content: [{ type: "text" as const, text: handoff.message }],
+						details: {
+							task,
+							verifying: true,
+							verifierAgent,
+							checksSummary,
+							handoff: handoff.payload,
+						},
 					};
 				}
 			}

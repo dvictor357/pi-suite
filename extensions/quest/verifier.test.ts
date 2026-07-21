@@ -1,7 +1,15 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { buildSandboxComplianceChecks, parseVerifyOutcome } from "./verifier";
+import {
+	buildSandboxComplianceChecks,
+	buildVerifierHandoff,
+	MAX_VERIFY_INCONCLUSIVES,
+	parseVerifyOutcome,
+	parseVerifyReport,
+	VERIFY_COMPLETION_SCHEMA,
+} from "./verifier";
 import type { SandboxProfile } from "./sandbox";
+import type { StepEvidence } from "./evidence";
 
 // ── parseVerifyOutcome ──────────────────────────────────────────────────────
 
@@ -58,6 +66,131 @@ describe("parseVerifyOutcome", () => {
 			parseVerifyOutcome("This could pass review later, but I'm not sure yet."),
 			"inconclusive",
 		);
+	});
+});
+
+// ── parseVerifyReport (structured preferred, prose fallback) ────────────────
+
+describe("parseVerifyReport", () => {
+	test("parses fixed-schema JSON outcome + evidence + impact", () => {
+		const r = parseVerifyReport(
+			JSON.stringify({
+				outcome: "PASS",
+				evidence: "diff matches step; tests green",
+				impact: "only utils.ts dependents",
+			}),
+		);
+		assert.equal(r.outcome, "pass");
+		assert.equal(r.structured, true);
+		assert.equal(r.evidence, "diff matches step; tests green");
+		assert.equal(r.impact, "only utils.ts dependents");
+	});
+
+	test("parses fenced JSON verify block", () => {
+		const r = parseVerifyReport(`Notes above.
+
+\`\`\`json
+{"outcome":"FAIL","evidence":"missing error handling"}
+\`\`\`
+`);
+		assert.equal(r.outcome, "fail");
+		assert.equal(r.structured, true);
+		assert.equal(r.evidence, "missing error handling");
+	});
+
+	test("falls back to prose parseVerifyOutcome when no JSON", () => {
+		const r = parseVerifyReport("PASS: looks good overall");
+		assert.equal(r.outcome, "pass");
+		assert.equal(r.structured, false);
+	});
+
+	test("inconclusive when neither structured nor prose verdict", () => {
+		const r = parseVerifyReport("I looked at the files and they seem mostly fine.");
+		assert.equal(r.outcome, "inconclusive");
+		assert.equal(r.structured, false);
+	});
+
+	test("accepts verdict alias field", () => {
+		const r = parseVerifyReport('{"verdict":"FAIL","reason":"no tests"}');
+		assert.equal(r.outcome, "fail");
+		assert.equal(r.evidence, "no tests");
+		assert.equal(r.structured, true);
+	});
+});
+
+// ── buildVerifierHandoff ────────────────────────────────────────────────────
+
+describe("buildVerifierHandoff", () => {
+	const baseEvidence: StepEvidence = {
+		changedFiles: ["src/foo.ts"],
+		diffStat: " src/foo.ts | 3 +++",
+		baselineSha: "abc",
+		checks: [
+			{ kind: "typecheck", command: "npm run typecheck", status: "pass", exitCode: 0, summary: "" },
+		],
+		capturedAt: 1,
+	};
+
+	test("returns ready-to-run paste + fixed schema + reportVia", () => {
+		const { payload, message } = buildVerifierHandoff({
+			stepIndex: 2,
+			stepContent: "Add handler",
+			stepContext: "wire POST /x",
+			stepResult: "added route",
+			verifierAgent: "verifier",
+			evidence: baseEvidence,
+			checksSummary: "typecheck:pass",
+			impactContext: "Codebase impact: src/foo.ts → bar.ts",
+			maxVerifyRetries: 3,
+		});
+
+		assert.equal(payload.subagent.agent, "verifier");
+		assert.match(payload.paste, /^subagent\(agent="verifier"/);
+		assert.match(payload.paste, /task=/);
+		assert.equal(payload.reportVia.tool, "quest_update");
+		assert.equal(payload.reportVia.index, 2);
+		assert.equal(payload.schema.outcome, "PASS");
+		assert.ok(payload.schema.evidence);
+		assert.deepEqual(
+			{ outcome: VERIFY_COMPLETION_SCHEMA.outcome.split(" | ")[0] },
+			{ outcome: "PASS" },
+		);
+		assert.match(payload.task, /Required completion schema/);
+		assert.match(payload.task, /"outcome"/);
+		assert.match(payload.task, /Add handler/);
+		assert.match(payload.task, /Objective evidence/);
+		assert.match(message, /Ready-to-run verifier handoff/);
+		assert.match(message, /quest_update\(index=2/);
+		assert.equal(payload.details.stepIndex, 2);
+		assert.equal(payload.details.rePrompt, false);
+		assert.deepEqual(payload.details.changedFiles, ["src/foo.ts"]);
+		assert.equal(MAX_VERIFY_INCONCLUSIVES, 1);
+	});
+
+	test("includes cwd and model in paste when provided", () => {
+		const { payload } = buildVerifierHandoff({
+			stepIndex: 0,
+			stepContent: "x",
+			verificationCwd: "/tmp/wt",
+			model: "gpt-test",
+		});
+		assert.equal(payload.subagent.cwd, "/tmp/wt");
+		assert.equal(payload.subagent.model, "gpt-test");
+		assert.match(payload.paste, /cwd="\/tmp\/wt"/);
+		assert.match(payload.paste, /model="gpt-test"/);
+	});
+
+	test("re-prompt mode marks details and task body", () => {
+		const { payload, message } = buildVerifierHandoff({
+			stepIndex: 0,
+			stepContent: "x",
+			rePrompt: true,
+			previousInconclusive: "looks fine to me",
+		});
+		assert.equal(payload.details.rePrompt, true);
+		assert.match(payload.task, /RE-PROMPT/);
+		assert.match(payload.task, /looks fine to me/);
+		assert.match(message, /verification re-prompt/);
 	});
 });
 

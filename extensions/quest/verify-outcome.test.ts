@@ -12,6 +12,7 @@ import {
 	planCheckFail,
 	planTerminalUpdate,
 	planVerifyFail,
+	planVerifyInconclusive,
 	planVerifyPass,
 	resolveEffectiveOutcome,
 	snapshotStepForVerify,
@@ -34,6 +35,7 @@ function step(
 		verified: partial.verified ?? false,
 		verifyResult: partial.verifyResult ?? null,
 		verifyRetries: partial.verifyRetries ?? 0,
+		verifyInconclusives: partial.verifyInconclusives,
 		attempts: partial.attempts ?? 1,
 		startedAt: partial.startedAt ?? NOW - 5_000,
 		completedAt: partial.completedAt ?? null,
@@ -95,6 +97,66 @@ describe("resolveEffectiveOutcome", () => {
 			resultText: "looks mostly fine",
 		});
 		assert.equal(r.outcome, undefined);
+	});
+
+	test("prefers structured JSON evidence over full prose result", () => {
+		const r = resolveEffectiveOutcome({
+			stepStatus: "verifying",
+			resultText: JSON.stringify({
+				outcome: "PASS",
+				evidence: "short reason",
+				impact: "deps ok",
+			}),
+		});
+		assert.equal(r.outcome, "PASS");
+		assert.equal(r.inferred, true);
+		assert.equal(r.evidence, "short reason | impact: deps ok");
+	});
+});
+
+// ── planVerifyInconclusive ───────────────────────────────────────────────────
+
+describe("planVerifyInconclusive", () => {
+	test("first inconclusive → re-prompt", () => {
+		const plan = planVerifyInconclusive({
+			step: step({ verifyInconclusives: 0 }),
+			stepIndex: 0,
+			resultText: "seems ok",
+			now: NOW,
+		});
+		assert.equal(plan.kind, "reprompt");
+		if (plan.kind === "reprompt") {
+			assert.equal(plan.nextInconclusives, 1);
+			assert.equal(plan.details.rePrompt, true);
+		}
+	});
+
+	test("second inconclusive → fail with MODEL_QUALITY", () => {
+		const plan = planVerifyInconclusive({
+			step: step({ verifyInconclusives: 1 }),
+			stepIndex: 3,
+			resultText: "still not sure",
+			now: NOW,
+		});
+		assert.equal(plan.kind, "fail");
+		if (plan.kind === "fail") {
+			assert.equal(plan.nextPhase, "failed");
+			assert.equal(plan.failureCode, "MODEL_QUALITY");
+			assert.equal(plan.details.failureCode, "MODEL_QUALITY");
+			assert.equal(plan.patches.verifyInconclusives, 2);
+			assert.match(plan.patches.result, /INCONCLUSIVE/);
+			assert.equal(plan.events[0]?.kind, "verify_fail");
+			assert.equal(plan.evalIntent.failureCode, "MODEL_QUALITY");
+		}
+	});
+
+	test("undefined verifyInconclusives treated as 0 → re-prompt", () => {
+		const plan = planVerifyInconclusive({
+			step: step({ verifyInconclusives: undefined }),
+			stepIndex: 0,
+			now: NOW,
+		});
+		assert.equal(plan.kind, "reprompt");
 	});
 });
 
