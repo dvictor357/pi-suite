@@ -105,6 +105,14 @@ Two additive observability features built on the shared contract:
   Managed via `memory_graph` (`list | add | link | remove`) in pi-memory. Preserved across
   rescans alongside other quest-owned foreign fields via `withForeignFromDisk`.
 
+  **Read path (pi-quest):** `extensions/quest/memory-graph-read.ts` selects a budgeted set of
+  non-eval nodes (`selectGraphNodesForPrompt`) and renders them with line-safe
+  `clampToBudget` (`renderGraphContextBlock`). Injected into:
+  - Project awareness (`compactAwarenessBlock` in `todo-sync.ts`) — top N recent preferred
+    kinds; constrained models get fewer nodes.
+  - `quest_plan` step context — 1–2 keyword-overlapping nodes via
+    `enrichStepsWithMemoryGraph`. Eval-result is excluded from prompt dumps by default.
+
 ### Retrieval ranking (read-side, owned by pi-quest)
 
 How `pi-quest` _ranks_ the cache it reads is its own concern (the cache shape stays

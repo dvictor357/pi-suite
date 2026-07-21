@@ -24,11 +24,14 @@ import {
 import { collectDiffEvidence, renderEvidenceBlock, type StepEvidence } from "./evidence";
 import { buildVerificationImpactContext, enrichPlanningContext } from "./codebase";
 import { detectDependencyCycle, getMaxDependencyDepth } from "./graph";
+import { enrichStepsWithMemoryGraph } from "./memory-graph-read";
 import { nextPendingStep } from "./steering";
 import { persistHandoff } from "./context-broker";
 import { normalizeClaims, validateClaims } from "./write-claim";
 import { resolveSandboxProfile } from "./sandbox";
 import type { QuestRuntime } from "./runtime";
+import { loadProjectMemory } from "./utils";
+import type { MemoryGraph } from "../../core";
 
 export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 	const {
@@ -334,6 +337,16 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			const codebaseEnrichment = enrichPlanningContext(quest.steps, quest.goal, ctx.cwd);
 			quest.steps = codebaseEnrichment.enrichedTasks;
 
+			// Attach 1–2 keyword-overlapping memory-graph nodes to step context
+			// (non-eval only). Best-effort; missing graph is a no-op.
+			const projectMemory = loadProjectMemory(ctx.cwd);
+			const memoryGraph =
+				projectMemory?.graph && typeof projectMemory.graph === "object"
+					? (projectMemory.graph as MemoryGraph)
+					: null;
+			const graphEnrichment = enrichStepsWithMemoryGraph(quest.steps, memoryGraph, quest.goal);
+			quest.steps = graphEnrichment.enrichedSteps;
+
 			const needsApproval = quest.planningMode === "approve" && !quest.planApproved;
 
 			const fullPlan = quest.steps
@@ -394,6 +407,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 						text: [
 							`Plan saved: **${quest.steps.length} steps**`,
 							codebaseEnrichment.summary,
+							graphEnrichment.summary,
 							codebaseToolAvailable()
 								? `For additional planning precision, use codebase(operation="query", pattern=...) and codebase(operation="map", file=...) before delegating broad steps.`
 								: `codebase tool unavailable; used direct cache fallback when compatible.`,
