@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
 	isDispatchable,
+	parallelAllowedForQuest,
 	selectDispatchBatch,
 	buildBatchSteering,
 	stepWorktreePath,
@@ -66,6 +67,120 @@ function makeQuest(overrides: Partial<Quest> = {}): Quest {
 		...overrides,
 	};
 }
+
+// ── parallelAllowedForQuest (#21 parallel × sandbox exclusion) ──────────────
+
+describe("parallelAllowedForQuest", () => {
+	test("allows parallel when no sandbox is configured", () => {
+		const quest = makeQuest({
+			steps: [makeStep({ content: "a" }), makeStep({ content: "b" })],
+			parallel: { enabled: true, maxConcurrent: 2 },
+		});
+		assert.equal(parallelAllowedForQuest(quest), true);
+	});
+
+	test("allows parallel when quest sandbox mode is none", () => {
+		const quest = makeQuest({
+			steps: [makeStep({ content: "a" })],
+			sandbox: {
+				mode: "none",
+				allowedPaths: [],
+				deniedPaths: [],
+				allowCommands: [],
+				denyCommands: [],
+				allowNetwork: true,
+				allowPackageInstall: true,
+				worktree: null,
+			},
+			parallel: { enabled: true },
+		});
+		assert.equal(parallelAllowedForQuest(quest), true);
+	});
+
+	test("forbids parallel when quest sandbox is restricted", () => {
+		const quest = makeQuest({
+			steps: [makeStep({ content: "a" })],
+			sandbox: {
+				mode: "restricted",
+				allowedPaths: ["src/**"],
+				deniedPaths: [],
+				allowCommands: [],
+				denyCommands: [],
+				allowNetwork: false,
+				allowPackageInstall: false,
+				worktree: null,
+			},
+			parallel: { enabled: true },
+		});
+		assert.equal(parallelAllowedForQuest(quest), false);
+	});
+
+	test("forbids parallel when quest sandbox is isolated", () => {
+		const quest = makeQuest({
+			steps: [makeStep({ content: "a" })],
+			sandbox: {
+				mode: "isolated",
+				allowedPaths: ["src/**"],
+				deniedPaths: [],
+				allowCommands: [],
+				denyCommands: [],
+				allowNetwork: false,
+				allowPackageInstall: false,
+				worktree: null,
+			},
+			parallel: { enabled: true },
+		});
+		assert.equal(parallelAllowedForQuest(quest), false);
+	});
+
+	test("forbids parallel when any dispatchable step has step-level sandbox", () => {
+		const quest = makeQuest({
+			steps: [
+				makeStep({ content: "open", status: "pending" }),
+				makeStep({
+					content: "sandboxed",
+					status: "pending",
+					sandbox: { mode: "restricted", allowedPaths: ["src/**"] },
+				}),
+			],
+			parallel: { enabled: true },
+		});
+		assert.equal(parallelAllowedForQuest(quest), false);
+	});
+
+	test("allows parallel when only non-dispatchable steps are sandboxed", () => {
+		// Done steps are not dispatchable; pending open step has no sandbox.
+		const quest = makeQuest({
+			steps: [
+				makeStep({
+					content: "done sandboxed",
+					status: "done",
+					sandbox: { mode: "restricted", allowedPaths: ["src/**"] },
+				}),
+				makeStep({ content: "open", status: "pending", dependencies: [0] }),
+			],
+			parallel: { enabled: true },
+		});
+		assert.equal(parallelAllowedForQuest(quest), true);
+	});
+
+	test("forbids parallel for quest-level sandbox even with empty steps", () => {
+		const quest = makeQuest({
+			steps: [],
+			sandbox: {
+				mode: "restricted",
+				allowedPaths: [],
+				deniedPaths: [],
+				allowCommands: [],
+				denyCommands: [],
+				allowNetwork: false,
+				allowPackageInstall: false,
+				worktree: null,
+			},
+		});
+		assert.equal(parallelAllowedForQuest(quest), false);
+	});
+});
 
 // ── isDispatchable ──────────────────────────────────────────────────────────
 

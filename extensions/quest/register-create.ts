@@ -163,6 +163,23 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 					? `\n⚠ Replacing existing quest "${existing.name}" (status: ${existing.status}). Previous quest will be archived on completion.`
 					: "";
 
+			// Parallel multi-task minion batches do not apply Quest sandbox-guard.
+			// When both parallel.enabled and restricted/isolated sandbox are set,
+			// force sequential (disable parallel) and surface a clear note (#21).
+			const sandboxPolicy = params.sandbox as SandboxPolicy | undefined;
+			let parallelConfig = params.parallel as ParallelConfig | undefined;
+			let parallelSandboxNote = "";
+			if (
+				parallelConfig?.enabled &&
+				sandboxPolicy?.mode &&
+				(sandboxPolicy.mode === "restricted" || sandboxPolicy.mode === "isolated")
+			) {
+				parallelConfig = undefined;
+				parallelSandboxNote =
+					`\n⚠ **Parallel disabled** — sandbox mode \`${sandboxPolicy.mode}\` requires sequential ` +
+					`\`quest_delegate\` (multi-task minion batches do not enforce Quest sandbox-guard).`;
+			}
+
 			const quest = emptyQuest(
 				params.name,
 				params.goal,
@@ -170,8 +187,8 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 				params.planningMode ?? "auto",
 				params.verifyOnComplete ?? true,
 				params.gitIntegration,
-				params.sandbox as SandboxPolicy | undefined,
-				params.parallel as ParallelConfig | undefined,
+				sandboxPolicy,
+				parallelConfig,
 			);
 			validateAndSetTeam(quest, params.team);
 			ensureLedgers(ctx.cwd, quest.name);
@@ -207,6 +224,7 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 							awareness,
 							codebaseGuidance,
 							modeNote,
+							parallelSandboxNote,
 						]
 							.filter(Boolean)
 							.join("\n"),

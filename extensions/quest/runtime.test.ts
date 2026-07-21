@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createQuestRuntime } from "./runtime";
-import { emptyQuest, saveQuest } from "./storage";
+import { emptyQuest, rememberAgentModel, rememberModelLadder, saveQuest } from "./storage";
 import type { Quest, QuestStep } from "./types";
 
 /** A QuestStep with all required fields defaulted; override what a test cares about. */
@@ -142,7 +142,62 @@ describe("fireNextTask", () => {
 
 			assert.equal(h.rt.fireNextTask(h.ctx), true);
 			assert.equal(h.steers.length, 1);
+			// Sequential quest_delegate path — never multi-task minion batch.
 			assert.match(h.steers[0], /quest_delegate/);
+			assert.doesNotMatch(h.steers[0], /Parallel Dispatch/);
+			assert.doesNotMatch(h.steers[0], /"tasks":/);
+		} finally {
+			h.cleanup();
+		}
+	});
+
+	test("falls back to sequential when quest-level sandbox is restricted with parallel enabled", () => {
+		const h = fakeRuntime();
+		try {
+			const quest = seedActive(h.rt, h.cwd, [
+				makeTask({ content: "worker step" }),
+				makeTask({ content: "another step" }),
+			]);
+			quest.parallel = { enabled: true, maxConcurrent: 2 };
+			quest.sandbox = {
+				mode: "restricted",
+				allowedPaths: ["src/**"],
+				deniedPaths: [],
+				allowCommands: [],
+				denyCommands: [],
+				allowNetwork: false,
+				allowPackageInstall: false,
+				worktree: null,
+			};
+
+			assert.equal(h.rt.fireNextTask(h.ctx), true);
+			assert.equal(h.steers.length, 1);
+			assert.match(h.steers[0], /quest_delegate/);
+			assert.doesNotMatch(h.steers[0], /Parallel Dispatch/);
+		} finally {
+			h.cleanup();
+		}
+	});
+
+	test("fireParallelBatch is a no-op when sandbox forbids parallel", () => {
+		const h = fakeRuntime();
+		try {
+			const quest = seedActive(h.rt, h.cwd, [makeTask({ content: "step" })]);
+			quest.parallel = { enabled: true, maxConcurrent: 2 };
+			quest.sandbox = {
+				mode: "isolated",
+				allowedPaths: ["src/**"],
+				deniedPaths: [],
+				allowCommands: [],
+				denyCommands: [],
+				allowNetwork: false,
+				allowPackageInstall: false,
+				worktree: null,
+			};
+
+			assert.equal(h.rt.fireParallelBatch(h.ctx, quest), false);
+			assert.equal(h.steers.length, 0);
+			assert.equal(quest.steps[0].status, "pending");
 		} finally {
 			h.cleanup();
 		}
@@ -185,6 +240,109 @@ describe("fireNextTask", () => {
 		try {
 			assert.equal(h.rt.fireNextTask(h.ctx), false);
 			assert.equal(h.steers.length, 0);
+		} finally {
+			h.cleanup();
+		}
+	});
+});
+
+describe("fireStep ladder init + lastModel stamp", () => {
+	test("ladder-eligible worker: initializes rung 0 and stamps lastModel on first fire", () => {
+		const h = fakeRuntime();
+		try {
+			rememberModelLadder(h.cwd, {
+				rungs: ["ornith-1.0", "mythos-5"],
+				roles: ["worker"],
+				approvedAt: Date.now(),
+			});
+			const quest = seedActive(h.rt, h.cwd, [
+				makeTask({ content: "implement feature", agent: "worker" }),
+			]);
+
+			assert.equal(h.rt.fireNextTask(h.ctx), true);
+			const step = quest.steps[0];
+			assert.equal(step.rung, 0);
+			assert.equal(step.lastModel, "ornith-1.0");
+			assert.equal(h.steers.length, 1);
+			assert.match(h.steers[0], /ornith-1\.0/);
+			assert.match(h.steers[0], /rung 1\/2/);
+		} finally {
+			h.cleanup();
+		}
+	});
+
+	test("explicit step.model bypasses ladder and stamps that model as lastModel", () => {
+		const h = fakeRuntime();
+		try {
+			rememberModelLadder(h.cwd, {
+				rungs: ["ornith-1.0", "mythos-5"],
+				roles: ["worker"],
+				approvedAt: Date.now(),
+			});
+			const quest = seedActive(h.rt, h.cwd, [
+				makeTask({ content: "pinned model", agent: "worker", model: "claude-opus" }),
+			]);
+
+			assert.equal(h.rt.fireNextTask(h.ctx), true);
+			const step = quest.steps[0];
+			assert.equal(step.rung, undefined);
+			assert.equal(step.lastModel, "claude-opus");
+			assert.match(h.steers[0], /claude-opus/);
+			assert.doesNotMatch(h.steers[0], /rung /);
+		} finally {
+			h.cleanup();
+		}
+	});
+
+	test("scout is not laddered; uses remembered model for lastModel", () => {
+		const h = fakeRuntime();
+		try {
+			rememberModelLadder(h.cwd, {
+				rungs: ["ornith-1.0", "mythos-5"],
+				approvedAt: Date.now(),
+			});
+			rememberAgentModel(h.cwd, "scout", {
+				model: "flash-scout",
+				timestamp: Date.now(),
+			});
+			const quest = seedActive(h.rt, h.cwd, [
+				makeTask({ content: "explore codebase", agent: "scout" }),
+			]);
+
+			assert.equal(h.rt.fireNextTask(h.ctx), true);
+			const step = quest.steps[0];
+			assert.equal(step.rung, undefined);
+			assert.equal(step.lastModel, "flash-scout");
+			assert.match(h.steers[0], /flash-scout/);
+		} finally {
+			h.cleanup();
+		}
+	});
+
+	test("re-fire of a step with rung already set does not re-pick start", () => {
+		const h = fakeRuntime();
+		try {
+			rememberModelLadder(h.cwd, {
+				rungs: ["ornith-1.0", "mythos-5"],
+				roles: ["worker"],
+				approvedAt: Date.now(),
+			});
+			// Pretend a prior escalation left the step on rung 1, requeued.
+			const quest = seedActive(h.rt, h.cwd, [
+				makeTask({
+					content: "retry after escalate",
+					agent: "worker",
+					rung: 1,
+					escalations: 1,
+					phase: "queued",
+					status: "pending",
+				}),
+			]);
+
+			assert.equal(h.rt.fireNextTask(h.ctx), true);
+			assert.equal(quest.steps[0].rung, 1);
+			assert.equal(quest.steps[0].lastModel, "mythos-5");
+			assert.match(h.steers[0], /mythos-5/);
 		} finally {
 			h.cleanup();
 		}

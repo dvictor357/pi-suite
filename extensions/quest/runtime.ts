@@ -18,7 +18,7 @@ import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 
 import type { Quest, QuestStep } from "./types";
-import { loadQuest, saveQuest } from "./storage";
+import { loadAgentModels, loadModelLadder, loadQuest, saveQuest } from "./storage";
 import { buildSteeringMessage, nextPendingStep } from "./steering";
 import {
 	createRunLedger,
@@ -49,12 +49,16 @@ import { QuestKanban, type KanbanActions } from "./kanban";
 import { hasCodebaseTool } from "./codebase";
 import { ActivityTracker } from "./activity-panel";
 import { buildStepContext, collectDependencyHandoffs } from "./context-broker";
-import { briefBudgetForModel, renderFailureBriefs } from "./ladder";
-import { isSandboxActive, resolveSandboxProfile } from "./sandbox";
+import {
+	applyStepDispatchModel,
+	briefBudgetForModel,
+	prepareStepDispatchModel,
+	renderFailureBriefs,
+} from "./ladder";
+import { resolveSandboxProfile } from "./sandbox";
 import { WriteClaimRegistry } from "./write-claim";
 import { DispatchGuard, checkTimeout, resolvePhase, validateTransition } from "./phase-loop";
 import {
-	isDispatchable,
 	selectDispatchBatch,
 	buildBatchSteering,
 	integrateBatch,
@@ -62,6 +66,7 @@ import {
 	createStepWorktree,
 	removeStepWorktree,
 	isWorkingTreeClean,
+	parallelAllowedForQuest,
 	DEFAULT_PARALLEL_CONFIG,
 	type ParallelConfig,
 } from "./parallel";
@@ -427,8 +432,19 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 			const base = captureBaseline(ctx.cwd);
 			if (base.sha) step.baselineSha = base.sha;
 		}
+		// First auto-pilot dispatch of a ladder-eligible step: pick start rung,
+		// resolve model, stamp lastModel so steering/evals/escalation all see them.
+		// Explicit step.model and judge roles bypass the ladder (prepareStepDispatchModel).
+		const prepared = prepareStepDispatchModel(step, {
+			ladder: loadModelLadder(ctx.cwd),
+			evalStats: getEvalStats(ctx.cwd),
+			rememberedModel: loadAgentModels(ctx.cwd)[step.agent]?.model,
+			cfg: LADDER,
+		});
+		applyStepDispatchModel(step, prepared);
 		quest.lastFiredStepIndex = index;
 		quest.stepsSincePause++;
+		// transitionStep → running persists rung/lastModel with the rest of the step.
 		if (!transitionStep(ctx, quest, index, "running")) {
 			dispatchGuard.release(ctx.cwd, index);
 			return;
@@ -448,15 +464,10 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		const quest = getQuest(ctx.cwd);
 		if (!quest || quest.status !== "active") return false;
 		const next = nextPendingStep(quest);
-		if (
-			quest.parallel?.enabled &&
-			next &&
-			!quest.steps.some(
-				(step, index) =>
-					isDispatchable(step, quest.steps) &&
-					isSandboxActive(resolveSandboxProfile(quest.sandbox, step.sandbox)),
-			)
-		) {
+		// Parallel multi-task minion batches skip Quest sandbox-guard (#21).
+		// When sandbox is restricted/isolated (quest- or step-level), force
+		// sequential quest_delegate instead of fireParallelBatch.
+		if (quest.parallel?.enabled && next && parallelAllowedForQuest(quest)) {
 			return fireParallelBatch(ctx, quest);
 		}
 		if (!next) return false;
@@ -469,6 +480,10 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 			? { ...DEFAULT_PARALLEL_CONFIG, ...quest.parallel }
 			: DEFAULT_PARALLEL_CONFIG;
 		if (!cfg.enabled || quest.status !== "active") return false;
+		// Defense in depth: never dispatch a multi-task minion batch when
+		// sandbox is active. Integration of already-dispatched worktrees is
+		// skipped too — sandboxed quests never create parallel worktrees.
+		if (!parallelAllowedForQuest(quest)) return false;
 
 		// Recover timed-out attempts before selecting more work. Dirty worktrees are
 		// retained and blocked; clean ones can be retried without losing evidence.
@@ -582,6 +597,15 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 			step.startedAt = Date.now();
 			const base = captureBaseline(created);
 			if (base.sha) step.baselineSha = base.sha;
+			// Ladder init + lastModel stamp before batch steer so each step's model
+			// is persisted and buildBatchSteering can resolve via rung / lastModel.
+			const prepared = prepareStepDispatchModel(step, {
+				ladder: loadModelLadder(ctx.cwd),
+				evalStats: getEvalStats(ctx.cwd),
+				rememberedModel: loadAgentModels(ctx.cwd)[step.agent]?.model,
+				cfg: LADDER,
+			});
+			applyStepDispatchModel(step, prepared);
 			if (!transitionStep(ctx, quest, index, "running", "parallel subagent dispatched")) continue;
 			dispatched.push(index);
 		}
