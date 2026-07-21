@@ -15,7 +15,12 @@ import { realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { cwdHash } from "../../core";
 import type { ParallelConfig, Quest, QuestStep } from "./types";
-import { normalizeClaims, type WriteClaimRegistry } from "./write-claim";
+import {
+	hasNonEmptyWriteClaim,
+	isReadOnlyRole,
+	normalizeClaims,
+	type WriteClaimRegistry,
+} from "./write-claim";
 import type { DispatchGuard } from "./phase-loop";
 import { DEFAULT_STEP_TIMEOUT_MS, checkTimeout, resolvePhase } from "./phase-loop";
 import { loadAgentModels, loadModelLadder } from "./storage";
@@ -288,8 +293,14 @@ export function selectDispatchBatch(
 		const step = quest.steps[index];
 		if (guard.isInFlight(cwd, index)) continue;
 
-		// Legacy steps without claims remain safe because each writer has an isolated
-		// worktree; declared claims avoid predictable merge conflicts earlier.
+		// Execution-role writers must declare a non-empty writeClaim under parallel
+		// mode (plan validation enforces this; exclude here as defense in depth).
+		// Read-only roles may keep empty claims.
+		if (!isReadOnlyRole(step.agent) && !hasNonEmptyWriteClaim(step.writeClaim)) {
+			conflicts.push({ index, blockedBy: -1 });
+			continue;
+		}
+
 		let stepPaths: string[];
 		try {
 			stepPaths = normalizeClaims(step.writeClaim, cwd);

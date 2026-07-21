@@ -497,9 +497,14 @@ describe("Batch selection ordering", () => {
 	test("shallowest deps first, then index (tie-break)", () => {
 		const quest = makeQuest({
 			steps: [
-				makeStep({ status: "pending", content: "S0", dependencies: [1] }), // depth 1
-				makeStep({ status: "done", content: "S1" }), // depth 0, done
-				makeStep({ status: "pending", content: "S2" }), // depth 0
+				makeStep({
+					status: "pending",
+					content: "S0",
+					dependencies: [1],
+					writeClaim: ["src/a.ts"],
+				}), // depth 1
+				makeStep({ status: "done", content: "S1", writeClaim: ["src/b.ts"] }), // depth 0, done
+				makeStep({ status: "pending", content: "S2", writeClaim: ["src/c.ts"] }), // depth 0
 			],
 		});
 		const guard = new DispatchGuard();
@@ -514,9 +519,9 @@ describe("Batch selection ordering", () => {
 	test("respects maxConcurrent cap", () => {
 		const quest = makeQuest({
 			steps: [
-				makeStep({ status: "pending", content: "S0" }),
-				makeStep({ status: "pending", content: "S1" }),
-				makeStep({ status: "pending", content: "S2" }),
+				makeStep({ status: "pending", content: "S0", writeClaim: ["src/a.ts"] }),
+				makeStep({ status: "pending", content: "S1", writeClaim: ["src/b.ts"] }),
+				makeStep({ status: "pending", content: "S2", writeClaim: ["src/c.ts"] }),
 			],
 		});
 		const guard = new DispatchGuard();
@@ -530,8 +535,8 @@ describe("Batch selection ordering", () => {
 	test("already-in-flight steps not re-selected", () => {
 		const quest = makeQuest({
 			steps: [
-				makeStep({ status: "pending", content: "S0" }),
-				makeStep({ status: "pending", content: "S1" }),
+				makeStep({ status: "pending", content: "S0", writeClaim: ["src/a.ts"] }),
+				makeStep({ status: "pending", content: "S1", writeClaim: ["src/b.ts"] }),
 			],
 		});
 		const guard = new DispatchGuard();

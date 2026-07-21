@@ -8,6 +8,9 @@ import {
 	findOverlap,
 	normalizeClaims,
 	validateClaims,
+	validateParallelWriteClaims,
+	missingParallelWriteClaimIndices,
+	hasNonEmptyWriteClaim,
 	isReadOnlyRole,
 	WriteClaimRegistry,
 } from "./write-claim";
@@ -211,6 +214,83 @@ describe("validateClaims", () => {
 	test("allows empty claims for any role", () => {
 		assert.equal(validateClaims("planner", [], []), null);
 		assert.equal(validateClaims("scout", undefined, undefined), null);
+	});
+});
+
+// ── Parallel write-claim requirement (R3) ───────────────────────────────────
+
+describe("hasNonEmptyWriteClaim", () => {
+	test("false for missing, empty, or undefined", () => {
+		assert.equal(hasNonEmptyWriteClaim(undefined), false);
+		assert.equal(hasNonEmptyWriteClaim([]), false);
+	});
+
+	test("true when at least one path is present", () => {
+		assert.equal(hasNonEmptyWriteClaim(["src/a.ts"]), true);
+	});
+});
+
+describe("missingParallelWriteClaimIndices", () => {
+	test("flags execution roles without writeClaim", () => {
+		const indices = missingParallelWriteClaimIndices([
+			{ agent: "worker", writeClaim: ["src/a.ts"] },
+			{ agent: "worker" },
+			{ agent: "quick-worker", writeClaim: [] },
+			{ agent: "scout" },
+			{ agent: "verifier", writeClaim: [] },
+		]);
+		assert.deepEqual(indices, [1, 2]);
+	});
+
+	test("returns empty when all writers have claims", () => {
+		assert.deepEqual(
+			missingParallelWriteClaimIndices([
+				{ agent: "worker", writeClaim: ["src/a.ts"] },
+				{ agent: "scout" },
+			]),
+			[],
+		);
+	});
+});
+
+describe("validateParallelWriteClaims", () => {
+	test("returns null when plan is valid", () => {
+		assert.equal(
+			validateParallelWriteClaims([
+				{ agent: "worker", writeClaim: ["src/foo.ts"] },
+				{ agent: "scout" },
+				{ agent: "verifier" },
+			]),
+			null,
+		);
+	});
+
+	test("lists 1-based step indices missing write claims", () => {
+		const err = validateParallelWriteClaims([
+			{ agent: "worker", writeClaim: ["src/a.ts"] },
+			{ agent: "worker" },
+			{ agent: "quick-worker", writeClaim: [] },
+			{ agent: "planner" },
+		]);
+		assert.ok(err !== null);
+		assert.match(err!, /#2/);
+		assert.match(err!, /#3/);
+		assert.doesNotMatch(err!, /#1/);
+		assert.doesNotMatch(err!, /#4/);
+		assert.match(err!, /Parallel mode requires/);
+		assert.match(err!, /Read-only roles/);
+	});
+
+	test("allows empty claims for all read-only roles", () => {
+		assert.equal(
+			validateParallelWriteClaims([
+				{ agent: "scout" },
+				{ agent: "verifier" },
+				{ agent: "reviewer" },
+				{ agent: "planner" },
+			]),
+			null,
+		);
 	});
 });
 

@@ -163,6 +163,47 @@ export function validateClaims(
 	return null;
 }
 
+/** True when a step declares at least one non-empty write-claim path. */
+export function hasNonEmptyWriteClaim(writeClaim: string[] | undefined): boolean {
+	return Boolean(writeClaim && writeClaim.length > 0);
+}
+
+/**
+ * 0-based indices of execution-role steps that lack a non-empty writeClaim.
+ * Read-only roles (scout, verifier, reviewer, planner) are exempt.
+ *
+ * Used at plan time when `parallel.enabled` so concurrent writers cannot silently
+ * overlap; also used by batch selection as defense in depth.
+ */
+export function missingParallelWriteClaimIndices(
+	steps: ReadonlyArray<{ agent: string; writeClaim?: string[] }>,
+): number[] {
+	const missing: number[] = [];
+	for (let i = 0; i < steps.length; i++) {
+		const step = steps[i];
+		if (isReadOnlyRole(step.agent)) continue;
+		if (!hasNonEmptyWriteClaim(step.writeClaim)) missing.push(i);
+	}
+	return missing;
+}
+
+/**
+ * Plan-time error when parallel is enabled and any execution-role step has no
+ * writeClaim. Returns null when the plan is valid.
+ */
+export function validateParallelWriteClaims(
+	steps: ReadonlyArray<{ agent: string; writeClaim?: string[] }>,
+): string | null {
+	const missing = missingParallelWriteClaimIndices(steps);
+	if (missing.length === 0) return null;
+	const labels = missing.map((i) => `#${i + 1}`).join(", ");
+	return (
+		`Parallel mode requires a non-empty writeClaim on every execution-role step. ` +
+		`Missing write claims on step(s): ${labels}. ` +
+		`Read-only roles (scout, verifier, reviewer, planner) may omit writeClaim.`
+	);
+}
+
 // ── Active claim registry ────────────────────────────────────────────────────
 
 /** One registered active write-claim set. */

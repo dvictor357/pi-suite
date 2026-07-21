@@ -201,9 +201,11 @@ pause/abort clears dispatch ownership without deleting isolated work.
 Sequential dispatch remains the default. `quest_create.parallel.enabled` explicitly opts
 into bounded batches of dependency-ready steps. Each selected step owns a branch and a Git
 worktree outside the main checkout; declared write claims reject predictable overlap.
-Checks and verification run in that worktree, then verified branches integrate in stable
-dependency/index order. Merge conflicts pause the quest with the branch/worktree retained
-as evidence; cleanup removes only clean worktrees.
+When parallel is enabled, every execution-role step must declare a non-empty `writeClaim`
+at plan time (read-only roles may omit it). Batch selection also excludes writers without
+claims as defense in depth. Checks and verification run in that worktree, then verified
+branches integrate in stable dependency/index order. Merge conflicts pause the quest with
+the branch/worktree retained as evidence; cleanup removes only clean worktrees.
 
 ## Verified escalation ladder
 
