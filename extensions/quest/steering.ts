@@ -1,6 +1,5 @@
 import type { Quest, QuestStep } from "./types";
-import { MAX_BURST, MAX_RETRIES, ICON, LADDER, formatDirectiveFor } from "./constants";
-import { compactAwarenessBlock } from "./todo-sync";
+import { MAX_BURST, MAX_RETRIES, ICON, LADDER } from "./constants";
 import { loadAgentModels, loadModelLadder } from "./storage";
 import { briefBudgetForModel, renderFailureBriefs, rungModel } from "./ladder";
 import { resolveSandboxProfile } from "./sandbox";
@@ -220,10 +219,9 @@ export function buildSteeringMessage(
 	// pi-minions child agent receives actual step content, dependency handoffs,
 	// failure briefs, sandbox constraints, project awareness, format directive,
 	// and the completion schema — not a generic reference to the parent steering
-	// message it cannot see.
+	// message it cannot see. Parent steer stays slim (progress + model + call);
+	// briefs/awareness/format live only in the child task= payload.
 	const modelInfo = assignedModel ? { id: assignedModel } : undefined;
-	const formatDirective = formatDirectiveFor(modelInfo);
-	const awarenessBlock = compactAwarenessBlock(cwd, modelInfo);
 	const briefBlock = renderFailureBriefs(
 		task.failureBriefs,
 		briefBudgetForModel(modelInfo, LADDER),
@@ -272,6 +270,9 @@ export function buildSteeringMessage(
 			: "";
 
 	// ── Steering message (orchestrator-visible overview + tool-call suggestion) ──
+	// Deliberately omits brief/awareness/format dumps — those are already embedded
+	// in minionTask via buildStepContext. Duplicating them here doubled tokens for
+	// the parent without helping the child (who only sees task=).
 	return [
 		`## Quest: ${quest.name} (${done}/${total} done)`,
 		``,
@@ -282,10 +283,6 @@ export function buildSteeringMessage(
 		sandboxBlock,
 		claimBlock,
 		modelLine,
-		briefBlock,
-		awarenessBlock,
-		``,
-		formatDirective,
 		``,
 		`When complete, call **quest_update** with step index ${index} to mark it done.`,
 		`If you hit a blocker you can't resolve, call quest_update with status "failed" and explain why.`,

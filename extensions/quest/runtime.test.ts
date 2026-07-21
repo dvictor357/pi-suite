@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createQuestRuntime } from "./runtime";
+import type { MemoryGraph, MemoryNode } from "../../core";
+import { createQuestRuntime, EVAL_RESULT_NODE_CAP, pruneEvalResultNodes } from "./runtime";
 import { emptyQuest, saveQuest } from "./storage";
 import type { Quest, QuestStep } from "./types";
 
@@ -188,5 +189,59 @@ describe("fireNextTask", () => {
 		} finally {
 			h.cleanup();
 		}
+	});
+});
+
+describe("pruneEvalResultNodes", () => {
+	function node(id: string, kind: MemoryNode["kind"], t = 1): MemoryNode {
+		return { id, kind, label: id, createdAt: t, updatedAt: t };
+	}
+
+	test("identity when under the cap", () => {
+		const graph: MemoryGraph = {
+			nodes: [node("e1", "eval-result"), node("k1", "knowledge"), node("e2", "eval-result")],
+			edges: [],
+		};
+		assert.equal(pruneEvalResultNodes(graph, 50), graph);
+		assert.equal(pruneEvalResultNodes(graph, 2), graph);
+	});
+
+	test("drops oldest eval-result nodes only, keeps last N", () => {
+		const graph: MemoryGraph = {
+			nodes: [
+				node("e0", "eval-result", 0),
+				node("d1", "design-decision", 1),
+				node("e1", "eval-result", 1),
+				node("k1", "knowledge", 2),
+				node("e2", "eval-result", 2),
+				node("e3", "eval-result", 3),
+				node("a1", "artifact-set", 4),
+			],
+			edges: [{ from: "d1", to: "k1", kind: "supports" }],
+		};
+		const pruned = pruneEvalResultNodes(graph, 2);
+		assert.notEqual(pruned, graph);
+		assert.deepEqual(
+			pruned.nodes.map((n) => n.id),
+			["d1", "k1", "e2", "e3", "a1"],
+		);
+		// Manual / non-eval kinds untouched; edges preserved.
+		assert.equal(pruned.nodes.find((n) => n.id === "d1")?.kind, "design-decision");
+		assert.equal(pruned.nodes.find((n) => n.id === "k1")?.kind, "knowledge");
+		assert.deepEqual(pruned.edges, graph.edges);
+	});
+
+	test("default cap is EVAL_RESULT_NODE_CAP (50)", () => {
+		const nodes: MemoryNode[] = [];
+		for (let i = 0; i < EVAL_RESULT_NODE_CAP + 5; i++) {
+			nodes.push(node(`e${i}`, "eval-result", i));
+		}
+		nodes.push(node("manual", "knowledge", 999));
+		const pruned = pruneEvalResultNodes({ nodes, edges: [] });
+		const evals = pruned.nodes.filter((n) => n.kind === "eval-result");
+		assert.equal(evals.length, EVAL_RESULT_NODE_CAP);
+		assert.equal(evals[0].id, "e5"); // first 5 dropped
+		assert.equal(evals[evals.length - 1].id, `e${EVAL_RESULT_NODE_CAP + 4}`);
+		assert.ok(pruned.nodes.some((n) => n.id === "manual"));
 	});
 });
