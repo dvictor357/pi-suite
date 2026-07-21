@@ -159,6 +159,15 @@ identically:
   low-context goal) plus a small, configurable "small-model" marker list. It only ever
   _reduces_ the base budget, so large ample-context models are never starved. All
   thresholds are surfaced in `CONTEXT_BUDGET` and overridable per call.
+- **`stepContextBudgetForModel(model)`** is the same scale applied to a larger
+  `stepContextBudget` base — the shared ceiling for the full multi-block step prompt
+  assembled by `buildStepContext` (task + failure briefs + dep handoffs + awareness +
+  format). Without a shared cap, independently budgeted sections still summed past a
+  tiny window.
+- **`fitSectionsToBudget(sections, budget)`** drops whole low-priority sections first
+  (priority: task > failure briefs > dep handoffs > awareness > format), then
+  line-safe clamps survivors. Never mid-line cuts except as a last resort on a single
+  oversized line.
 - **`clampToBudget(text, budget)`** trims by dropping whole trailing lines and appending a
   marker, never cutting a line mid-way. This replaced raw `slice(0, n)` cuts in the live
   awareness path (`todo-sync.ts`), the memory injection, and the composable context-broker —

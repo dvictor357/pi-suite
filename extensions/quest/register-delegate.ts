@@ -31,7 +31,16 @@ import { normalizeClaims, validateClaims } from "./write-claim";
 import { resolvePhase } from "./phase-loop";
 
 export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
-	const { getQuest, textResult, resolvePersona, stampTaskModel, persist } = rt;
+	const {
+		getQuest,
+		textResult,
+		resolvePersona,
+		stampTaskModel,
+		persist,
+		recordEval,
+		makeEval,
+		recordRun,
+	} = rt;
 
 	pi.registerTool({
 		name: "quest_assign_model",
@@ -431,8 +440,25 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				if (task.attempts <= MAX_RETRIES && rt.beginStepRetry(ctx, quest, params.index, error)) {
 					rt.transitionStep(ctx, quest, params.index, "queued", "bounded sub-agent retry");
 				} else if (task.phase !== "blocked") {
+					// Terminal tool/sub-agent crash: stamp TOOL_FAILURE on the run
+					// ledger and eval JSONL so diagnostics can separate infra fails
+					// from check/quality fails.
 					rt.transitionStep(ctx, quest, params.index, "failed", "attempt budget exhausted");
 					task.completedAt = Date.now();
+					recordRun(ctx.cwd, {
+						kind: "task_fail",
+						taskIndex: params.index,
+						taskContent: task.content,
+						agent: role,
+						model: model.id,
+						timestamp: Date.now(),
+						error,
+						failureCode: "TOOL_FAILURE",
+					});
+					recordEval(
+						ctx.cwd,
+						makeEval(quest, task, params.index, "failed", false, task.result, "TOOL_FAILURE"),
+					);
 					persist(ctx, quest);
 				}
 				return {
@@ -449,6 +475,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 						thinkingLevel,
 						ok: false,
 						error: res.error,
+						failureCode: "TOOL_FAILURE" as const,
 					},
 				};
 			}

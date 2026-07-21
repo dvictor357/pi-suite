@@ -1,9 +1,24 @@
 import type { BudgetModelInfo } from "../../core";
+import { fitSectionsToBudget, stepContextBudgetForModel } from "../../core";
 import { formatDirectiveFor } from "./constants";
 import { buildSandboxConstraintBlock } from "./delegate";
 import type { SandboxProfile } from "./sandbox";
 import { compactAwarenessBlock } from "./todo-sync";
 import type { Quest, QuestStep, StepHandoff } from "./types";
+
+/**
+ * Priority ranks for multi-block step context (lower = keep longer).
+ * Issue I8: task > failure briefs > dep handoffs > awareness > format.
+ * Structural sections (framing, sandbox, completion schema) share the task tier.
+ */
+const SECTION_PRIORITY = {
+	task: 0,
+	structural: 0,
+	failure: 1,
+	deps: 2,
+	awareness: 3,
+	format: 4,
+} as const;
 
 const MAX_SUMMARY = 2_000;
 const MAX_NOTES = 1_000;
@@ -140,23 +155,44 @@ export interface BuildStepContextOpts {
 }
 
 export function buildStepContext(opts: BuildStepContextOpts): string {
-	const sections: string[] = [];
+	// Build each section independently, then fit them into one model budget.
+	// Priority (keep first): task > failure briefs > dep handoffs > awareness > format.
+	// Whole low-priority sections drop before any line-safe clamp of survivors.
+	const framingParts: string[] = [];
 	if (opts.includeLegacyFraming) {
-		if (opts.persona?.trim()) sections.push(opts.persona.trim(), "", "---", "");
-		sections.push(roleFramingBlock(opts.role), "");
+		if (opts.persona?.trim()) framingParts.push(opts.persona.trim(), "---");
+		framingParts.push(roleFramingBlock(opts.role));
 	}
-	sections.push(taskBlock(opts.content));
-	const optional = [
-		contextBlock(opts.context),
-		dependencyHandoffBlock(opts.dependencyResults ?? []),
-		failureBriefBlock(opts.failureBriefBlock ?? ""),
-		sandboxConstraintBlock(opts.sandboxProfile),
-		opts.cwd ? projectAwarenessBlock(opts.cwd, opts.modelInfo) : "",
-		formatBlock(opts.modelInfo),
-		completionSchemaBlock(),
+	const framing = framingParts.filter(Boolean).join("\n\n");
+
+	const taskParts = [taskBlock(opts.content), contextBlock(opts.context)].filter(Boolean);
+	const task = taskParts.join("\n\n");
+
+	const sections = [
+		{ text: framing, priority: SECTION_PRIORITY.structural },
+		{ text: task, priority: SECTION_PRIORITY.task },
+		{
+			text: failureBriefBlock(opts.failureBriefBlock ?? ""),
+			priority: SECTION_PRIORITY.failure,
+		},
+		{
+			text: dependencyHandoffBlock(opts.dependencyResults ?? []),
+			priority: SECTION_PRIORITY.deps,
+		},
+		{
+			text: sandboxConstraintBlock(opts.sandboxProfile),
+			priority: SECTION_PRIORITY.structural,
+		},
+		{
+			text: opts.cwd ? projectAwarenessBlock(opts.cwd, opts.modelInfo) : "",
+			priority: SECTION_PRIORITY.awareness,
+		},
+		{ text: formatBlock(opts.modelInfo), priority: SECTION_PRIORITY.format },
+		{ text: completionSchemaBlock(), priority: SECTION_PRIORITY.structural },
 	];
-	for (const section of optional) if (section) sections.push("", section);
-	return sections.join("\n");
+
+	const budget = stepContextBudgetForModel(opts.modelInfo);
+	return fitSectionsToBudget(sections, budget);
 }
 
 /** Persist a bounded completion handoff while retaining the original result for compatibility. */

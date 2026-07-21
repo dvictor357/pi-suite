@@ -31,6 +31,13 @@ export interface BudgetModelInfo {
 export interface ContextBudgetConfig {
 	/** Base character budget for a context block on a large, ample-context model. */
 	awarenessBudget: number;
+	/**
+	 * Base character budget for the full multi-block step context assembled by
+	 * `buildStepContext` (task + briefs + deps + awareness + format). Larger than
+	 * {@link awarenessBudget} so large models keep every section; scaled down for
+	 * small/low-context models so the total cannot blow a tiny window.
+	 */
+	stepContextBudget: number;
 	/** Never trim below this many characters. */
 	minBudget: number;
 	/** Context windows at or below this (tokens) are treated as low-context. */
@@ -51,6 +58,8 @@ export interface ContextBudgetConfig {
  */
 export const CONTEXT_BUDGET: ContextBudgetConfig = {
 	awarenessBudget: 1200,
+	// Generous for multi-section assembly on large models; scaled like awarenessBudget.
+	stepContextBudget: 6000,
 	minBudget: 400,
 	lowContextWindow: 32768,
 	lowContextScale: 0.5,
@@ -92,12 +101,8 @@ export function verbosityForModel(
 	return isConstrainedModel(model, cfg) ? "compact" : "full";
 }
 
-/**
- * The character budget a context block should fit within for this model. Starts
- * from the base and applies (multiplicatively) a low-context-window discount and
- * a small-model discount, floored at `minBudget`. An unknown model → base.
- */
-export function budgetForModel(model: BudgetModelInfo | undefined, cfg = CONTEXT_BUDGET): number {
+/** Shared scale factor for model-aware budgets (low-context × small-model). */
+function modelBudgetScale(model: BudgetModelInfo | undefined, cfg: ContextBudgetConfig): number {
 	let scale = 1;
 	if (
 		typeof model?.contextWindow === "number" &&
@@ -107,7 +112,92 @@ export function budgetForModel(model: BudgetModelInfo | undefined, cfg = CONTEXT
 		scale *= cfg.lowContextScale;
 	}
 	if (isSmallModel(model, cfg)) scale *= cfg.smallModelScale;
-	return Math.max(cfg.minBudget, Math.round(cfg.awarenessBudget * scale));
+	return scale;
+}
+
+/**
+ * The character budget a context block should fit within for this model. Starts
+ * from the base and applies (multiplicatively) a low-context-window discount and
+ * a small-model discount, floored at `minBudget`. An unknown model → base.
+ */
+export function budgetForModel(model: BudgetModelInfo | undefined, cfg = CONTEXT_BUDGET): number {
+	return Math.max(cfg.minBudget, Math.round(cfg.awarenessBudget * modelBudgetScale(model, cfg)));
+}
+
+/**
+ * Character budget for the full multi-block step context (`buildStepContext`).
+ * Same scale factors as {@link budgetForModel}, applied to {@link ContextBudgetConfig.stepContextBudget}.
+ */
+export function stepContextBudgetForModel(
+	model: BudgetModelInfo | undefined,
+	cfg = CONTEXT_BUDGET,
+): number {
+	return Math.max(cfg.minBudget, Math.round(cfg.stepContextBudget * modelBudgetScale(model, cfg)));
+}
+
+/**
+ * One section of a multi-block prompt. Lower `priority` is kept longer when the
+ * joined text exceeds the budget (0 = never drop until only priority-0 remains).
+ */
+export interface BudgetSection {
+	/** Section body; empty/whitespace-only sections are ignored. */
+	text: string;
+	/**
+	 * Keep-order rank. Drop highest numbers first (whole section). Convention for
+	 * step context: task=0, failure briefs=1, dep handoffs=2, awareness=3, format=4.
+	 */
+	priority: number;
+}
+
+/**
+ * Fit sections into a character budget by dropping whole low-priority sections
+ * first, then line-safe {@link clampToBudget} if still over. Never mid-line cuts
+ * except as clampToBudget's last resort on a single oversized line.
+ *
+ * Sections are joined with a blank line between non-empty survivors, preserving
+ * the input order of whatever remains.
+ */
+export function fitSectionsToBudget(
+	sections: ReadonlyArray<BudgetSection>,
+	budget: number,
+	marker = "\n…",
+): string {
+	const active = sections
+		.map((s, index) => ({ text: s.text.trimEnd(), priority: s.priority, index }))
+		.filter((s) => s.text.length > 0);
+
+	const join = (list: typeof active): string =>
+		list
+			.slice()
+			.sort((a, b) => a.index - b.index)
+			.map((s) => s.text)
+			.join("\n\n");
+
+	const kept = [...active];
+	while (kept.length > 0) {
+		const joined = join(kept);
+		if (joined.length <= budget) return joined;
+
+		// Drop the lowest-priority (highest number) section; among ties, drop the
+		// later insertion so earlier structural sections win.
+		let dropAt = -1;
+		let dropPriority = -Infinity;
+		let dropIndex = -Infinity;
+		for (let i = 0; i < kept.length; i++) {
+			const s = kept[i];
+			if (s.priority > dropPriority || (s.priority === dropPriority && s.index > dropIndex)) {
+				dropPriority = s.priority;
+				dropIndex = s.index;
+				dropAt = i;
+			}
+		}
+		// Only priority-0 (or a single section) left — stop dropping and clamp.
+		if (dropAt < 0 || dropPriority <= 0 || kept.length === 1) {
+			return clampToBudget(joined, budget, marker);
+		}
+		kept.splice(dropAt, 1);
+	}
+	return "";
 }
 
 /**

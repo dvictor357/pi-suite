@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { CONTEXT_BUDGET, stepContextBudgetForModel } from "../../core";
 import {
 	buildStepContext,
 	coerceStepHandoff,
@@ -138,4 +139,112 @@ test("completion schema requests structured output while documenting compatibili
 	assert.match(output, /filesChanged/);
 	assert.match(output, /verification/);
 	assert.match(output, /plain prose remains accepted/);
+});
+
+describe("buildStepContext unified multi-block budget", () => {
+	const longFailure = [
+		"**Prior failed attempts — address these specifically:**",
+		"- " + "x".repeat(200),
+		"- " + "y".repeat(200),
+	].join("\n");
+	const longDeps = [
+		{
+			content: "Scout auth",
+			handoff: {
+				version: 1 as const,
+				summary: "use AuthService with refresh tokens and " + "z".repeat(180),
+				filesChanged: ["src/auth.ts"],
+				verification: ["npm test: passed"],
+			},
+		},
+	];
+
+	test("keeps all sections under a large-model budget", () => {
+		const output = buildStepContext({
+			role: "worker",
+			content: "Implement auth",
+			context: "Preserve refresh tokens",
+			dependencyResults: longDeps,
+			failureBriefBlock: longFailure,
+			modelInfo: { id: "claude-opus-4-8", contextWindow: 200000 },
+			// Skip cwd so awareness is empty (no disk dependency).
+		});
+		assert.match(output, /Implement auth/);
+		assert.match(output, /Prior failed attempts/);
+		assert.match(output, /use AuthService/);
+		assert.match(output, /Completion schema/);
+		assert.ok(
+			output.length <= stepContextBudgetForModel({ id: "claude-opus-4-8", contextWindow: 200000 }),
+		);
+	});
+
+	test("with tiny contextWindow drops format then awareness before task", () => {
+		// Force a very small multi-block budget so lower-priority sections must go.
+		const tiny = {
+			id: "tiny-local",
+			contextWindow: 1, // triggers low-context scale
+		};
+		// Override via model scale alone is still floored at minBudget (400). Build
+		// sections larger than that so drops are forced. Inject long optional blocks.
+		const fatFailure = "**Prior failed attempts:**\n" + "line of failure detail\n".repeat(40);
+		const fatDeps = [
+			{
+				content: "Prior step",
+				handoff: {
+					version: 1 as const,
+					summary: "dependency handoff line\n".repeat(40).trim(),
+					filesChanged: [] as string[],
+					verification: [] as string[],
+				},
+			},
+		];
+		const output = buildStepContext({
+			role: "worker",
+			content: "MUST_KEEP_TASK_TITLE",
+			context: "MUST_KEEP_TASK_CONTEXT",
+			dependencyResults: fatDeps,
+			failureBriefBlock: fatFailure,
+			modelInfo: tiny,
+		});
+		const budget = stepContextBudgetForModel(tiny);
+		assert.ok(budget < CONTEXT_BUDGET.stepContextBudget, `expected scaled budget, got ${budget}`);
+		assert.ok(output.length <= budget, `len ${output.length} > budget ${budget}`);
+		// Task is highest priority — always retained (or clamped line-safe).
+		assert.match(output, /MUST_KEEP_TASK_TITLE/);
+		// Format directive is lowest priority — dropped first on a tiny window.
+		assert.doesNotMatch(output, /Before marking a code step done|run the formatter|FORMAT/i);
+	});
+
+	test("priority order under a fixed tiny budget string fixture", () => {
+		// nano + low window → 0.5 * 0.6 scale → 1800 chars. Fat optional blocks each
+		// exceed that alone so format, then awareness, then deps, then failure drop
+		// until the assembly fits; task always remains.
+		const modelInfo = { id: "nano-test", contextWindow: 512 };
+		const fat = (tag: string) => tag + "_MARKER\n" + "padding line of context data\n".repeat(80);
+		const output = buildStepContext({
+			role: "worker",
+			content: "KEEP_ME",
+			context: "ctx",
+			dependencyResults: [
+				{
+					content: "Dep",
+					handoff: {
+						version: 1,
+						summary: fat("DROP_DEPS"),
+						filesChanged: [],
+						verification: [],
+					},
+				},
+			],
+			failureBriefBlock: fat("DROP_FAIL"),
+			modelInfo,
+		});
+		const budget = stepContextBudgetForModel(modelInfo);
+		assert.equal(budget, Math.round(CONTEXT_BUDGET.stepContextBudget * 0.5 * 0.6));
+		assert.ok(output.length <= budget, `len ${output.length} > budget ${budget}`);
+		assert.match(output, /KEEP_ME/);
+		// Fat optional blocks cannot both fit; lowest-priority of the fat pair (deps)
+		// drops first. Failure may survive if task+failure+schema still fit.
+		assert.doesNotMatch(output, /DROP_DEPS_MARKER/);
+	});
 });

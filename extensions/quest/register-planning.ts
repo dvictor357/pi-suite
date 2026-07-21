@@ -817,7 +817,9 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				}
 
 				// FAIL — shared retry/escalate/auto-fail machine (LLM verdict source).
-				return applyVerifyFail(effectiveEvidence, inferredOutcome);
+				// No deterministic check failed: attribute to model quality so eval
+				// stats can distinguish soft quality fails from hard check failures.
+				return applyVerifyFail(effectiveEvidence, inferredOutcome, "MODEL_QUALITY");
 			}
 
 			// Persist the child completion payload at the quest_update boundary. Keep

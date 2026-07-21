@@ -58,12 +58,19 @@ export { asRecord, strArray, boolOr, numOr, strOr, optStr, optNum, oneOf } from 
 export {
 	CONTEXT_BUDGET,
 	budgetForModel,
+	stepContextBudgetForModel,
+	fitSectionsToBudget,
 	isSmallModel,
 	isConstrainedModel,
 	verbosityForModel,
 	clampToBudget,
 } from "./context-budget";
-export type { BudgetModelInfo, ContextBudgetConfig, Verbosity } from "./context-budget";
+export type {
+	BudgetModelInfo,
+	BudgetSection,
+	ContextBudgetConfig,
+	Verbosity,
+} from "./context-budget";
 
 import { join } from "node:path";
 import { appendLine, setErrorSink } from "./fs";
