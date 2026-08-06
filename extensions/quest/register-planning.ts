@@ -972,7 +972,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 							`## Git Integration`,
 							``,
 							git.autoBranch
-								? `**Recommended branch:** \`${git.branchPrefix || "quest/"}task-${params.index + 1}-${quest.steps[
+								? `**Recommended branch:** \`${git.branchPrefix || "quest/"}step-${params.index + 1}-${quest.steps[
 										params.index
 									].content
 										.replace(/[^a-z0-9]+/gi, "-")
@@ -1104,7 +1104,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					if (edit.dependencies !== undefined) task.dependencies = edit.dependencies;
 					editsApplied++;
 				}
-				// Re-validate all dependencies after edits
+				// Re-validate all dependencies after edits (range/self, cycles, depth)
 				for (let i = 0; i < quest.steps.length; i++) {
 					for (const dep of quest.steps[i].dependencies) {
 						if (dep < 0 || dep >= quest.steps.length || dep === i) {
@@ -1119,6 +1119,32 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 							};
 						}
 					}
+				}
+				const cyclePath = detectDependencyCycle(quest.steps);
+				if (cyclePath) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Dependency cycle after edit: ${cyclePath
+									.map((i) => `#${i + 1}`)
+									.join(" → ")}. Break the cycle to proceed.`,
+							},
+						],
+						details: {},
+					};
+				}
+				const depth = getMaxDependencyDepth(quest.steps);
+				if (depth > MAX_DEPENDENCY_DEPTH) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Dependency depth ${depth} after edit exceeds maximum ${MAX_DEPENDENCY_DEPTH}. Simplify the dependency chain.`,
+							},
+						],
+						details: {},
+					};
 				}
 			}
 
