@@ -6,6 +6,7 @@ import {
 	coerceStepHandoff,
 	collectDependencyHandoffs,
 	completionSchemaBlock,
+	modelIndependentStepChars,
 	parseStepHandoff,
 	persistHandoff,
 } from "./context-broker";
@@ -139,6 +140,50 @@ test("completion schema requests structured output while documenting compatibili
 	assert.match(output, /filesChanged/);
 	assert.match(output, /verification/);
 	assert.match(output, /plain prose remains accepted/);
+});
+
+describe("modelIndependentStepChars", () => {
+	test("measures exactly the sections a cheap rung must hold, excluding awareness/format", () => {
+		const deps = [{ content: "Scout auth", handoff: handoff("use AuthService") }];
+		const opts = {
+			role: "worker",
+			content: "Implement auth",
+			context: "Preserve refresh tokens",
+			persona: "You are the worker persona",
+			dependencyResults: deps,
+			failureBriefBlock: "**Prior failed attempts — address these specifically:**\n- tests failed",
+			includeLegacyFraming: true,
+		};
+
+		// The measurement must equal the sum of the fixed sections and NOT depend
+		// on modelInfo (awareness/format would change it) or cwd reads.
+		const plain = modelIndependentStepChars(opts);
+		const withModel = modelIndependentStepChars({
+			...opts,
+			modelInfo: { id: "tiny-1", contextWindow: 4096 },
+		});
+		assert.ok(plain > 0);
+		assert.equal(withModel, plain, "modelInfo must not change the measurement");
+		assert.ok(
+			plain > opts.content.length + opts.context.length + deps[0].handoff.summary.length,
+			"measurement includes framing + completion schema, not just task/deps",
+		);
+	});
+
+	test("grows with dependency handoff content", () => {
+		const base = modelIndependentStepChars({
+			role: "worker",
+			content: "x",
+			includeLegacyFraming: false,
+		});
+		const withDeps = modelIndependentStepChars({
+			role: "worker",
+			content: "x",
+			dependencyResults: [{ content: "dep", handoff: handoff("y".repeat(100)) }],
+			includeLegacyFraming: false,
+		});
+		assert.ok(withDeps > base);
+	});
 });
 
 describe("buildStepContext unified multi-block budget", () => {

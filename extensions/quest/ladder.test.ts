@@ -11,12 +11,14 @@ import {
 	briefBudgetForModel,
 	buildFailureBrief,
 	coerceFailureBrief,
+	contextWindowResolver,
 	decideVerifyFailAction,
 	ladderApplies,
 	pickStartRung,
 	prepareStepDispatchModel,
 	renderFailureBriefs,
 	rungModel,
+	startRungForStep,
 	type FailureBrief,
 	type LadderConfig,
 } from "./ladder";
@@ -118,6 +120,51 @@ describe("pickStartRung", () => {
 			...Array.from({ length: 5 }, () => evalRow("mythos-5", false)),
 		];
 		assert.equal(pickStartRung(l, "worker", statsWith(rows), CFG), 2);
+	});
+});
+
+describe("contextWindowResolver", () => {
+	it("maps id → context window, unknown ids to undefined", () => {
+		const resolve = contextWindowResolver([
+			{ id: "cheap-1", contextWindow: 16000 },
+			{ id: "big-1", contextWindow: 200000 },
+		]);
+		assert.equal(resolve("cheap-1"), 16000);
+		assert.equal(resolve("big-1"), 200000);
+		assert.equal(resolve("unknown"), undefined);
+	});
+});
+
+describe("startRungForStep", () => {
+	const l = ladder(["haiku-4-5", "opus-4-8"]);
+
+	it("small steps start on the history rung unchanged", () => {
+		assert.equal(startRungForStep(l, "worker", statsWith([]), CFG, 100), 0);
+	});
+
+	it("huge steps skip a rung whose model cannot fit the prompt", () => {
+		// haiku is small-marked → stepContextBudget < 6000; a step far above it bumps.
+		assert.equal(startRungForStep(l, "worker", statsWith([]), CFG, 50000), 1);
+	});
+
+	it("unknown context windows keep the base budget and never over-bump", () => {
+		// Non-marked id, no resolver → base stepContextBudget (6000); 5000 fits.
+		const plain = ladder(["cheap-1", "opus-4-8"]);
+		assert.equal(startRungForStep(plain, "worker", statsWith([]), CFG, 5000), 0);
+	});
+
+	it("explicit low context window bumps off that rung", () => {
+		const resolve = contextWindowResolver([{ id: "haiku-4-5", contextWindow: 8000 }]);
+		assert.equal(startRungForStep(l, "worker", statsWith([]), CFG, 3500, resolve), 1);
+	});
+
+	it("history floor still wins: disqualified cheap rung + big step → last rung", () => {
+		const rows = Array.from({ length: 5 }, () => evalRow("haiku-4-5", false));
+		assert.equal(startRungForStep(l, "worker", statsWith(rows), CFG, 100), 1);
+	});
+
+	it("zero/unknown step size never bumps", () => {
+		assert.equal(startRungForStep(l, "worker", statsWith([]), CFG, 0), 0);
 	});
 });
 

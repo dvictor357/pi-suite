@@ -16,6 +16,7 @@ import {
 	budgetForModel,
 	clampToBudget,
 	statsFor,
+	stepContextBudgetForModel,
 	CONTEXT_BUDGET,
 	DEFAULT_RETRY_POLICY,
 	type BudgetModelInfo,
@@ -111,7 +112,8 @@ export interface PrepareStepDispatchResult {
  * Prepare model + ladder state for auto-pilot (or `quest_delegate`) dispatch.
  *
  * Pure: does not mutate the step. On first dispatch of a ladder-eligible step,
- * picks a start rung via {@link pickStartRung} and returns the rung's model.
+ * picks a start rung via {@link startRungForStep} (history + context fit) and
+ * returns the rung's model.
  * Explicit `step.model` and judge/exploration roles bypass the ladder entirely
  * ({@link ladderApplies}). Callers must stamp `rung` / `lastModel` and persist
  * so later verify-fail escalation and eval stats see them.
@@ -123,13 +125,27 @@ export function prepareStepDispatchModel(
 		evalStats: EvalStatsIndex;
 		rememberedModel?: string;
 		cfg: LadderConfig;
+		/**
+		 * Measured model-independent context chars ({@link modelIndependentStepChars});
+		 * triggers context-fit start-rung bumps. 0/absent = no bump.
+		 */
+		stepChars?: number;
+		/** Resolve a model id → context window (tokens); unknown = ample. */
+		contextWindowById?: (id: string) => number | undefined;
 	},
 ): PrepareStepDispatchResult {
 	const { ladder, evalStats, rememberedModel, cfg } = opts;
 	if (ladder && ladderApplies(ladder, step.agent, step.model, cfg)) {
 		const rungInitialized = step.rung === undefined;
 		const rung = rungInitialized
-			? pickStartRung(ladder, step.agent, evalStats, cfg)
+			? startRungForStep(
+					ladder,
+					step.agent,
+					evalStats,
+					cfg,
+					opts.stepChars ?? 0,
+					opts.contextWindowById,
+				)
 			: (step.rung as number);
 		const model = rungModel(ladder, rung);
 		return {
@@ -203,6 +219,47 @@ export function pickStartRung(
 		if (!disqualified) return i;
 	}
 	return ladder.rungs.length - 1;
+}
+
+// ── Context-fit routing ──────────────────────────────────────────────────────
+
+/**
+ * Build a `contextWindowById` resolver from a registry snapshot. Pure and cheap:
+ * map once, look up by id. Unknown ids return undefined (treated as ample).
+ */
+export function contextWindowResolver(
+	available: readonly { id: string; contextWindow?: number }[],
+): (id: string) => number | undefined {
+	const byId = new Map(available.map((m) => [m.id, m.contextWindow]));
+	return (id: string) => byId.get(id);
+}
+
+/**
+ * Start rung for a step: the history-based rung ({@link pickStartRung}), then
+ * walked upward while the current rung's model cannot fit the step's measured
+ * model-independent context ({@link modelIndependentStepChars}) without hard
+ * trimming. Unknown models keep the base budget, so the bump only engages when
+ * the step is genuinely large — small steps behave exactly like history-only
+ * routing.
+ */
+export function startRungForStep(
+	ladder: ModelLadderConfig,
+	agent: string,
+	stats: EvalStatsIndex,
+	cfg: LadderConfig,
+	stepChars: number,
+	contextWindowById?: (id: string) => number | undefined,
+): number {
+	let rung = pickStartRung(ladder, agent, stats, cfg);
+	if (stepChars <= 0) return rung;
+	for (; rung + 1 < ladder.rungs.length; rung++) {
+		const budget = stepContextBudgetForModel({
+			id: ladder.rungs[rung],
+			contextWindow: contextWindowById?.(ladder.rungs[rung]),
+		});
+		if (budget >= stepChars) break;
+	}
+	return rung;
 }
 
 // ── Escalation decision ──────────────────────────────────────────────────────

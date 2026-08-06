@@ -6,6 +6,7 @@ import {
 	enqueueUiPrompt,
 	matchModel,
 	formatModelLabel,
+	ModelSelectList,
 	promptModelAssignment,
 	toModelLike,
 	type ModelAssignment,
@@ -71,6 +72,53 @@ test("toModelLike projects only id/name/provider and stringifies provider", () =
 		contextWindow: 200000,
 	} as unknown as { id: string; name: string; provider: string });
 	assert.deepEqual(projected, { id: "x", name: "X", provider: "anthropic" });
+});
+
+test("ModelSelectList filters by id, name, and provider, case-insensitively", () => {
+	const list = new ModelSelectList(
+		[
+			{
+				value: "deepseek-v4-flash",
+				label: "deepseek-v4-flash · deepseek",
+				description: "deepseek",
+			},
+			{ value: "claude-opus-4-5", label: "claude-opus-4-5 · anthropic", description: "anthropic" },
+			{
+				value: "keep-default",
+				label: "Keep harness default (no override)",
+				description: "Use harness default",
+			},
+		],
+		3,
+		{
+			selectedPrefix: (t) => t,
+			selectedText: (t) => t,
+			description: (t) => t,
+			scrollInfo: (t) => t,
+			noMatch: (t) => t,
+		},
+	);
+	// filteredItems is TS-private on SelectList; plain runtime field.
+	const visible = (l: ModelSelectList): string[] =>
+		(l as unknown as { filteredItems: { value: string }[] }).filteredItems.map((i) => i.value);
+
+	list.setFilter("deepseek");
+	assert.deepEqual(visible(list), ["deepseek-v4-flash"]);
+
+	list.setFilter("ANTHROPIC"); // provider match, case-insensitive
+	assert.deepEqual(visible(list), ["claude-opus-4-5"]);
+
+	list.setFilter("claude-opus"); // substring across the label, not just prefix of value
+	assert.deepEqual(visible(list), ["claude-opus-4-5"]);
+
+	list.setFilter("zzz");
+	assert.equal(visible(list).length, 0);
+
+	list.setFilter(""); // empty filter restores the full list
+	assert.equal(visible(list).length, 3);
+
+	list.setFilter("  ");
+	assert.equal(visible(list).length, 3, "whitespace-only filter is treated as empty");
 });
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {

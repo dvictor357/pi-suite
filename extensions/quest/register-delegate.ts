@@ -12,10 +12,15 @@ import {
 	rememberModelLadder,
 } from "./storage";
 import { resolveTaskModel } from "./delegate";
-import { buildStepContext, collectDependencyHandoffs } from "./context-broker";
+import {
+	buildStepContext,
+	collectDependencyHandoffs,
+	modelIndependentStepChars,
+} from "./context-broker";
 import {
 	applyStepDispatchModel,
 	briefBudgetForModel,
+	contextWindowResolver,
 	isNeverLadderRole,
 	prepareStepDispatchModel,
 	renderFailureBriefs,
@@ -26,7 +31,7 @@ import { enqueueUiPrompt, matchModel, promptModelAssignment, toModelLike } from 
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { resolveSandboxProfile, sandboxToolsForRole } from "./sandbox";
 import { runSubAgent } from "./subagent";
-import type { QuestRuntime } from "./runtime";
+import { contextWindowsFor, type QuestRuntime } from "./runtime";
 import { normalizeClaims, validateClaims } from "./write-claim";
 import { resolvePhase } from "./phase-loop";
 
@@ -348,6 +353,21 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				evalStats: rt.getEvalStats(ctx.cwd),
 				rememberedModel: remembered,
 				cfg: LADDER,
+				stepChars: modelIndependentStepChars({
+					role,
+					content: task.content,
+					context: task.context,
+					persona: resolvePersona(quest.team, role),
+					dependencyResults: collectDependencyHandoffs(quest, task),
+					failureBriefBlock: renderFailureBriefs(
+						task.failureBriefs,
+						LADDER.briefBudget,
+						LADDER.maxBriefs,
+					),
+					sandboxProfile: resolveSandboxProfile(quest.sandbox, task.sandbox),
+					includeLegacyFraming: true,
+				}),
+				contextWindowById: contextWindowResolver(contextWindowsFor(ctx)),
 			});
 			const rungInitialized = prepared.rungInitialized;
 			applyStepDispatchModel(task, {

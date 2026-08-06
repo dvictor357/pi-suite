@@ -9,7 +9,14 @@
  * without any UI; the dialog is a thin wrapper over `ctx.ui`.
  */
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Container, type SelectItem, SelectList, Text } from "@earendil-works/pi-tui";
+import {
+	Container,
+	matchesKey,
+	Key,
+	type SelectItem,
+	SelectList,
+	Text,
+} from "@earendil-works/pi-tui";
 
 /** Minimal model shape this module needs — a structural subset of pi-ai's Model. */
 export interface ModelLike {
@@ -59,6 +66,33 @@ export function matchModel<T extends ModelLike>(available: T[], proposed: string
 /** Human-readable label for a model in a selection list. */
 export function formatModelLabel(m: ModelLike): string {
 	return `${m.id} · ${m.provider}`;
+}
+
+/**
+ * SelectList whose type-to-filter matches the whole item — id, name, and
+ * provider — case-insensitively, instead of pi-tui's stock value-prefix match.
+ * The stock component exposes setFilter but never calls it from handleInput, so
+ * {@link promptModelAssignment} wires the keystrokes itself.
+ */
+export class ModelSelectList extends SelectList {
+	setFilter(filter: string): void {
+		// items/filteredItems/selectedIndex are TS-private in SelectList but plain
+		// runtime fields; the cast is the only way to reimplement filtering.
+		const self = this as unknown as {
+			items: SelectItem[];
+			filteredItems: SelectItem[];
+			selectedIndex: number;
+		};
+		const needle = filter.trim().toLowerCase();
+		self.filteredItems = needle
+			? self.items.filter((item) =>
+					`${item.value} ${item.label ?? ""} ${item.description ?? ""}`
+						.toLowerCase()
+						.includes(needle),
+				)
+			: self.items;
+		self.selectedIndex = 0;
+	}
 }
 
 const KEEP_DEFAULT = "Keep harness default (no override)";
@@ -180,7 +214,7 @@ export async function promptModelAssignment(
 				description: "Use harness default",
 			});
 
-			const selectList = new SelectList(items, Math.min(items.length, 10), {
+			const selectList = new ModelSelectList(items, Math.min(items.length, 10), {
 				selectedPrefix: (text) => theme.fg("accent", text),
 				selectedText: (text) => theme.fg("accent", text),
 				description: (text) => theme.fg("muted", text),
@@ -200,10 +234,28 @@ export async function promptModelAssignment(
 
 			container.addChild(selectList);
 			container.addChild(new Text("", 0, 0));
+			// Live filter feedback; the SelectList itself shows "No matching commands"
+			// when the filter excludes every item.
+			const filterText = new Text("", 0, 0);
+			container.addChild(filterText);
 			container.addChild(
-				new Text(theme.fg("dim", "type to filter · ↑↓ navigate · enter select · esc cancel"), 1, 0),
+				new Text(
+					theme.fg(
+						"dim",
+						"type to filter · backspace clear · esc clears then cancels · enter select",
+					),
+					1,
+					0,
+				),
 			);
 			container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+			let filter = "";
+			const setFilter = (next: string): void => {
+				filter = next;
+				selectList.setFilter(filter);
+				filterText.setText(filter ? theme.fg("muted", `filter: ${filter}`) : "");
+			};
 
 			return {
 				render(width: number) {
@@ -213,6 +265,29 @@ export async function promptModelAssignment(
 					container.invalidate();
 				},
 				handleInput(data: string) {
+					// Navigation/confirm keys always go to the list first — Enter arrives
+					// as a single control char and must not be swallowed into the filter.
+					if (matchesKey(data, Key.enter) || matchesKey(data, Key.tab)) {
+						selectList.handleInput(data);
+						return;
+					}
+					if (matchesKey(data, Key.backspace)) {
+						if (filter.length > 0) setFilter(filter.slice(0, -1));
+						return;
+					}
+					if (matchesKey(data, Key.escape)) {
+						if (filter.length > 0) {
+							setFilter(""); // first Esc clears the filter
+							return;
+						}
+						selectList.handleInput(data); // second Esc cancels
+						return;
+					}
+					// Printable single character → accumulate into the filter.
+					if (data.length === 1 && data >= " ") {
+						setFilter(filter + data);
+						return;
+					}
 					selectList.handleInput(data);
 					tui.requestRender();
 				},

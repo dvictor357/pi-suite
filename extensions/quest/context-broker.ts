@@ -154,10 +154,16 @@ export interface BuildStepContextOpts {
 	includeLegacyFraming?: boolean;
 }
 
-export function buildStepContext(opts: BuildStepContextOpts): string {
-	// Build each section independently, then fit them into one model budget.
-	// Priority (keep first): task > failure briefs > dep handoffs > awareness > format.
-	// Whole low-priority sections drop before any line-safe clamp of survivors.
+/**
+ * Build the ordered context sections (text + drop priority). With
+ * `includeModelDependent: false` the awareness/format sections are skipped
+ * entirely (no cwd/modelInfo reads) — used for measuring what a cheap rung
+ * would have to trim, before the model is chosen.
+ */
+function buildStepSections(
+	opts: BuildStepContextOpts,
+	includeModelDependent: boolean,
+): { text: string; priority: number }[] {
 	const framingParts: string[] = [];
 	if (opts.includeLegacyFraming) {
 		if (opts.persona?.trim()) framingParts.push(opts.persona.trim(), "---");
@@ -168,7 +174,7 @@ export function buildStepContext(opts: BuildStepContextOpts): string {
 	const taskParts = [taskBlock(opts.content), contextBlock(opts.context)].filter(Boolean);
 	const task = taskParts.join("\n\n");
 
-	const sections = [
+	const sections: { text: string; priority: number }[] = [
 		{ text: framing, priority: SECTION_PRIORITY.structural },
 		{ text: task, priority: SECTION_PRIORITY.task },
 		{
@@ -183,16 +189,40 @@ export function buildStepContext(opts: BuildStepContextOpts): string {
 			text: sandboxConstraintBlock(opts.sandboxProfile),
 			priority: SECTION_PRIORITY.structural,
 		},
-		{
-			text: opts.cwd ? projectAwarenessBlock(opts.cwd, opts.modelInfo) : "",
-			priority: SECTION_PRIORITY.awareness,
-		},
-		{ text: formatBlock(opts.modelInfo), priority: SECTION_PRIORITY.format },
-		{ text: completionSchemaBlock(), priority: SECTION_PRIORITY.structural },
 	];
+	if (includeModelDependent) {
+		sections.push(
+			{
+				text: opts.cwd ? projectAwarenessBlock(opts.cwd, opts.modelInfo) : "",
+				priority: SECTION_PRIORITY.awareness,
+			},
+			{ text: formatBlock(opts.modelInfo), priority: SECTION_PRIORITY.format },
+		);
+	}
+	sections.push({ text: completionSchemaBlock(), priority: SECTION_PRIORITY.structural });
+	return sections;
+}
 
+export function buildStepContext(opts: BuildStepContextOpts): string {
+	// Build each section independently, then fit them into one model budget.
+	// Priority (keep first): task > failure briefs > dep handoffs > awareness > format.
+	// Whole low-priority sections drop before any line-safe clamp of survivors.
 	const budget = stepContextBudgetForModel(opts.modelInfo);
-	return fitSectionsToBudget(sections, budget);
+	return fitSectionsToBudget(buildStepSections(opts, true), budget);
+}
+
+/**
+ * Honest model-independent step-context size: the framing + task + failure
+ * briefs + dep handoffs + sandbox + completion schema, without awareness/format
+ * (which are budget-scaled to whatever model runs and always fit). This is what
+ * a cheap rung actually has to hold; if it exceeds the rung's step-context
+ * budget, the context broker will drop or hard-trim those sections.
+ *
+ * Used at dispatch time to route big steps off small/low-context rungs before
+ * the model is chosen — replaces the old `estimateStepChars` heuristic.
+ */
+export function modelIndependentStepChars(opts: BuildStepContextOpts): number {
+	return buildStepSections(opts, false).reduce((sum, s) => sum + s.text.length, 0);
 }
 
 /** Persist a bounded completion handoff while retaining the original result for compatibility. */

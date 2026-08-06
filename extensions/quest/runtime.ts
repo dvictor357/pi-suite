@@ -48,10 +48,15 @@ import { syncQuestToTodo } from "./todo-sync";
 import { QuestKanban, type KanbanActions } from "./kanban";
 import { hasCodebaseTool } from "./codebase";
 import { ActivityTracker } from "./activity-panel";
-import { buildStepContext, collectDependencyHandoffs } from "./context-broker";
+import {
+	buildStepContext,
+	collectDependencyHandoffs,
+	modelIndependentStepChars,
+} from "./context-broker";
 import {
 	applyStepDispatchModel,
 	briefBudgetForModel,
+	contextWindowResolver,
 	prepareStepDispatchModel,
 	renderFailureBriefs,
 } from "./ladder";
@@ -82,6 +87,19 @@ import {
 /** Stable, filesystem-safe slug for a quest name (ledger/eval directory key). */
 export function questSlug(name: string): string {
 	return name.replace(/[^a-z0-9-]+/gi, "-").toLowerCase();
+}
+
+/**
+ * Registry snapshot of id → context window, best-effort. A missing registry
+ * (headless/test contexts) degrades to empty, which the ladder treats as
+ * "unknown model → base budget" (never over-bumps).
+ */
+export function contextWindowsFor(ctx: ExtensionContext): { id: string; contextWindow?: number }[] {
+	try {
+		return ctx.modelRegistry?.getAvailable() ?? [];
+	} catch {
+		return [];
+	}
 }
 
 /** Default cap for auto-mirrored eval-result nodes on the project memory graph. */
@@ -587,6 +605,23 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		return recovered;
 	}
 
+	function stepContextChars(quest: Quest, step: QuestStep): number {
+		return modelIndependentStepChars({
+			role: step.agent,
+			content: step.content,
+			context: step.context,
+			persona: resolvePersona(quest.team, step.agent),
+			dependencyResults: collectDependencyHandoffs(quest, step),
+			failureBriefBlock: renderFailureBriefs(
+				step.failureBriefs,
+				LADDER.briefBudget,
+				LADDER.maxBriefs,
+			),
+			sandboxProfile: resolveSandboxProfile(quest.sandbox, step.sandbox),
+			includeLegacyFraming: false,
+		});
+	}
+
 	function fireStep(ctx: ExtensionContext, quest: Quest, step: QuestStep, index: number): void {
 		if (resolvePhase(step) !== "queued") return;
 		if (!dispatchGuard.acquire(ctx.cwd, index)) return;
@@ -604,14 +639,16 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 			const base = captureBaseline(ctx.cwd);
 			if (base.sha) step.baselineSha = base.sha;
 		}
-		// First auto-pilot dispatch of a ladder-eligible step: pick start rung,
-		// resolve model, stamp lastModel so steering/evals/escalation all see them.
-		// Explicit step.model and judge roles bypass the ladder (prepareStepDispatchModel).
+		// Ladder init + lastModel stamp before steering so rung/lastModel are
+		// persisted and steering/evals/escalation all see them. Explicit step.model
+		// and judge roles bypass the ladder (prepareStepDispatchModel).
 		const prepared = prepareStepDispatchModel(step, {
 			ladder: loadModelLadder(ctx.cwd),
 			evalStats: getEvalStats(ctx.cwd),
 			rememberedModel: loadAgentModels(ctx.cwd)[step.agent]?.model,
 			cfg: LADDER,
+			stepChars: stepContextChars(quest, step),
+			contextWindowById: contextWindowResolver(contextWindowsFor(ctx)),
 		});
 		applyStepDispatchModel(step, prepared);
 		quest.lastFiredStepIndex = index;
@@ -766,6 +803,8 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 				evalStats: getEvalStats(ctx.cwd),
 				rememberedModel: loadAgentModels(ctx.cwd)[step.agent]?.model,
 				cfg: LADDER,
+				stepChars: stepContextChars(quest, step),
+				contextWindowById: contextWindowResolver(contextWindowsFor(ctx)),
 			});
 			applyStepDispatchModel(step, prepared);
 			if (!transitionStep(ctx, quest, index, "running", "parallel subagent dispatched")) continue;

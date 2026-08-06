@@ -5,6 +5,7 @@ import type { ParallelConfig, SandboxPolicy } from "./types";
 import { emptyQuest } from "./storage";
 import { compactAwarenessBlock } from "./todo-sync";
 import { codebaseStatusSummary, hasCodebaseCache, loadCodebaseIndex } from "./codebase";
+import { collectEnhanceContext, renderEnhancedBrief } from "./enhance";
 import type { QuestRuntime } from "./runtime";
 
 export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
@@ -216,7 +217,9 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 						text: [
 							`Quest created: **${params.name}**${overwriteWarning}`,
 							``,
-							`Next: Plan the quest. Use subagent(agent="scout") to explore the codebase,`,
+							`Next: Plan the quest. Call **quest_enhance** first to enrich the goal with`,
+							`project context (memory, conventions, prior research, past quests, git state),`,
+							`then use subagent(agent="scout") to explore the codebase,`,
 							`then subagent(agent="planner") to create a step breakdown. Save the plan`,
 							`with **quest_plan** — pass the steps array and set autoStart: true.`,
 							``,
@@ -231,6 +234,56 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 					},
 				],
 				details: { quest },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "quest_enhance",
+		label: "Quest Enhance",
+		description: [
+			"Enhance the current quest's goal (or a raw goal) with project context before planning:",
+			"project memory (stack, conventions, facts), prior quest research, past quests,",
+			"role→model assignments, and git state. Call this after quest_create, and pass",
+			"the returned brief to the scout/planner sub-agents as the foundation of their prompts.",
+		].join(" "),
+		parameters: Type.Object({
+			goal: Type.Optional(
+				Type.String({
+					description: "Raw goal to enhance. Defaults to the active quest's goal.",
+				}),
+			),
+			name: Type.Optional(
+				Type.String({
+					description: "Quest name for the brief header. Defaults to the active quest's name.",
+				}),
+			),
+		}),
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const quest = getQuest(ctx.cwd);
+			const goal = params.goal ?? quest?.goal;
+			if (!goal) {
+				return rt.textResult(
+					"No active quest and no goal provided. Create a quest first (quest_create) or pass a goal to enhance.",
+				);
+			}
+			const brief = renderEnhancedBrief(
+				goal,
+				params.name ?? quest?.name,
+				collectEnhanceContext(ctx.cwd),
+			);
+			return {
+				content: [
+					{
+						type: "text",
+						text: [
+							"Enhanced quest brief — use this as the foundation for scout/planner prompts:",
+							"",
+							brief,
+						].join("\n"),
+					},
+				],
+				details: { enhanced: true, budgetChars: brief.length },
 			};
 		},
 	});
