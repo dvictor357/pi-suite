@@ -36,7 +36,7 @@ import {
 } from "./sandbox";
 import { execSync } from "node:child_process";
 import type { SandboxProfile, SandboxCallRecord, SandboxArtifacts } from "./sandbox";
-import { evaluateToolCall } from "./sandbox-guard";
+import { evaluateToolCall, extractPath } from "./sandbox-guard";
 
 /** Extended result that carries sandbox artifacts when a sandbox was active. */
 export interface SubAgentResult {
@@ -233,14 +233,7 @@ function collectTouchedPaths(log: SandboxCallRecord[]): string[] {
 	for (const rec of log) {
 		if (rec.blocked) continue;
 		if (rec.tool === "edit" || rec.tool === "write") {
-			const path =
-				typeof rec.input.path === "string"
-					? rec.input.path
-					: typeof rec.input.file_path === "string"
-						? rec.input.file_path
-						: typeof rec.input.file === "string"
-							? rec.input.file
-							: undefined;
+			const path = extractPath(rec.input);
 			if (path) seen.add(path);
 		}
 		// SB-3: capture bash redirect targets (e.g. echo x > file, cat a >> b)

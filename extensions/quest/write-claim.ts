@@ -16,15 +16,8 @@ import { dirname, isAbsolute, normalize, relative, resolve } from "node:path";
 
 // ── Roles that must never hold write claims ──────────────────────────────────
 
-/** Roles that explore/judge but must never declare write claims. */
-const READ_ONLY_ROLES = new Set(["scout", "verifier", "reviewer", "planner"]);
-
-/**
- * True when a role is read-only and therefore must not declare write claims.
- */
-export function isReadOnlyRole(role: string): boolean {
-	return READ_ONLY_ROLES.has(role.trim().toLowerCase());
-}
+import { isReadOnlyRole } from "./roles";
+export { isReadOnlyRole };
 
 // ── Path normalization ───────────────────────────────────────────────────────
 

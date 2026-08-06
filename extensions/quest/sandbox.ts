@@ -7,6 +7,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
+import { isReadOnlyRole } from "./roles";
 import type { SandboxMode, SandboxPolicy, SandboxOverrides, WorktreeConfig } from "./types";
 
 export type { SandboxCallRecord, SandboxArtifacts } from "./types";
@@ -180,9 +181,6 @@ function tightenBoolean(base: boolean, override?: boolean): boolean {
 
 // ── Role-based sandbox tool defaults ────────────────────────────────────────
 
-/** Roles that explore/judge but must not mutate the working tree. */
-const READ_ONLY_SANDBOX_ROLES = new Set(["planner", "scout", "reviewer", "verifier"]);
-
 /** Read-only tool scope for sandboxed roles. */
 const READ_ONLY_SANDBOX_TOOLS = ["read", "grep", "find", "ls"];
 
@@ -206,8 +204,7 @@ export const GUARDED_SANDBOX_TOOLS = ["bash", "edit", "write"] as const;
  * Pure — the caller turns these names into (guarded) tool definitions.
  */
 export function sandboxToolPlan(role: string, profile: SandboxProfile): string[] {
-	const normalizedRole = role.trim().toLowerCase();
-	if (READ_ONLY_SANDBOX_ROLES.has(normalizedRole)) return [...READ_ONLY_SANDBOX_TOOLS];
+	if (isReadOnlyRole(role)) return [...READ_ONLY_SANDBOX_TOOLS];
 	const names = [...READ_ONLY_SANDBOX_TOOLS, "edit", "write"];
 	if (profile.allowCommands.length > 0) names.push("bash");
 	return names;

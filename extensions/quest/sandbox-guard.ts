@@ -62,7 +62,7 @@ function matchesAnyGlob(path: string, globs: string[]): boolean {
 }
 
 /** Extract a filesystem path argument from a tool call's input, if any. */
-function extractPath(input: Record<string, unknown>): string | undefined {
+export function extractPath(input: Record<string, unknown>): string | undefined {
 	return (
 		optStr(input.path) ?? optStr(input.file_path) ?? optStr(input.filePath) ?? optStr(input.file)
 	);

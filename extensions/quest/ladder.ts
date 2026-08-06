@@ -25,6 +25,7 @@ import {
 	type RetryPolicy,
 } from "../../core";
 import { asRecord, boolOr, numOr, optNum, optStr, strOr } from "../../core";
+import { isReadOnlyRole, READ_ONLY_ROLES } from "./roles";
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
@@ -36,12 +37,9 @@ import { asRecord, boolOr, numOr, optNum, optStr, strOr } from "../../core";
 export const DEFAULT_LADDER_ROLES = ["worker", "quick-worker"];
 
 /** Roles that inspect, plan, or judge work; never governed by the execution ladder. */
-export const NEVER_LADDER_ROLES = ["scout", "verifier", "reviewer", "planner"];
+export const NEVER_LADDER_ROLES = [...READ_ONLY_ROLES];
 
-export function isNeverLadderRole(role: string): boolean {
-	const wanted = role.trim().toLowerCase();
-	return NEVER_LADDER_ROLES.some((r) => r === wanted);
-}
+export const isNeverLadderRole = isReadOnlyRole;
 
 /** Tunable ladder knobs; the shipped values live in constants.ts (`LADDER`). */
 export interface LadderConfig {

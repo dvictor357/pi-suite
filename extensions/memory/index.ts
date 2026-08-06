@@ -34,12 +34,12 @@ import { basename, join } from "node:path";
 import {
 	AGENT_DIR,
 	CONTRACT_VERSION,
-	cwdHash,
 	isFutureContract,
 	readJSON,
 	writeJSON,
 	updateJSON,
 	writeSessionMeta,
+	projectMemoryPath,
 	CONTEXT_BUDGET,
 	budgetForModel,
 	clampToBudget,
@@ -56,7 +56,6 @@ import { withForeignFromDisk } from "./profile";
 import { buildUserPromptBits } from "./user-bits";
 
 const USER_PATH = join(AGENT_DIR, "memory", "user.json");
-const PROJECTS_DIR = join(AGENT_DIR, "memory", "projects");
 
 /** Read the current agent identity from environment. */
 function getAgentIdentity(): string | null {
@@ -64,7 +63,7 @@ function getAgentIdentity(): string | null {
 }
 
 function projectPath(cwd: string): string {
-	return join(PROJECTS_DIR, `${cwdHash(cwd)}.json`);
+	return projectMemoryPath(cwd);
 }
 
 function defaultProject(cwd: string): ProjectProfile {

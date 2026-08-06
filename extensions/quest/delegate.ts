@@ -12,18 +12,14 @@
 
 import type { SandboxProfile } from "./sandbox";
 
-/**
- * Roles that explore/judge but must not mutate the working tree. They get a
- * read-only tool scope so a misbehaving sub-agent can't edit files.
- */
-const READ_ONLY_ROLES = new Set(["scout", "verifier", "reviewer", "planner"]);
+import { isReadOnlyRole } from "./roles";
 
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
 const FULL_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 
 /** The tool allowlist a sub-agent of the given role should run with. */
 export function toolsForRole(role: string): string[] {
-	return READ_ONLY_ROLES.has(role.trim().toLowerCase()) ? [...READ_ONLY_TOOLS] : [...FULL_TOOLS];
+	return isReadOnlyRole(role) ? [...READ_ONLY_TOOLS] : [...FULL_TOOLS];
 }
 
 /**
