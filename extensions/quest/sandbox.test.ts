@@ -3,8 +3,6 @@ import assert from "node:assert/strict";
 import {
 	resolveSandboxProfile,
 	isSandboxActive,
-	sandboxedTools,
-	sandboxToolsForRole,
 	sandboxToolPlan,
 	SENSITIVE_DENIED_GLOBS,
 	getSensitiveDeniedPaths,
@@ -334,130 +332,6 @@ describe("isSandboxActive", () => {
 			isSandboxActive({ ...DEFAULT_SANDBOX_POLICY, mode: "isolated" } as SandboxProfile),
 			true,
 		);
-	});
-});
-
-// ── sandboxedTools ───────────────────────────────────────────────────────────
-
-describe("sandboxedTools", () => {
-	test("returns role tools unchanged when sandbox is off", () => {
-		assert.deepEqual(
-			sandboxedTools({ ...DEFAULT_SANDBOX_POLICY, mode: "none" } as SandboxProfile, [
-				"read",
-				"bash",
-				"edit",
-				"write",
-			]),
-			["read", "bash", "edit", "write"],
-		);
-	});
-
-	test("returns null unchanged when tools are null and sandbox is off", () => {
-		assert.equal(
-			sandboxedTools({ ...DEFAULT_SANDBOX_POLICY, mode: "none" } as SandboxProfile, null),
-			null,
-		);
-	});
-
-	test("removes edit, write, and bash when sandbox allows no commands", () => {
-		const filtered = sandboxedTools(
-			{ ...DEFAULT_SANDBOX_POLICY, mode: "restricted" } as SandboxProfile,
-			["read", "grep", "find", "bash", "edit", "write"],
-		);
-		assert.deepEqual(filtered, ["read", "grep", "find"]);
-	});
-
-	test("keeps bash when sandbox allows commands", () => {
-		const filtered = sandboxedTools(
-			{
-				...DEFAULT_SANDBOX_POLICY,
-				mode: "isolated",
-				allowCommands: ["npm test"],
-			} as SandboxProfile,
-			["read", "grep", "find", "bash", "edit", "write"],
-		);
-		assert.deepEqual(filtered, ["read", "grep", "find", "bash"]);
-	});
-
-	test("does not mutate the input array", () => {
-		const original = ["read", "edit", "write"];
-		const copy = [...original];
-		sandboxedTools({ ...DEFAULT_SANDBOX_POLICY, mode: "restricted" } as SandboxProfile, copy);
-		assert.deepEqual(copy, original);
-	});
-
-	test("preserves ls and other non-write tools", () => {
-		const filtered = sandboxedTools(
-			{ ...DEFAULT_SANDBOX_POLICY, mode: "isolated" } as SandboxProfile,
-			["read", "grep", "find", "ls"],
-		);
-		assert.deepEqual(filtered, ["read", "grep", "find", "ls"]);
-	});
-});
-
-// ── sandboxToolsForRole ─────────────────────────────────────────────────────
-
-describe("sandboxToolsForRole", () => {
-	test("planner/scout/reviewer/verifier default to read-only tools", () => {
-		for (const role of ["planner", "scout", "reviewer", "verifier"]) {
-			assert.deepEqual(sandboxToolsForRole(role), ["read", "grep", "find", "ls"]);
-		}
-	});
-
-	test("worker and unknown roles default to write-capable tools", () => {
-		assert.deepEqual(sandboxToolsForRole("worker"), [
-			"read",
-			"bash",
-			"edit",
-			"write",
-			"grep",
-			"find",
-			"ls",
-		]);
-		assert.deepEqual(sandboxToolsForRole("custom-agent"), [
-			"read",
-			"bash",
-			"edit",
-			"write",
-			"grep",
-			"find",
-			"ls",
-		]);
-	});
-
-	test("active sandbox with no allowed commands removes bash and write tools from worker scope", () => {
-		assert.deepEqual(
-			sandboxToolsForRole("worker", {
-				...DEFAULT_SANDBOX_POLICY,
-				mode: "restricted",
-			} as SandboxProfile),
-			["read", "grep", "find", "ls"],
-		);
-	});
-
-	test("active sandbox with allowed commands keeps bash for worker scope", () => {
-		assert.deepEqual(
-			sandboxToolsForRole("worker", {
-				...DEFAULT_SANDBOX_POLICY,
-				mode: "restricted",
-				allowCommands: ["npm test"],
-			} as SandboxProfile),
-			["read", "bash", "grep", "find", "ls"],
-		);
-	});
-
-	test("returns fresh arrays", () => {
-		const first = sandboxToolsForRole("worker");
-		first.pop();
-		assert.deepEqual(sandboxToolsForRole("worker"), [
-			"read",
-			"bash",
-			"edit",
-			"write",
-			"grep",
-			"find",
-			"ls",
-		]);
 	});
 });
 

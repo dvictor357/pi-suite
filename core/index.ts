@@ -28,29 +28,26 @@ export type {
 } from "./contract";
 
 export { cwdHash } from "./hash";
-export { readJSON, writeJSON, updateJSON, appendLine, setErrorSink } from "./fs";
+export { readJSON, writeJSON, updateJSON } from "./fs";
 export { AGENT_DIR, SESSION_META_PATH, todoListPath, projectMemoryPath } from "./paths";
-export { readSessionMeta, writeSessionMeta } from "./session-meta";
+export { writeSessionMeta } from "./session-meta";
 export {
 	MAX_RETRIES,
 	MAX_BURST,
 	MAX_VERIFY_RETRIES,
 	MAX_DEPENDENCY_DEPTH,
-	MAX_ESCALATIONS,
 	DEFAULT_RETRY_POLICY,
 } from "./retry-policy";
 export type { RetryPolicy } from "./retry-policy";
-export { createRunLedger, recordRunEvent, runLedgerPath, runsDir } from "./run-ledger";
-export type { RunLedger, RunEvent, RunEventKind } from "./run-ledger";
-export { createEvalLog, recordEvalEntry, evalLogPath, evalsDir } from "./eval-logging";
+export { createRunLedger } from "./run-ledger";
+export type { RunLedger, RunEvent } from "./run-ledger";
+export { createEvalLog } from "./eval-logging";
 export type { EvalLog, EvalEntry, FailureCode } from "./eval-logging";
 export {
 	readAllEvalEntries,
 	computeEvalStats,
 	statsFor,
-	statsKey,
 	computeEvalTimeSeries,
-	sortRoleModelStats,
 	formatEvalStatsReport,
 } from "./eval-stats";
 export type { RoleModelStats, EvalStatsIndex, EvalTimeBucket, EvalTimeSeries } from "./eval-stats";

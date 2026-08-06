@@ -11,7 +11,6 @@ import {
 	rememberAgentModel,
 	rememberModelLadder,
 } from "./storage";
-import { resolveTaskModel } from "./delegate";
 import {
 	buildStepContext,
 	collectDependencyHandoffs,
@@ -29,7 +28,7 @@ import { clearQuestFromTodo } from "./todo-sync";
 import { loadTeams } from "./teams";
 import { enqueueUiPrompt, matchModel, promptModelAssignment, toModelLike } from "./models";
 import { renderStatus, writeQuestSessionMeta } from "./status";
-import { resolveSandboxProfile, sandboxToolsForRole } from "./sandbox";
+import { resolveSandboxProfile } from "./sandbox";
 import { runSubAgent } from "./subagent";
 import { contextWindowsFor, type QuestRuntime } from "./runtime";
 import { normalizeClaims, validateClaims } from "./write-claim";
@@ -376,14 +375,9 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				lastModel: undefined,
 			});
 
-			const resolved = resolveTaskModel({
-				taskModel: task.model,
-				ladderModel: prepared.source === "ladder" ? prepared.model : undefined,
-				rememberedModel: remembered,
-			});
-			let modelId = resolved.model;
+			let modelId = prepared.model;
 
-			if (resolved.needsPrompt) {
+			if (!modelId) {
 				const teamHints = quest.team ? (loadTeams()[quest.team]?.modelHints ?? {}) : {};
 				const proposal = params.proposed?.trim() || teamHints[role];
 				if (!proposal) {
@@ -428,7 +422,6 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			}
 
 			const sandboxProfile = resolveSandboxProfile(quest.sandbox, task.sandbox);
-			const sandboxTools = sandboxToolsForRole(role, sandboxProfile);
 
 			const modelInfo = modelId ? { id: modelId } : undefined;
 			const prompt = buildStepContext({
@@ -450,7 +443,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 
 			const res = await runSubAgent(
 				ctx,
-				{ role, model, thinkingLevel, prompt, tools: sandboxTools, sandboxProfile },
+				{ role, model, thinkingLevel, prompt, sandboxProfile },
 				signal,
 			);
 

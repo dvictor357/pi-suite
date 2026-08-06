@@ -190,15 +190,6 @@ export function statsFor(
 
 // ── Time-series aggregation ──────────────────────────────────────────────────
 
-/** Format a timestamp as YYYY-MM-DD (UTC, no external deps). */
-function isoDate(ts: number): string {
-	const d = new Date(ts);
-	const y = d.getUTCFullYear();
-	const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-	const day = String(d.getUTCDate()).padStart(2, "0");
-	return `${y}-${m}-${day}`;
-}
-
 /**
  * Aggregate raw eval entries into daily time buckets with pass rates, average
  * duration, and total escalations. Buckets are sorted newest first.
@@ -217,7 +208,7 @@ export function computeEvalTimeSeries(entries: unknown[]): EvalTimeSeries {
 		const s = coerceEvalTimeSample(entry);
 		if (!s) continue;
 
-		const date = isoDate(s.timestamp);
+		const date = new Date(s.timestamp).toISOString().slice(0, 10);
 		let bucket = days.get(date);
 		if (!bucket) {
 			bucket = { samples: 0, passes: 0, totalDurationMs: 0, escalations: 0 };

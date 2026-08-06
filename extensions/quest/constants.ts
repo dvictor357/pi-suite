@@ -12,7 +12,6 @@ import type { StepStatus, TeamConfig } from "./types";
 import { DEFAULT_LADDER_ROLES, type LadderConfig } from "./ladder";
 
 export { MAX_BURST, MAX_RETRIES, MAX_VERIFY_RETRIES, MAX_DEPENDENCY_DEPTH };
-export { MAX_ESCALATIONS } from "../../core";
 
 // ── Model escalation ladder ──────────────────────────────────────────────────
 /**

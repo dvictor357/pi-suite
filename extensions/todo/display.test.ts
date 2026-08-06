@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { TodoItem } from "../../core";
-import { displayOrder, visibleOrder, indent, treePrefix } from "./display";
+import { displayOrder, visibleOrder, treePrefix } from "./display";
 
 function item(content: string, status: TodoItem["status"], level?: number): TodoItem {
 	return { content, status, level, createdAt: 1, completedAt: null };
@@ -110,29 +110,6 @@ test("visibleOrder mixed statuses in tree keep grouping", () => {
 		shown.map((i) => i.content),
 		["parent A", "child A1", "child A2", "parent B", "child B1"],
 	);
-});
-
-// ── indent ──────────────────────────────────────────────────────────────────
-
-test("indent returns empty string for level 0", () => {
-	assert.equal(indent(0), "");
-});
-
-test("indent returns two spaces per level", () => {
-	assert.equal(indent(1), "  ");
-	assert.equal(indent(2), "    ");
-	assert.equal(indent(3), "      ");
-});
-
-test("indent clamps at 8 levels", () => {
-	assert.equal(indent(8), "  ".repeat(8));
-	assert.equal(indent(9), "  ".repeat(8));
-	assert.equal(indent(100), "  ".repeat(8));
-});
-
-test("indent clamps negative to 0", () => {
-	assert.equal(indent(-1), "");
-	assert.equal(indent(-5), "");
 });
 
 // ── treePrefix ──────────────────────────────────────────────────────────────

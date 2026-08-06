@@ -2,9 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
 	toolsForRole,
-	resolveTaskModel,
 	extractFinalText,
-	buildSubAgentPrompt,
 	buildSandboxConstraintBlock,
 	awaitFinalTurn,
 	type AwaitableSession,
@@ -115,39 +113,6 @@ test("toolsForRole returns a fresh array (no shared mutable state)", () => {
 	assert.ok(!toolsForRole("worker").includes("danger"));
 });
 
-test("resolveTaskModel precedence: step model wins over ladder and memory", () => {
-	assert.deepEqual(
-		resolveTaskModel({
-			taskModel: "gpt-5",
-			ladderModel: "ornith-1.0",
-			rememberedModel: "claude-opus-4-5",
-		}),
-		{ model: "gpt-5", needsPrompt: false, source: "task" },
-	);
-});
-
-test("resolveTaskModel precedence: ladder rung wins over the remembered model", () => {
-	assert.deepEqual(
-		resolveTaskModel({ ladderModel: "ornith-1.0", rememberedModel: "claude-opus-4-5" }),
-		{ model: "ornith-1.0", needsPrompt: false, source: "ladder" },
-	);
-});
-
-test("resolveTaskModel precedence: remembered model when step and ladder have none", () => {
-	assert.deepEqual(resolveTaskModel({ rememberedModel: "claude-opus-4-5" }), {
-		model: "claude-opus-4-5",
-		needsPrompt: false,
-		source: "memory",
-	});
-});
-
-test("resolveTaskModel needs a prompt when nothing is known", () => {
-	assert.deepEqual(resolveTaskModel({}), { needsPrompt: true });
-	assert.deepEqual(resolveTaskModel({ taskModel: "  ", ladderModel: "", rememberedModel: "" }), {
-		needsPrompt: true,
-	});
-});
-
 test("extractFinalText reads the last assistant message's text blocks", () => {
 	const messages = [
 		{ role: "user", content: "do the thing" },
@@ -175,64 +140,6 @@ test("extractFinalText handles string content and empty input", () => {
 	assert.equal(extractFinalText([{ role: "assistant", content: "plain string" }]), "plain string");
 	assert.equal(extractFinalText([]), "");
 	assert.equal(extractFinalText([{ role: "user", content: "no assistant here" }]), "");
-});
-
-test("buildSubAgentPrompt includes role, task, and context", () => {
-	const prompt = buildSubAgentPrompt({
-		role: "scout",
-		content: "Map the auth module",
-		context: "Focus on token refresh",
-	});
-	assert.match(prompt, /"scout" sub-agent/);
-	assert.match(prompt, /Map the auth module/);
-	assert.match(prompt, /Focus on token refresh/);
-});
-
-test("buildSubAgentPrompt leads with the persona when provided", () => {
-	const prompt = buildSubAgentPrompt({
-		role: "scout",
-		content: "Map the auth module",
-		persona: "# Scout\nYou recon code without mutating it.",
-	});
-	assert.match(prompt, /^# Scout\nYou recon code without mutating it\.\n\n---/);
-	// persona precedes the role/step framing
-	assert.ok(prompt.indexOf("# Scout") < prompt.indexOf('"scout" sub-agent'));
-});
-
-test("buildSubAgentPrompt omits the persona block when persona is blank", () => {
-	const prompt = buildSubAgentPrompt({ role: "worker", content: "Do it", persona: "   " });
-	assert.doesNotMatch(prompt, /---/);
-	assert.match(prompt, /^You are a "worker" sub-agent/);
-});
-
-test("buildSubAgentPrompt omits empty optional sections", () => {
-	const prompt = buildSubAgentPrompt({ role: "worker", content: "Do it" });
-	assert.doesNotMatch(prompt, /## Context/);
-	assert.doesNotMatch(prompt, /Prior results/);
-	assert.doesNotMatch(prompt, /Prior failed attempts/);
-});
-
-test("buildSubAgentPrompt places the failure-brief block after dependency results", () => {
-	const prompt = buildSubAgentPrompt({
-		role: "worker",
-		content: "Fix the flaky test",
-		dependencyResults: [{ content: "Locate the test", result: "found in foo.test.ts" }],
-		failureBriefBlock:
-			"**Prior failed attempts — address these specifically:**\n- Attempt 1: timeout",
-		formatDirective: "Run the formatter.",
-	});
-	const deps = prompt.indexOf("Prior results you can build on");
-	const briefs = prompt.indexOf("Prior failed attempts");
-	const directive = prompt.indexOf("Run the formatter.");
-	assert.ok(deps >= 0 && briefs > deps, "briefs come after dependency results");
-	assert.ok(briefs < directive, "briefs come before the format directive");
-	assert.equal(
-		buildSubAgentPrompt({ role: "worker", content: "x", failureBriefBlock: "  " }).includes(
-			"Prior failed",
-		),
-		false,
-		"blank block is omitted",
-	);
 });
 
 // ── buildSandboxConstraintBlock ────────────────────────────────────────────
@@ -427,74 +334,4 @@ describe("buildSandboxConstraintBlock", () => {
 		});
 		assert.match(block, /policy violation/);
 	});
-});
-
-// ── buildSubAgentPrompt with sandbox ───────────────────────────────────────
-
-test("buildSubAgentPrompt injects sandbox block when profile is provided", () => {
-	const prompt = buildSubAgentPrompt({
-		role: "worker",
-		content: "Add user auth",
-		sandboxProfile: {
-			mode: "restricted",
-			allowedPaths: ["src/**"],
-			deniedPaths: [],
-			allowCommands: [],
-			denyCommands: [],
-			allowNetwork: false,
-			allowPackageInstall: true,
-			worktree: null,
-		},
-	});
-	assert.match(prompt, /## Sandbox Constraints/);
-	assert.match(prompt, /\`src\/\*\*\`/);
-	assert.match(prompt, /Network access:.*denied/);
-});
-
-test("buildSubAgentPrompt omits sandbox block when profile is none mode", () => {
-	const prompt = buildSubAgentPrompt({
-		role: "worker",
-		content: "Add user auth",
-		sandboxProfile: { mode: "none" } as SandboxProfile,
-	});
-	assert.doesNotMatch(prompt, /Sandbox Constraints/);
-});
-
-test("buildSubAgentPrompt sandbox block appears after deps, before format", () => {
-	const prompt = buildSubAgentPrompt({
-		role: "worker",
-		content: "Add user auth",
-		dependencyResults: [{ content: "scout report", result: "auth in src/auth.ts" }],
-		formatDirective: "Run the formatter.",
-		sandboxProfile: {
-			mode: "restricted",
-			allowedPaths: ["src/**"],
-			deniedPaths: [],
-			allowCommands: [],
-			denyCommands: [],
-			allowNetwork: true,
-			allowPackageInstall: true,
-			worktree: null,
-		},
-	});
-	const sandboxIdx = prompt.indexOf("Sandbox Constraints");
-	const priorIdx = prompt.indexOf("Prior results");
-	const formatIdx = prompt.indexOf("Run the formatter.");
-	assert.ok(priorIdx < sandboxIdx, "sandbox should appear after prior results");
-	assert.ok(sandboxIdx < formatIdx, "sandbox should appear before format directive");
-});
-
-test("buildSubAgentPrompt lists only dependencies that produced a result", () => {
-	const prompt = buildSubAgentPrompt({
-		role: "worker",
-		content: "Wire it up",
-		dependencyResults: [
-			{ content: "design api", result: "REST with JWT" },
-			{ content: "unfinished", result: null },
-		],
-		formatDirective: "Run the formatter.",
-	});
-	assert.match(prompt, /design api: REST with JWT/);
-	assert.doesNotMatch(prompt, /unfinished/);
-	assert.match(prompt, /Run the formatter\./);
 });

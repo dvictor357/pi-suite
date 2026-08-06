@@ -32,11 +32,6 @@ function clampedLevel(level: number | undefined): number {
 	return Math.max(0, Math.min(level ?? 0, 8));
 }
 
-/** Two spaces per nest level, clamped to 0..8. */
-export function indent(level: number): string {
-	return "  ".repeat(clampedLevel(level));
-}
-
 function hasLaterSiblingAtLevel(items: TodoItem[], index: number, level: number): boolean {
 	for (const item of items.slice(index + 1)) {
 		const nextLevel = clampedLevel(item.level);

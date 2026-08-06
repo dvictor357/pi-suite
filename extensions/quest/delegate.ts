@@ -27,36 +27,6 @@ export function toolsForRole(role: string): string[] {
 }
 
 /**
- * Decide which model id a task's sub-agent should use, in precedence order:
- *   1. a model already assigned to the task (most specific user intent),
- *   2. the current rung of the project's approved model ladder, when the
- *      ladder governs this role (approving the ladder approved every rung,
- *      so this never re-prompts),
- *   3. the project's remembered model for this role (asked once per role),
- *   4. otherwise the orchestrator must propose one and the user must approve.
- *
- * Returns the resolved model id and its source, or `needsPrompt: true` when no
- * source has a model yet.
- */
-export function resolveTaskModel(opts: {
-	taskModel?: string;
-	ladderModel?: string;
-	rememberedModel?: string;
-}): {
-	model?: string;
-	needsPrompt: boolean;
-	source?: "task" | "ladder" | "memory";
-} {
-	const fromTask = opts.taskModel?.trim();
-	if (fromTask) return { model: fromTask, needsPrompt: false, source: "task" };
-	const fromLadder = opts.ladderModel?.trim();
-	if (fromLadder) return { model: fromLadder, needsPrompt: false, source: "ladder" };
-	const fromMemory = opts.rememberedModel?.trim();
-	if (fromMemory) return { model: fromMemory, needsPrompt: false, source: "memory" };
-	return { needsPrompt: true };
-}
-
-/**
  * Extract the sub-agent's final text answer: the last assistant message's
  * concatenated text blocks. Typed structurally so it needs no SDK imports and
  * stays trivially testable.
@@ -153,58 +123,6 @@ export function buildSandboxConstraintBlock(profile?: SandboxProfile): string {
 		`You MUST respect these constraints. Operating outside them is a policy violation.`,
 	);
 
-	return lines.join("\n");
-}
-
-/**
- * Build the focused instruction sent to a sub-agent. The orchestrator already
- * wrote the task's `context` and resolved the role's `persona` markdown; this
- * leads with that persona, then frames the role, the task, any upstream results
- * it can build on, sandbox constraints when active, and the project's format
- * directive into one concise prompt. Pure so it can be unit-tested.
- */
-export function buildSubAgentPrompt(opts: {
-	role: string;
-	content: string;
-	context?: string;
-	persona?: string;
-	dependencyResults?: ReadonlyArray<{ content: string; result: string | null }>;
-	/** Rendered failure-brief block (see ladder.ts) — what earlier attempts got wrong. */
-	failureBriefBlock?: string;
-	formatDirective?: string;
-	sandboxProfile?: SandboxProfile;
-}): string {
-	const lines: string[] = [];
-	if (opts.persona?.trim()) {
-		lines.push(opts.persona.trim(), ``, `---`, ``);
-	}
-	lines.push(
-		`You are a "${opts.role}" sub-agent. Complete exactly this step — nothing more — and report back concisely.`,
-		``,
-		`## Task`,
-		opts.content,
-	);
-	if (opts.context?.trim()) lines.push(``, `## Context`, opts.context.trim());
-
-	const deps = (opts.dependencyResults ?? []).filter((d) => d.result?.trim());
-	if (deps.length) {
-		lines.push(``, `## Prior results you can build on`);
-		for (const d of deps) lines.push(`- ${d.content}: ${d.result}`);
-	}
-
-	// A retry must lead with what failed before, ahead of generic constraints.
-	if (opts.failureBriefBlock?.trim()) lines.push(``, opts.failureBriefBlock.trim());
-
-	// Inject sandbox constraints when active
-	const sandboxBlock = buildSandboxConstraintBlock(opts.sandboxProfile);
-	if (sandboxBlock) lines.push(``, sandboxBlock);
-
-	if (opts.formatDirective?.trim()) lines.push(``, opts.formatDirective.trim());
-
-	lines.push(
-		``,
-		`When done, reply with a short summary of what you changed or found. Do not ask for confirmation.`,
-	);
 	return lines.join("\n");
 }
 

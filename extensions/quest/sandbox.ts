@@ -157,24 +157,6 @@ export function isSandboxActive(profile: SandboxProfile): boolean {
 	return profile.mode !== "none";
 }
 
-/**
- * Compute the effective tool scope for a sandboxed sub-agent.
- *
- * When sandbox is "none", sub-agents get their normal role-based tools. When
- * sandbox is "restricted" or "isolated", we remove write-capable tools ("edit",
- * "write") from the scope. If no commands are allowed, we also remove "bash"
- * so the tool scope matches the prompt-level shell policy.
- *
- * Returns null when `roleTools` is null (caller defers to its own defaults).
- */
-export function sandboxedTools(
-	profile: SandboxProfile,
-	roleTools: string[] | null,
-): string[] | null {
-	if (!isSandboxActive(profile)) return roleTools; // no sandbox → no change
-	return filterSandboxTools(profile, roleTools ?? []);
-}
-
 /** Intersection of two glob lists: entries that appear in both. */
 function intersectGlobs(a: string[], b: string[]): string[] {
 	const setB = new Set(b);
@@ -204,57 +186,22 @@ const READ_ONLY_SANDBOX_ROLES = new Set(["planner", "scout", "reviewer", "verifi
 /** Read-only tool scope for sandboxed roles. */
 const READ_ONLY_SANDBOX_TOOLS = ["read", "grep", "find", "ls"];
 
-/** Write-capable tool scope for worker roles. */
-const WRITE_CAPABLE_SANDBOX_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
-
-/**
- * Compute the effective tool scope for a sub-agent role, optionally bounded
- * by a sandbox profile.
- *
- * Role defaults encode the project's security posture:
- * - planner, scout, reviewer, verifier → read-only (read, grep, find, ls)
- * - worker (or any unrecognized role) → full-edit within allowed scope
- *
- * When sandbox is active (restricted or isolated), write-capable tools
- * (edit, write) are removed from the scope regardless of role. When no commands
- * are allowed, bash is removed too so shell access is actually denied.
- */
-export function sandboxToolsForRole(role: string, profile?: SandboxProfile): string[] {
-	const normalizedRole = role.trim().toLowerCase();
-	const isReadOnly = READ_ONLY_SANDBOX_ROLES.has(normalizedRole);
-	const baseTools = isReadOnly ? [...READ_ONLY_SANDBOX_TOOLS] : [...WRITE_CAPABLE_SANDBOX_TOOLS];
-
-	if (profile && isSandboxActive(profile)) {
-		return filterSandboxTools(profile, baseTools);
-	}
-
-	return baseTools;
-}
-
-function filterSandboxTools(profile: SandboxProfile, tools: string[]): string[] {
-	return tools.filter((tool) => {
-		if (tool === "edit" || tool === "write") return false;
-		if (tool === "bash" && profile.allowCommands.length === 0) return false;
-		return true;
-	});
-}
-
 /** Tools that carry a sandbox guard when handed to a sub-agent (write/shell). */
 export const GUARDED_SANDBOX_TOOLS = ["bash", "edit", "write"] as const;
 
 /**
  * Plan the concrete tool set a sandboxed sub-agent should receive.
  *
- * Unlike {@link sandboxToolsForRole} (which bluntly strips write/edit so a
- * sandboxed worker cannot write at all), this returns the tools the sub-agent
- * keeps when the spawn path wraps {@link GUARDED_SANDBOX_TOOLS} with the
- * tool-call guard (see sandbox-guard.ts). Granular path/command enforcement then
- * happens per call rather than denying file work outright:
+ * Unlike a blunt strip of write/edit (so a sandboxed worker cannot write at
+ * all), this returns the tools the sub-agent keeps when the spawn path wraps
+ * {@link GUARDED_SANDBOX_TOOLS} with the tool-call guard (see sandbox-guard.ts).
+ * Granular path/command enforcement then happens per call rather than denying
+ * file work outright:
  *
  * - read-only roles (planner/scout/reviewer/verifier) → read-only tools only;
  * - write-capable roles → read-only tools + guarded edit + write, plus guarded
  *   bash only when the policy lists allowed commands (shell stays gated by the
- *   allow-list, matching {@link filterSandboxTools}).
+ *   allow-list).
  *
  * Pure — the caller turns these names into (guarded) tool definitions.
  */
