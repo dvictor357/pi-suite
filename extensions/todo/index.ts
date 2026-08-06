@@ -43,6 +43,7 @@ import {
 } from "../../core";
 import type { TodoItem, TodoList, TodoStatus as Status } from "../../core";
 import { treePrefix, visibleOrder } from "./display";
+import { mergeTodoItems } from "./merge";
 
 const MAX_ITEMS = 30;
 const TRUNCATE_AT = 10;
@@ -479,26 +480,7 @@ export default function (pi: ExtensionAPI) {
 
 			// Build items with timestamps, merging with existing
 			const existing = getCached(ctx.cwd);
-			const existingMap = new Map(existing.items.map((i, idx) => [i.content, { item: i, idx }]));
-
-			const now = Date.now();
-			const items: TodoItem[] = rawItems.map((raw: any) => {
-				const prev = existingMap.get(raw.content);
-				return {
-					content: raw.content,
-					status: raw.status as Status,
-					agent: raw.agent,
-					context: raw.context,
-					result: raw.result,
-					source: typeof raw.source === "string" ? raw.source : prev?.item.source,
-					sourceId: typeof raw.sourceId === "string" ? raw.sourceId : prev?.item.sourceId,
-					sourceIndex:
-						typeof raw.sourceIndex === "number" ? raw.sourceIndex : prev?.item.sourceIndex,
-					level: typeof raw.level === "number" ? raw.level : prev?.item.level,
-					createdAt: prev?.item.createdAt ?? now,
-					completedAt: raw.status === "completed" ? (prev?.item.completedAt ?? now) : null,
-				};
-			});
+			const items = mergeTodoItems(rawItems, existing.items);
 
 			const list: TodoList = {
 				cwd: ctx.cwd,
