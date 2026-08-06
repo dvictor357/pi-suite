@@ -29,6 +29,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
+import { statSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
 	AGENT_DIR,
@@ -52,6 +53,7 @@ import type {
 	MemoryGraph,
 } from "../../core";
 import { withForeignFromDisk } from "./profile";
+import { buildUserPromptBits } from "./user-bits";
 
 const USER_PATH = join(AGENT_DIR, "memory", "user.json");
 const PROJECTS_DIR = join(AGENT_DIR, "memory", "projects");
@@ -141,6 +143,16 @@ function loadUser(): UserProfile {
 function saveUser(profile: UserProfile): void {
 	profile.lastModified = Date.now();
 	writeJSON(USER_PATH, profile);
+}
+
+/** mtime:size stamp of the project memory file — null when absent. */
+function projectStamp(cwd: string): string | null {
+	try {
+		const st = statSync(projectPath(cwd));
+		return `${st.mtimeMs}:${st.size}`;
+	} catch {
+		return null;
+	}
 }
 
 import {
@@ -279,30 +291,22 @@ function buildPromptBlock(project: ProjectProfile, user: UserProfile): string {
 	}
 
 	// User
-	if (user.conventions.length || user.commitStyle || user.indent || user.facts.length) {
-		const userBits = [
-			user.commitStyle ? `${user.commitStyle} commits` : null,
-			user.indent,
-			user.quotes ? `${user.quotes} quotes` : null,
-			user.errorHandling,
-			user.communication,
-		].filter(Boolean);
-		if (userBits.length || user.conventions.length || user.facts.length) {
-			lines.push("");
-			lines.push("**You:**");
-			if (userBits.length) lines.push(userBits.join(" • "));
-			if (user.conventions.length) {
-				const { displayed, hidden } = budgetConventions(user.conventions);
-				const suffix = hidden > 0 ? ` +${hidden} more` : "";
-				lines.push(`Conventions: ${displayed.join(", ")}${suffix}`);
-			}
-			// User facts (budgeted)
-			const userFacts = filterRelevantFacts(user.facts, agentName);
-			if (userFacts.length) {
-				const { displayed, hidden } = budgetFacts(userFacts);
-				const suffix = hidden > 0 ? ` +${hidden} more` : "";
-				lines.push(`Facts: ${displayed.join(" • ")}${suffix}`);
-			}
+	const userBits = buildUserPromptBits(user);
+	if (userBits.length || user.conventions.length || user.facts.length) {
+		lines.push("");
+		lines.push("**You:**");
+		if (userBits.length) lines.push(userBits.join(" • "));
+		if (user.conventions.length) {
+			const { displayed, hidden } = budgetConventions(user.conventions);
+			const suffix = hidden > 0 ? ` +${hidden} more` : "";
+			lines.push(`Conventions: ${displayed.join(", ")}${suffix}`);
+		}
+		// User facts (budgeted)
+		const userFacts = filterRelevantFacts(user.facts, agentName);
+		if (userFacts.length) {
+			const { displayed, hidden } = budgetFacts(userFacts);
+			const suffix = hidden > 0 ? ` +${hidden} more` : "";
+			lines.push(`Facts: ${displayed.join(" • ")}${suffix}`);
 		}
 	}
 
@@ -317,10 +321,17 @@ export default function (pi: ExtensionAPI) {
 	// invoked with a different ctx.cwd) must not get another project's profile —
 	// otherwise a later saveProject would write project A's data into B's file.
 	let projectProfileCwd: string | null = null;
+	// File stamp (mtime:size) the cache was loaded from. A stale in-memory
+	// snapshot must never win over a newer write on disk (e.g. quest merging
+	// conventions into the memory file) — mirror todo's storeStamp pattern.
+	let projectProfileStamp: string | null = null;
 
 	/** Get or load the project profile (reconcile if stale). */
 	function getProject(cwd: string): ProjectProfile {
-		if (projectProfile && projectProfileCwd === cwd) return projectProfile;
+		const stamp = projectStamp(cwd);
+		if (projectProfile && projectProfileCwd === cwd && projectProfileStamp === stamp) {
+			return projectProfile;
+		}
 		const stored = loadProject(cwd);
 		// Auto-detect on first load of the session if never scanned or older than 1h.
 		if (!stored.lastScanned || Date.now() - stored.lastScanned > 3_600_000) {
@@ -339,6 +350,7 @@ export default function (pi: ExtensionAPI) {
 			projectProfile = stored;
 		}
 		projectProfileCwd = cwd;
+		projectProfileStamp = stamp;
 		return projectProfile;
 	}
 
@@ -1213,14 +1225,27 @@ export default function (pi: ExtensionAPI) {
 					const value = restStr.slice(eq + 1).trim();
 					const project = getProject(ctx.cwd);
 					const now = Date.now();
+					const PROJECT_TECH_FIELDS = [
+						"packageManager",
+						"language",
+						"framework",
+						"designSystem",
+						"buildTool",
+						"testRunner",
+						"linter",
+						"formatter",
+					] as const;
 					if (key === "convention") {
 						project.conventions.push(value);
 					} else if (key === "fact") {
 						project.facts.push({ scope: "project", text: value, createdAt: now, updatedAt: now });
-					} else if (key in project) {
+					} else if ((PROJECT_TECH_FIELDS as readonly string[]).includes(key)) {
 						(project as any)[key] = value;
 					} else {
-						ctx.ui.notify(`Unknown key: ${key}`, "error");
+						ctx.ui.notify(
+							`Unknown or non-settable key: ${key}. Tech fields: ${PROJECT_TECH_FIELDS.join(", ")}`,
+							"error",
+						);
 						return;
 					}
 					saveProject(ctx.cwd, project);
@@ -1242,14 +1267,26 @@ export default function (pi: ExtensionAPI) {
 					const value = restStr.slice(eq + 1).trim();
 					const user = loadUser();
 					const now = Date.now();
+					const USER_PREF_FIELDS = [
+						"communication",
+						"commitStyle",
+						"indent",
+						"quotes",
+						"preferredPackageManager",
+						"errorHandling",
+						"shell",
+					] as const;
 					if (key === "convention") {
 						user.conventions.push(value);
 					} else if (key === "fact") {
 						user.facts.push({ scope: "user", text: value, createdAt: now, updatedAt: now });
-					} else if (key in user) {
+					} else if ((USER_PREF_FIELDS as readonly string[]).includes(key)) {
 						(user as any)[key] = value;
 					} else {
-						ctx.ui.notify(`Unknown key: ${key}`, "error");
+						ctx.ui.notify(
+							`Unknown or non-settable key: ${key}. Pref fields: ${USER_PREF_FIELDS.join(", ")}`,
+							"error",
+						);
 						return;
 					}
 					saveUser(user);
