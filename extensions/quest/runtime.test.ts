@@ -537,3 +537,31 @@ describe("fireStep ladder init + lastModel stamp", () => {
 		}
 	});
 });
+
+describe("persist onPersist hook", () => {
+	test("fires the UI-refresh hook on every durable save", () => {
+		const h = fakeRuntime();
+		try {
+			const seen: Array<Quest> = [];
+			const rt = createQuestRuntime(h.rt.pi, {
+				onPersist: (_ctx, quest) => seen.push(quest),
+			});
+			const quest = seedActive(rt, h.cwd, [makeTask({ content: "first" })]);
+
+			// No hook until something is persisted.
+			assert.equal(seen.length, 0);
+
+			rt.persist(h.ctx, quest);
+
+			// The hook sees the exact quest object that was saved/cached.
+			assert.deepEqual(seen, [quest]);
+
+			// Persisting again refreshes again — this is what keeps the activity
+			// panel live during orchestrator-direct steps (quest_update etc.).
+			rt.persist(h.ctx, quest);
+			assert.equal(seen.length, 2);
+		} finally {
+			h.cleanup();
+		}
+	});
+});

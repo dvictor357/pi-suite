@@ -135,6 +135,15 @@ export function pruneEvalResultNodes(
 	return { ...graph, nodes };
 }
 
+export interface QuestRuntimeOptions {
+	/**
+	 * Called at the end of every {@link QuestRuntime.persist}. Lets the UI layer
+	 * refresh panels that depend on quest state (activity widget, status) without
+	 * importing quest tool modules, which would be circular.
+	 */
+	onPersist?: (ctx: ExtensionContext, quest: Quest) => void;
+}
+
 export interface QuestRuntime {
 	/** The pi extension API this runtime was created against. */
 	readonly pi: ExtensionAPI;
@@ -259,7 +268,10 @@ export interface QuestRuntime {
 	): number;
 }
 
-export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
+export function createQuestRuntime(
+	pi: ExtensionAPI,
+	options: QuestRuntimeOptions = {},
+): QuestRuntime {
 	let questCache: Quest | null = null;
 	let autoPilotLocked = false;
 	const ledgerCache = new Map<string, { ledger: RunLedger; evalLog: EvalLog }>();
@@ -414,6 +426,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 		renderStatus(ctx, quest);
 		writeQuestSessionMeta(ctx.cwd, quest);
 		syncQuestToTodo(quest, ctx.cwd);
+		options.onPersist?.(ctx, quest);
 	}
 
 	function transitionStep(

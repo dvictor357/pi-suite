@@ -25,6 +25,7 @@ import {
 	renderFailureBriefs,
 } from "./ladder";
 import { clearQuestFromTodo } from "./todo-sync";
+import { clearActivityUI } from "./register-events";
 import { loadTeams } from "./teams";
 import { enqueueUiPrompt, matchModel, promptModelAssignment, toModelLike } from "./models";
 import { renderStatus, writeQuestSessionMeta } from "./status";
@@ -563,6 +564,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			renderStatus(ctx, null);
 			writeQuestSessionMeta(ctx.cwd, null);
 			clearQuestFromTodo(ctx.cwd); // flush stale [Quest] items from pi-todo
+			clearActivityUI(ctx, rt);
 			return {
 				content: [
 					{

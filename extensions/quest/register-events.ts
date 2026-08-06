@@ -486,6 +486,7 @@ async function applySequential(
 				renderStatus(ctx, null);
 				writeQuestSessionMeta(ctx.cwd, null);
 				clearQuestFromTodo(ctx.cwd);
+				clearActivityUI(ctx, rt);
 			} else {
 				persist(ctx, quest);
 			}

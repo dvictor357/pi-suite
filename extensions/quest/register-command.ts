@@ -8,6 +8,7 @@ import { ensureBuiltInTeams, loadTeams, teamInstallFromGit } from "./teams";
 import { formatQuestStatus, nextPendingStep } from "./steering";
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { listBlockedWithWorktree } from "./phase-loop";
+import { clearActivityUI } from "./register-events";
 import type { QuestRuntime } from "./runtime";
 
 export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
@@ -391,6 +392,7 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 					renderStatus(ctx, null);
 					writeQuestSessionMeta(ctx.cwd, null);
 					clearQuestFromTodo(ctx.cwd); // flush quest items, not re-sync them as completed
+					clearActivityUI(ctx, rt);
 					ctx.ui.notify(
 						`Quest "${name}" cancelled and archived (${done}/${quest.steps.length} steps done).`,
 						"info",

@@ -23,11 +23,16 @@ import { registerCreateTools } from "./register-create";
 import { registerPlanningTools } from "./register-planning";
 import { registerStatusTools } from "./register-status";
 import { registerDelegateTools } from "./register-delegate";
-import { registerEvents } from "./register-events";
+import { registerEvents, pushActivityUI } from "./register-events";
 import { registerQuestCommand } from "./register-command";
 
 export default function (pi: ExtensionAPI) {
-	const rt = createQuestRuntime(pi);
+	const rt = createQuestRuntime(pi, {
+		// Refresh the activity panel on every quest mutation — not just tracked
+		// subagent tool events. Orchestrator-direct steps (quest_update, retries,
+		// approval) otherwise leave the widget frozen at the last subagent snapshot.
+		onPersist: (ctx) => pushActivityUI(ctx, rt),
+	});
 	registerCreateTools(pi, rt);
 	registerPlanningTools(pi, rt);
 	registerStatusTools(pi, rt);
