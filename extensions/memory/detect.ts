@@ -643,9 +643,13 @@ function detectIndent(cwd: string): string | null {
 				}
 				if (tabLines > spaceLines) return "tabs";
 				if (spaceLines > 0) {
-					// Check space size
-					const match = content.match(/^ {2,}(?=\S)/m);
-					const size = match ? match[0].length : 2;
+					// Min leading-space width across indented lines — the first indented
+					// line can be a deeply-nested 8-space line in a 2-space project.
+					let size = 8;
+					for (const line of content.split("\n").slice(0, 50)) {
+						const m = line.match(/^ {2,}(?=\S)/);
+						if (m) size = Math.min(size, m[0].length);
+					}
 					return `spaces-${size}`;
 				}
 			}

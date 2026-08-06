@@ -980,6 +980,7 @@ export function createQuestRuntime(pi: ExtensionAPI): QuestRuntime {
 					render: (w: number) => {
 						const fresh = loadQuest(ctx.cwd);
 						if (fresh) kanban.setQuest(fresh);
+						else setQuest(null); // auto-archived while the kanban is open — sync the cache
 						return kanban.render(w);
 					},
 					invalidate: () => kanban.invalidate(),

@@ -57,7 +57,15 @@ const ARCHIVE_DIR = join(TODO_DIR, "archive");
 // ── Storage ──────────────────────────────────────────────────────────────────
 
 function archivePath(cwd: string, timestamp: number): string {
-	return join(ARCHIVE_DIR, `${cwdHash(cwd)}-${timestamp}.json`);
+	// Two archives in the same millisecond (auto-archive then /todo clear) would
+	// overwrite each other — bump until the filename is free.
+	let ts = timestamp;
+	let p = join(ARCHIVE_DIR, `${cwdHash(cwd)}-${ts}.json`);
+	while (existsSync(p)) {
+		ts += 1;
+		p = join(ARCHIVE_DIR, `${cwdHash(cwd)}-${ts}.json`);
+	}
+	return p;
 }
 
 /**
@@ -252,10 +260,10 @@ function listArchives(cwd: string): ArchiveListing[] {
 	try {
 		if (!existsSync(ARCHIVE_DIR)) return [];
 		const hash = cwdHash(cwd);
-		// Try index first
+		// Try index first, but only trust rows whose file still exists
 		if (existsSync(TODO_ARCHIVE_INDEX_PATH)) {
-			const matches = readArchiveIndex().filter((e) => e.cwdHash === hash);
-			if (matches.length > 0) return matches.map(toListing);
+			const live = readArchiveIndex().filter((e) => e.cwdHash === hash && existsSync(e.path));
+			if (live.length > 0) return live.map(toListing);
 			// No index matches — quick check if files exist for this cwd before rebuilding
 			const prefix = `${hash}-`;
 			if (!readdirSync(ARCHIVE_DIR).some((f) => f.startsWith(prefix) && f.endsWith(".json"))) {
@@ -505,7 +513,7 @@ export default function (pi: ExtensionAPI) {
 			const output = buildOutput(list, warnings);
 			return {
 				content: [{ type: "text", text: output }],
-				details: { items: list.items, title: list.title },
+				details: { items: visibleOrder(list.items), title: list.title },
 			};
 		},
 
