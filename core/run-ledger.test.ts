@@ -39,10 +39,6 @@ describe("run-ledger", () => {
 		assert.notStrictEqual(a, b);
 	});
 
-	it("writes a dir with a real cwd (skipped)", { skip: "needs real cwd" }, () => {
-		// kept for documentation — real cwd needs dir to exist
-	});
-
 	it("createRunLedger appends JSON lines", () => {
 		// Use tmpdir so we own the output fully.
 		const cwdBase = join(tmp, "test-cwd");
