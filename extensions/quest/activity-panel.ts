@@ -230,63 +230,72 @@ export class ActivityTracker {
 const ACTIVITY_MAX = 80;
 
 /**
+ * Recursively extract displayable text from a (possibly streamed) tool result.
+ * Handles plain strings, the standard `{ content: [...] }` block shape
+ * (`[{ type: "text", text: "..." }]`), nested `content`/`text` fields, and
+ * arrays. Never `String()`s an object — that yields "[object Object]" and was
+ * the previous behaviour for block-shaped partial results.
+ */
+function extractResultText(value: unknown): string {
+	if (typeof value === "string") return value;
+	if (value == null) return "";
+	if (Array.isArray(value)) return value.map(extractResultText).join("\n");
+	if (typeof value === "object") {
+		const rec = value as Record<string, unknown>;
+		if (typeof rec.content === "string") return rec.content;
+		if (rec.content != null) {
+			const inner = extractResultText(rec.content);
+			if (inner) return inner;
+		}
+		if (typeof rec.text === "string") return rec.text;
+		if (rec.text != null) {
+			const inner = extractResultText(rec.text);
+			if (inner) return inner;
+		}
+	}
+	return "";
+}
+
+/**
  * Extract a brief, UI-safe activity summary from a tool's partial result.
  * The result is typically accumulated output text from a sub-agent session.
  * We take only the first line, truncated, to avoid leaking sensitive detail.
  */
 function safeActivityFromResult(partialResult: unknown): string | null {
-	try {
-		const text =
-			typeof partialResult === "string"
-				? partialResult
-				: partialResult != null && typeof partialResult === "object" && "content" in partialResult
-					? String((partialResult as { content: unknown }).content ?? "")
-					: "";
-		if (!text) return null;
+	const text = extractResultText(partialResult);
+	if (!text) return null;
 
-		// Take first non-empty line, strip markdown formatting
-		const firstLine =
-			text
-				.split("\n")
-				.find((l) => l.trim().length > 0)
-				?.trim() ?? "";
-		if (!firstLine) return null;
+	// Take first non-empty line, strip markdown formatting
+	const firstLine =
+		text
+			.split("\n")
+			.find((l) => l.trim().length > 0)
+			?.trim() ?? "";
+	if (!firstLine) return null;
 
-		// Strip common markdown prefixes for cleaner display
-		const cleaned = firstLine.replace(/^[#*>-]+ /, "").trim();
-		return cleaned.length > ACTIVITY_MAX ? cleaned.slice(0, ACTIVITY_MAX - 1) + "…" : cleaned;
-	} catch {
-		return null;
-	}
+	// Strip common markdown prefixes for cleaner display
+	const cleaned = firstLine.replace(/^[#*>-]+ /, "").trim();
+	return cleaned.length > ACTIVITY_MAX ? cleaned.slice(0, ACTIVITY_MAX - 1) + "…" : cleaned;
 }
 
 /** Advisory heuristic: try to detect a file being written from partial output. */
 function guessWriteClaim(partialResult: unknown): string | undefined {
-	try {
-		const text =
-			typeof partialResult === "string"
-				? partialResult
-				: partialResult != null && typeof partialResult === "object" && "content" in partialResult
-					? String((partialResult as { content: unknown }).content ?? "")
-					: "";
-		if (!text) return undefined;
+	const text = extractResultText(partialResult);
+	if (!text) return undefined;
 
-		// Look for file path patterns — common tool output formats.
-		const patterns = [
-			/\b(?:Writing|Created|Saved|Edited|Modified)\s+(?:to\s+)?`?([^\s`,\n]{3,80})`?/i,
-			/`([^\s`]{3,80}\.(?:ts|tsx|js|jsx|py|rs|go|java|rb|md|json|yaml|yml|html|css))`/,
-		];
-		for (const p of patterns) {
-			const m = text.match(p);
-			if (m?.[1]) {
-				const file = m[1].replace(/^\.\//, "");
-				return file.length > 40 ? file.slice(-40) : file;
-			}
+	// Look for file path patterns — common tool output formats.
+	const patterns = [
+		/\b(?:Writing|Created|Saved|Edited|Modified)\s+(?:to\s+)?`?([^\s`,\n]{3,80})`?/i,
+		/`([^\s`]{3,80}\.(?:ts|tsx|js|jsx|py|rs|go|java|rb|md|json|yaml|yml|html|css))`/,
+	];
+	for (const p of patterns) {
+		const m = text.match(p);
+		if (m?.[1]) {
+			const file = m[1].replace(/^\.\//, "");
+			return file.length > 40 ? file.slice(-40) : file;
 		}
-		return undefined;
-	} catch {
-		return undefined;
 	}
+	return undefined;
 }
 
 // ── Widget renderer (setWidget-compatible) ───────────────────────────────

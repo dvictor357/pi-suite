@@ -171,6 +171,28 @@ test("ActivityTracker handles malformed partialResult", () => {
 	assert.equal(t.activeRuns[0].currentActivity, "delegating to worker");
 });
 
+test("ActivityTracker extracts text from block-shaped partialResult (no [object Object])", () => {
+	const t = new ActivityTracker();
+	const q = quest();
+	t.onStart("call-1", "subagent", { agent: "worker" }, q);
+
+	// Standard pi tool-result shape: content is an array of text blocks.
+	t.onUpdate("call-1", {
+		content: [{ type: "text", text: "## Analysis Complete\n\nFound 3 issues." }],
+		details: {},
+	});
+	assert.ok(t.activeRuns[0].currentActivity.includes("Analysis Complete"));
+	assert.ok(!t.activeRuns[0].currentActivity.includes("object Object"));
+
+	// Single object content block.
+	t.onUpdate("call-1", { content: { type: "text", text: "Edited src/app.ts" } });
+	assert.equal(t.activeRuns[0].currentActivity, "Edited src/app.ts");
+
+	// Deeply nested text field.
+	t.onUpdate("call-1", { type: "text", text: "wrote tests" });
+	assert.equal(t.activeRuns[0].currentActivity, "wrote tests");
+});
+
 test("ActivityTracker detects write claim from output", () => {
 	const t = new ActivityTracker();
 	const q = quest();
