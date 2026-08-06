@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { readJSON, writeJSON, updateJSON, loadProjectMemory } from "./utils";
+import { readJSON, updateJSON, loadProjectMemory } from "./utils";
 import {
 	SESSION_META_PATH,
 	todoListPath as todoPath,
@@ -55,27 +55,34 @@ export function questTaskToTodo(
 export function syncQuestToTodo(quest: Quest, cwd: string): void {
 	try {
 		const path = todoPath(cwd);
-		const existing = readJSON<SyncedTodoList>(path, { cwd, items: [], version: 1 });
-		const existingItems = Array.isArray(existing.items) ? existing.items : [];
-		const previousQuestItems = new Map<number, SyncedTodoItem>();
-		for (const item of existingItems) {
-			if (item?.source === "quest" && typeof item.sourceIndex === "number") {
-				previousQuestItems.set(item.sourceIndex, item);
-			}
-		}
-		const nonQuestItems = existingItems.filter(
-			(item) => item?.source !== "quest" && !item?.content?.startsWith("[Quest]"),
+		updateJSON<SyncedTodoList>(
+			path,
+			(existing) => {
+				const existingItems = Array.isArray(existing.items) ? existing.items : [];
+				const previousQuestItems = new Map<number, SyncedTodoItem>();
+				for (const item of existingItems) {
+					if (item?.source === "quest" && typeof item.sourceIndex === "number") {
+						previousQuestItems.set(item.sourceIndex, item);
+					}
+				}
+				const nonQuestItems = existingItems.filter(
+					(item) => item?.source !== "quest" && !item?.content?.startsWith("[Quest]"),
+				);
+				const questItems = quest.steps.map((task, index) =>
+					questTaskToTodo(quest, task, index, previousQuestItems.get(index)),
+				);
+				const nextItems = [...nonQuestItems, ...questItems];
+				// No-op when items haven't changed (preserves todo writes from other processes)
+				if (JSON.stringify(nextItems) === JSON.stringify(existingItems)) return existing;
+				return {
+					cwd: existing.cwd ?? cwd,
+					title: existing.title ?? `Quest: ${quest.name}`,
+					items: nextItems,
+					version: 1,
+				};
+			},
+			{ cwd, items: [], version: 1 },
 		);
-		const questItems = quest.steps.map((task, index) =>
-			questTaskToTodo(quest, task, index, previousQuestItems.get(index)),
-		);
-		const next: SyncedTodoList = {
-			cwd: existing.cwd ?? cwd,
-			title: existing.title ?? `Quest: ${quest.name}`,
-			items: [...nonQuestItems, ...questItems],
-			version: 1,
-		};
-		writeJSON(path, next);
 	} catch (e) {
 		console.error("[pi-quest] syncQuestToTodo:", e); /* optional — pi-todo may not be installed */
 	}

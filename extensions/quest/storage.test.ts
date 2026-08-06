@@ -4,6 +4,8 @@ import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+	archiveQuest,
+	clearActiveQuest,
 	emptyQuest,
 	listArchives,
 	loadAgentModels,
@@ -14,7 +16,13 @@ import {
 	saveQuest,
 } from "./storage";
 import type { SandboxPolicy } from "./types";
-import { projectMemoryPath, questActivePath, readJSON, writeJSON } from "./utils";
+import {
+	projectMemoryPath,
+	questActivePath,
+	questArchiveIndexPath,
+	readJSON,
+	writeJSON,
+} from "./utils";
 
 const tempCwd = (): string => mkdtempSync(join(tmpdir(), "pi-suite-quest-storage-"));
 
@@ -398,4 +406,100 @@ test("loadModelLadder rejects malformed ladders and a future contract", () => {
 		modelLadder: { rungs: ["ornith-1.0"], approvedAt: 1 },
 	});
 	assert.equal(loadModelLadder(cwd), null, "future contract is refused, not misread");
+});
+
+// ── updateArchiveIndex: read-merge-write preserves concurrent writes ──────
+
+test("archiveQuest merge-preserves existing entries in archive index", () => {
+	const cwd = tempCwd();
+	// Pre-populate index with an entry from "another process"
+	writeJSON(questArchiveIndexPath(cwd), {
+		version: 1,
+		entries: [
+			{
+				path: "/some/other/quest.json",
+				name: "Other Quest",
+				goal: "existing work",
+				completedAt: 100,
+				taskCount: 3,
+				doneCount: 3,
+			},
+		],
+	});
+
+	// Archive a quest — updateArchiveIndex does read-merge-write
+	const quest = emptyQuest("Merge Test", "test merge");
+	quest.steps = [
+		{
+			content: "step 1",
+			status: "done",
+			agent: "worker",
+			context: "",
+			dependencies: [],
+			result: "done",
+			attempts: 1,
+			startedAt: 50,
+			completedAt: 200,
+			verified: false,
+			verifyResult: null,
+			verifyRetries: 0,
+			commitHash: null,
+			branchName: null,
+		},
+	];
+	quest.completedAt = 200;
+	archiveQuest(quest, cwd);
+
+	const index = readJSON<{ version: number; entries: any[] }>(questArchiveIndexPath(cwd), {
+		version: 1,
+		entries: [],
+	});
+	// Both entries must be present — the pre-existing one and the newly archived
+	assert.equal(index.entries.length, 2, "merge preserved both entries");
+	assert.ok(
+		index.entries.some((e: any) => e.name === "Other Quest"),
+		"pre-existing entry kept",
+	);
+	assert.ok(
+		index.entries.some((e: any) => e.name === "Merge Test"),
+		"new entry added",
+	);
+
+	clearActiveQuest(cwd);
+});
+
+test("archiveIndex merge is idempotent for same quest", () => {
+	const cwd = tempCwd();
+	const quest = emptyQuest("Idempotent", "test");
+	quest.steps = [
+		{
+			content: "step",
+			status: "done",
+			agent: "worker",
+			context: "",
+			dependencies: [],
+			result: "ok",
+			attempts: 1,
+			startedAt: 10,
+			completedAt: 100,
+			verified: false,
+			verifyResult: null,
+			verifyRetries: 0,
+			commitHash: null,
+			branchName: null,
+		},
+	];
+	quest.completedAt = 100;
+
+	// Archive same quest twice — second write should deduplicate by path
+	archiveQuest(quest, cwd);
+	archiveQuest(quest, cwd);
+
+	const index = readJSON<{ version: number; entries: any[] }>(questArchiveIndexPath(cwd), {
+		version: 1,
+		entries: [],
+	});
+	assert.equal(index.entries.length, 1, "duplicate entry deduplicated");
+
+	clearActiveQuest(cwd);
 });

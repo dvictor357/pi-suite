@@ -531,11 +531,16 @@ const byCompletedAtDesc = (a: QuestArchiveEntry, b: QuestArchiveEntry): number =
 
 function updateArchiveIndex(cwd: string, entry: QuestArchiveEntry): void {
 	try {
-		const indexPath = questArchiveIndexPath(cwd);
-		const entries = readQuestArchiveIndex(indexPath).filter((e) => e.path !== entry.path);
-		entries.push(entry);
-		entries.sort(byCompletedAtDesc);
-		writeJSON(indexPath, { version: 1, entries });
+		updateJSON<{ version: number; entries: QuestArchiveEntry[] }>(
+			questArchiveIndexPath(cwd),
+			(existing) => {
+				const entries = existing.entries.filter((e) => e.path !== entry.path);
+				entries.push(entry);
+				entries.sort(byCompletedAtDesc);
+				return { version: 1, entries };
+			},
+			{ version: 1, entries: [] },
+		);
 	} catch (e) {
 		console.error("[pi-quest] updateArchiveIndex:", e); /* best-effort */
 	}

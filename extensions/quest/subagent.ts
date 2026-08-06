@@ -207,11 +207,11 @@ export async function runSubAgent(
 				touchedPaths: touched,
 				worktreePath: worktreePath ?? undefined,
 			};
-			// Gather git diff when the sub-agent touched files.
-			if (touched.length > 0) {
-				const changed = gitChangedFiles(sessionCwd);
-				if (changed) sandboxArtifacts.changedFiles = changed;
-			}
+			// SB-3: always gather git status when sandboxed so bash-only writers
+			// (echo x > file) are captured even when no edit/write tool was called.
+			// Uses git status --porcelain which includes untracked new files.
+			const changed = gitChangedFiles(sessionCwd);
+			if (changed) sandboxArtifacts.changedFiles = changed;
 		}
 
 		return { ok: true, output: extractFinalText(messages), sandboxArtifacts };
@@ -227,30 +227,56 @@ export async function runSubAgent(
 	}
 }
 
-/** Extract write-tool paths (deduplicated) from a call log. */
+/** Extract write-tool paths (deduplicated) and bash redirect targets from a call log. */
 function collectTouchedPaths(log: SandboxCallRecord[]): string[] {
 	const seen = new Set<string>();
 	for (const rec of log) {
 		if (rec.blocked) continue;
-		if (rec.tool !== "edit" && rec.tool !== "write") continue;
-		const path =
-			typeof rec.input.path === "string"
-				? rec.input.path
-				: typeof rec.input.file_path === "string"
-					? rec.input.file_path
-					: typeof rec.input.file === "string"
-						? rec.input.file
-						: undefined;
-		if (path) seen.add(path);
+		if (rec.tool === "edit" || rec.tool === "write") {
+			const path =
+				typeof rec.input.path === "string"
+					? rec.input.path
+					: typeof rec.input.file_path === "string"
+						? rec.input.file_path
+						: typeof rec.input.file === "string"
+							? rec.input.file
+							: undefined;
+			if (path) seen.add(path);
+		}
+		// SB-3: capture bash redirect targets (e.g. echo x > file, cat a >> b)
+		if (rec.tool === "bash") {
+			const cmd = typeof rec.input.command === "string" ? rec.input.command : "";
+			for (const p of extractRedirectPaths(cmd)) {
+				seen.add(p);
+			}
+		}
 	}
 	return [...seen];
 }
 
-/** Return `git diff --name-only` output as an array, or null on failure. */
+/** Extract file paths from shell redirect operators (>, >>, 2>, 1>, &>). */
+function extractRedirectPaths(cmd: string): string[] {
+	const paths: string[] = [];
+	const re = /[0-9&]?>>?\s*(\S+)/g;
+	let m: RegExpExecArray | null;
+	while ((m = re.exec(cmd)) !== null) {
+		paths.push(m[1]);
+	}
+	return paths;
+}
+
+/** Return `git status --porcelain` output as an array of paths, or null on failure. */
 function gitChangedFiles(cwd: string): string[] | null {
 	try {
-		const out = execSync("git diff --name-only", { cwd, timeout: 10_000, stdio: "pipe" });
-		return out.toString().trim().split("\n").filter(Boolean);
+		const out = execSync("git status --porcelain", { cwd, timeout: 10_000, stdio: "pipe" });
+		// Strip the status prefix (e.g. " M src/foo.ts" → "src/foo.ts", "?? new.txt" → "new.txt")
+		return out
+			.toString()
+			.trim()
+			.split("\n")
+			.filter(Boolean)
+			.map((line) => line.slice(3).trim())
+			.filter(Boolean);
 	} catch {
 		return null;
 	}
