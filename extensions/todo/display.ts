@@ -1,7 +1,7 @@
 import type { TodoItem, TodoStatus } from "../../core";
 
 /** Sort priority for the todo list view: active work first, finished last. */
-export const STATUS_ORDER: Record<TodoStatus, number> = {
+const STATUS_ORDER: Record<TodoStatus, number> = {
 	in_progress: 0,
 	delegated: 1,
 	pending: 2,

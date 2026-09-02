@@ -25,7 +25,7 @@ import {
 	type RetryPolicy,
 } from "../../core";
 import { asRecord, boolOr, numOr, optNum, optStr, strOr } from "../../core";
-import { isReadOnlyRole, READ_ONLY_ROLES } from "./roles";
+import { isReadOnlyRole } from "./roles";
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
@@ -35,9 +35,6 @@ import { isReadOnlyRole, READ_ONLY_ROLES } from "./roles";
  * explicit `agentModels` assignment untouched.
  */
 export const DEFAULT_LADDER_ROLES = ["worker", "quick-worker"];
-
-/** Roles that inspect, plan, or judge work; never governed by the execution ladder. */
-export const NEVER_LADDER_ROLES = [...READ_ONLY_ROLES];
 
 export const isNeverLadderRole = isReadOnlyRole;
 

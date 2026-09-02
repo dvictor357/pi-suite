@@ -91,7 +91,7 @@ export function runLedgerPath(cwd: string, questSlug: string): string {
 }
 
 /** Append one event as a JSON line. Best-effort — never throws. */
-export function recordRunEvent(path: string, event: RunEvent): void {
+function recordRunEvent(path: string, event: RunEvent): void {
 	try {
 		appendLine(path, JSON.stringify(event));
 	} catch {

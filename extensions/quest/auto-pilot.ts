@@ -256,7 +256,7 @@ export function simulateAfterUnresolved(
 }
 
 /** Apply timeout plan then unresolved plan onto a snapshot (pure). */
-export function simulateAfterTimeoutsAndUnresolved(
+function simulateAfterTimeoutsAndUnresolved(
 	steps: readonly AutoPilotStepSnapshot[],
 	timeouts: readonly TimeoutAction[],
 	unresolved: readonly UnresolvedAction[],

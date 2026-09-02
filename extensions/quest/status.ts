@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { writeSessionMeta } from "../../core";
 import type { Quest } from "./types";
-import { writeSessionMeta } from "./utils";
 
 export function writeQuestSessionMeta(cwd: string, quest: Quest | null): void {
 	if (!quest || quest.status === "idle" || quest.status === "done") {

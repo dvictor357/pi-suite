@@ -2,15 +2,21 @@ import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { AgentModelChoice, ModelLadderConfig } from "../../core";
 import {
+	CONTRACT_VERSION,
 	THINKING_LEVELS,
 	asRecord,
-	strArray,
 	boolOr,
-	strOr,
-	oneOf,
+	isFutureContract,
 	numOr,
-	optStr,
+	oneOf,
 	optNum,
+	optStr,
+	projectMemoryPath,
+	readJSON,
+	strArray,
+	strOr,
+	updateJSON,
+	writeJSON,
 } from "../../core";
 import type {
 	GitIntegration,
@@ -25,16 +31,10 @@ import type {
 import { coerceStepHandoff } from "./context-broker";
 import { coerceFailureBrief } from "./ladder";
 import {
-	readJSON,
-	writeJSON,
-	updateJSON,
 	loadProjectMemory,
-	projectMemoryPath,
 	questActivePath,
 	questArchiveDir,
 	questArchiveIndexPath,
-	CONTRACT_VERSION,
-	isFutureContract,
 } from "./utils";
 
 /**
@@ -546,7 +546,7 @@ function updateArchiveIndex(cwd: string, entry: QuestArchiveEntry): void {
 	}
 }
 
-export function rebuildArchiveIndex(cwd: string): void {
+function rebuildArchiveIndex(cwd: string): void {
 	try {
 		const archiveDir = questArchiveDir(cwd);
 		if (!existsSync(archiveDir)) return;

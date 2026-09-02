@@ -29,7 +29,7 @@ export function loadTeams(): Record<string, TeamConfig> {
 
 const SAFE_TEAM_NAME = /^[a-z0-9_-]+$/i;
 
-export function saveTeam(team: TeamConfig): void {
+function saveTeam(team: TeamConfig): void {
 	try {
 		if (!SAFE_TEAM_NAME.test(team.name)) {
 			throw new Error(

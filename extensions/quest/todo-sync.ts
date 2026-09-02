@@ -1,11 +1,13 @@
 import { basename } from "node:path";
-import { readJSON, updateJSON, loadProjectMemory } from "./utils";
+import { loadProjectMemory } from "./utils";
 import {
 	SESSION_META_PATH,
+	readJSON,
 	todoListPath as todoPath,
 	budgetForModel,
 	clampToBudget,
 	isConstrainedModel,
+	updateJSON,
 	type BudgetModelInfo,
 	type MemoryGraph,
 } from "../../core";
@@ -19,7 +21,7 @@ import {
 
 export { todoPath };
 
-export function questTaskToTodo(
+function questTaskToTodo(
 	quest: Quest,
 	task: QuestStep,
 	index: number,

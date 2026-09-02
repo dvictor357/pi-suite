@@ -10,7 +10,7 @@
 import { clampToBudget, type MemoryGraph, type MemoryNode, type NodeKind } from "../../core";
 
 /** Preferred node kinds for prompt injection, highest priority first. */
-export const PREFERRED_PROMPT_KINDS: readonly NodeKind[] = [
+const PREFERRED_PROMPT_KINDS: readonly NodeKind[] = [
 	"design-decision",
 	"knowledge",
 	"loop-pattern",

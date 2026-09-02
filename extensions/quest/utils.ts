@@ -1,28 +1,6 @@
 import { join } from "node:path";
 import { homedir } from "node:os";
-import {
-	cwdHash,
-	readJSON,
-	writeJSON,
-	updateJSON,
-	writeSessionMeta,
-	projectMemoryPath,
-	CONTRACT_VERSION,
-	isFutureContract,
-} from "../../core";
-
-// Shared primitives now live in core. Re-export them so the rest of the quest
-// extension can keep importing from "./utils" unchanged.
-export {
-	cwdHash,
-	readJSON,
-	writeJSON,
-	updateJSON,
-	writeSessionMeta,
-	projectMemoryPath,
-	CONTRACT_VERSION,
-	isFutureContract,
-};
+import { cwdHash, readJSON, projectMemoryPath, isFutureContract } from "../../core";
 
 /**
  * Read pi-memory's project file for awareness. Returns null if absent, or if it

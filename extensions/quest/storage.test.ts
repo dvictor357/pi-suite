@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { projectMemoryPath, readJSON, writeJSON } from "../../core";
 import {
 	archiveQuest,
 	clearActiveQuest,
@@ -16,13 +17,7 @@ import {
 	saveQuest,
 } from "./storage";
 import type { SandboxPolicy } from "./types";
-import {
-	projectMemoryPath,
-	questActivePath,
-	questArchiveIndexPath,
-	readJSON,
-	writeJSON,
-} from "./utils";
+import { questActivePath, questArchiveIndexPath } from "./utils";
 
 const tempCwd = (): string => mkdtempSync(join(tmpdir(), "pi-suite-quest-storage-"));
 

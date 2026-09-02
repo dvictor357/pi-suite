@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { projectMemoryPath } from "../../core";
 import { buildSteeringMessage, wasTurnAborted } from "./steering";
 import { emptyQuest, rememberAgentModel } from "./storage";
 import type { QuestStep } from "./types";
-import { projectMemoryPath } from "./utils";
 
 describe("wasTurnAborted", () => {
 	test("true when the final assistant turn was aborted (Esc)", () => {

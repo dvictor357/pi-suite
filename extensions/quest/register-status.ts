@@ -1,7 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { updateJSON, projectMemoryPath, CONTRACT_VERSION, isFutureContract } from "./utils";
 import { ensureBuiltInTeams, loadTeams } from "./teams";
 import { formatQuestStatus } from "./steering";
 import { listArchives, saveQuest } from "./storage";
@@ -9,10 +8,14 @@ import { renderStatus, writeQuestSessionMeta } from "./status";
 import { listBlockedWithWorktree, type RecoverBlockedMode } from "./phase-loop";
 import type { QuestRuntime } from "./runtime";
 import {
-	readAllEvalEntries,
+	CONTRACT_VERSION,
 	computeEvalStats,
 	computeEvalTimeSeries,
 	formatEvalStatsReport,
+	isFutureContract,
+	projectMemoryPath,
+	readAllEvalEntries,
+	updateJSON,
 } from "../../core";
 
 export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {

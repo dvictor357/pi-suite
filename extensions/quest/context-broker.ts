@@ -79,15 +79,15 @@ export function coerceStepHandoff(value: unknown): StepHandoff | undefined {
 	};
 }
 
-export function roleFramingBlock(role: string): string {
+function roleFramingBlock(role: string): string {
 	return `You are a "${role}" sub-agent. Complete exactly this step — nothing more — and report back concisely.`;
 }
 
-export function taskBlock(content: string): string {
+function taskBlock(content: string): string {
 	return `## Task\n${content}`;
 }
 
-export function contextBlock(context?: string): string {
+function contextBlock(context?: string): string {
 	return context?.trim() ? `## Context\n${context.trim()}` : "";
 }
 
@@ -97,7 +97,7 @@ export interface DependencyHandoff {
 }
 
 /** Render only direct dependencies, using bounded summaries rather than their raw output. */
-export function dependencyHandoffBlock(dependencies: ReadonlyArray<DependencyHandoff>): string {
+function dependencyHandoffBlock(dependencies: ReadonlyArray<DependencyHandoff>): string {
 	if (!dependencies.length) return "";
 	const lines = ["## Prior results you can build on"];
 	for (const dependency of dependencies) {
@@ -113,22 +113,6 @@ export function dependencyHandoffBlock(dependencies: ReadonlyArray<DependencyHan
 		if (dependency.handoff.notes) lines.push(`Notes: ${dependency.handoff.notes}`);
 	}
 	return lines.join("\n");
-}
-
-export function failureBriefBlock(rendered: string): string {
-	return rendered.trim();
-}
-
-export function sandboxConstraintBlock(profile?: SandboxProfile): string {
-	return buildSandboxConstraintBlock(profile);
-}
-
-export function projectAwarenessBlock(cwd: string, model?: BudgetModelInfo): string {
-	return compactAwarenessBlock(cwd, model);
-}
-
-export function formatBlock(model?: BudgetModelInfo): string {
-	return formatDirectiveFor(model);
 }
 
 export function completionSchemaBlock(): string {
@@ -178,7 +162,7 @@ function buildStepSections(
 		{ text: framing, priority: SECTION_PRIORITY.structural },
 		{ text: task, priority: SECTION_PRIORITY.task },
 		{
-			text: failureBriefBlock(opts.failureBriefBlock ?? ""),
+			text: opts.failureBriefBlock?.trim() ?? "",
 			priority: SECTION_PRIORITY.failure,
 		},
 		{
@@ -186,17 +170,17 @@ function buildStepSections(
 			priority: SECTION_PRIORITY.deps,
 		},
 		{
-			text: sandboxConstraintBlock(opts.sandboxProfile),
+			text: buildSandboxConstraintBlock(opts.sandboxProfile),
 			priority: SECTION_PRIORITY.structural,
 		},
 	];
 	if (includeModelDependent) {
 		sections.push(
 			{
-				text: opts.cwd ? projectAwarenessBlock(opts.cwd, opts.modelInfo) : "",
+				text: opts.cwd ? compactAwarenessBlock(opts.cwd, opts.modelInfo) : "",
 				priority: SECTION_PRIORITY.awareness,
 			},
-			{ text: formatBlock(opts.modelInfo), priority: SECTION_PRIORITY.format },
+			{ text: formatDirectiveFor(opts.modelInfo), priority: SECTION_PRIORITY.format },
 		);
 	}
 	sections.push({ text: completionSchemaBlock(), priority: SECTION_PRIORITY.structural });

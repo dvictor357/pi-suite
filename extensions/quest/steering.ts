@@ -37,7 +37,7 @@ export function nextPendingStep(quest: Quest): { task: QuestStep; index: number 
 	return null;
 }
 
-export function formatStepTime(t: QuestStep): string {
+function formatStepTime(t: QuestStep): string {
 	if (!t.startedAt) return "";
 	const end = t.completedAt ?? Date.now();
 	const ms = end - t.startedAt;

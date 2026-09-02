@@ -148,7 +148,7 @@ function coerceEvalTimeSample(value: unknown): EvalTimeSample | null {
 // ── Aggregation ──────────────────────────────────────────────────────────────
 
 /** Index key for one (agent role, model) pair (NUL-joined so it cannot collide). */
-export function statsKey(agent: string, model: string): string {
+function statsKey(agent: string, model: string): string {
 	return `${agent}\u0000${model}`;
 }
 

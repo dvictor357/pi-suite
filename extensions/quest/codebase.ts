@@ -110,7 +110,7 @@ const COMMON_WORDS = new Set([
 	"context",
 ]);
 
-export function codebaseCachePath(cwd: string): string {
+function codebaseCachePath(cwd: string): string {
 	return join(cwd, CODEBASE_CACHE_PATH);
 }
 
@@ -453,7 +453,7 @@ export function enrichPlanningContext(
 	};
 }
 
-export function extractFilePaths(text: string): string[] {
+function extractFilePaths(text: string): string[] {
 	const matches =
 		text.match(/[A-Za-z0-9_.\/-]+\.(?:[cm]?[jt]sx?|json|md|css|scss|yml|yaml)/g) || [];
 	return [...new Set(matches.map(normalizeRelativePath).filter((p) => !p.startsWith("..")))];

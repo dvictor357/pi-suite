@@ -74,7 +74,7 @@ import { appendLine, setErrorSink } from "./fs";
 import { AGENT_DIR } from "./paths";
 
 /** Shared suite-wide error log. One file for every suite extension. */
-export const ERROR_LOG_PATH = join(AGENT_DIR, "pi-suite-errors.log");
+const ERROR_LOG_PATH = join(AGENT_DIR, "pi-suite-errors.log");
 
 /**
  * Install a default error sink the moment any extension imports core, so a

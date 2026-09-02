@@ -98,7 +98,7 @@ export function evalLogPath(cwd: string, questSlug: string): string {
 }
 
 /** Append one eval entry as JSONL. Best-effort — never throws. */
-export function recordEvalEntry(path: string, entry: EvalEntry): void {
+function recordEvalEntry(path: string, entry: EvalEntry): void {
 	try {
 		appendLine(path, JSON.stringify(entry));
 	} catch {

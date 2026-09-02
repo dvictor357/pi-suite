@@ -346,7 +346,7 @@ export function formatTimestamp(ms: number): string {
  * Build compact sandbox detail lines for display in the step detail pane.
  * Shows quest-level policy and any per-step overrides.
  */
-export function buildSandboxDetailLines(
+function buildSandboxDetailLines(
 	quest: { sandbox?: { mode?: string; worktree?: { path?: string } | null } },
 	task: { sandbox?: { mode?: string } },
 	maxW: number,

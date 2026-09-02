@@ -63,7 +63,7 @@ function pmBinary(profile: ProjectMemory | null, hasPackageJson: boolean): strin
  * The package.json `scripts` map for a project, or an empty object when absent
  * or unreadable. Pulled out so {@link resolveChecks} stays pure over its inputs.
  */
-export function readPackageScripts(cwd: string): Record<string, string> {
+function readPackageScripts(cwd: string): Record<string, string> {
 	const path = join(cwd, "package.json");
 	if (!existsSync(path)) return {};
 	try {
