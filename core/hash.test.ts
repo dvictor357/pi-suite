@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { cwdHash } from "./hash";
 
-// cwdHash is part of the cross-extension contract: all three extensions must
+// cwdHash is part of the cross-extension contract: every suite extension must
 // produce the SAME hash for the same cwd, or they silently read/write different
 // files for one project. These values are a regression lock — if they change,
 // every extension's on-disk state is re-keyed and CONTRACT_VERSION must bump.

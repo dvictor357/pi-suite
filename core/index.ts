@@ -1,9 +1,9 @@
 /**
  * @pi-suite/core — the shared cross-extension contract for the pi-suite
- * extensions (pi-quest, pi-todo, pi-memory).
+ * extensions (pi-quest, pi-todo, pi-memory, pi-agent).
  *
  * Extensions import from here instead of re-declaring storage shapes, paths, or
- * helpers. This is the only module all three depend on; see ./contract for the
+ * helpers. This is the only module they all depend on; see ./contract for the
  * versioned on-disk contract and core/README.md for the rationale.
  */
 export { CONTRACT_VERSION, THINKING_LEVELS, isFutureContract } from "./contract";
@@ -30,7 +30,7 @@ export type {
 export { cwdHash } from "./hash";
 export { readJSON, writeJSON, updateJSON } from "./fs";
 export { AGENT_DIR, SESSION_META_PATH, todoListPath, projectMemoryPath } from "./paths";
-export { writeSessionMeta } from "./session-meta";
+export { readSessionMeta, writeSessionMeta } from "./session-meta";
 export {
 	MAX_RETRIES,
 	MAX_BURST,
@@ -73,16 +73,16 @@ import { join } from "node:path";
 import { appendLine, setErrorSink } from "./fs";
 import { AGENT_DIR } from "./paths";
 
-/** Shared suite-wide error log. One file for all three extensions. */
+/** Shared suite-wide error log. One file for every suite extension. */
 export const ERROR_LOG_PATH = join(AGENT_DIR, "pi-suite-errors.log");
 
 /**
  * Install a default error sink the moment any extension imports core, so a
  * failed read/write is captured in a shared log instead of being silently
- * black-holed (the previous no-op default). All three extensions share one
- * core module instance at runtime, so a single suite-wide log is both simpler
- * and more coherent than three competing per-extension sinks. Tests or an
- * extension may still override this via `setErrorSink`.
+ * black-holed (the previous no-op default). Suite extensions share one core
+ * module instance at runtime, so a single suite-wide log is both simpler and
+ * more coherent than competing per-extension sinks. Tests or an extension may
+ * still override this via `setErrorSink`.
  */
 setErrorSink((context, error) => {
 	const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);

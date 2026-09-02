@@ -4,11 +4,12 @@ You are working in `pi-suite`, a TypeScript package for pi. Use this file as you
 
 ## What this project is
 
-`pi-suite` ships three pi extensions that work together:
+`pi-suite` ships four pi extensions that work together:
 
 - `pi-quest` plans work, delegates steps to sub-agents, verifies results, and tracks quest progress.
 - `pi-todo` keeps a persistent task ledger for the current project.
 - `pi-memory` remembers project/user preferences and injects that context into future agent runs.
+- `pi-agent` reads quest/eval/session-meta and shows a performance dashboard (`/agent`, `agent_dashboard`).
 
 These extensions share files under `~/.pi/agent`. The main goal of this repo is to keep their shared JSON shapes and path rules in one place: `core/`.
 
@@ -93,6 +94,12 @@ extensions/
     detect.ts         Pure project/user tech-stack detection
     profile.ts        Reconcile detected fields while preserving foreign fields
 
+  agent/
+    index.ts          Registers agent_dashboard tool, /agent command, status badge
+    dashboard.ts      fetchDashboard: quest + eval-stats + session-meta → DashboardStats
+    dashboard-types.ts  DashboardStats / agent / cycle / trend / health shapes
+    report.ts         Markdown and JSON recap builders (pure)
+
 docs/                 Architecture notes
 MIGRATION.md          Migration checklist and drift history
 package.json          pi package manifest; pi.extensions points at ./extensions
@@ -123,7 +130,7 @@ Shared files live under `~/.pi/agent`. Project-scoped files use `cwdHash(cwd)`.
 - Todo list: `~/.pi/agent/tmp/todos/<cwdHash>.json`
 - Project memory: `~/.pi/agent/memory/projects/<cwdHash>.json`
 - User memory: `~/.pi/agent/memory/user.json`
-- Session meta: shared status handoff with extension keys `memory`, `todo`, `quest`
+- Session meta: shared status handoff with extension keys `memory`, `todo`, `quest` (pi-agent reads this file; it does not own a key)
 - Quest active/archive state: `~/.pi/agent/quests/<cwdHash>/...`
 - Quest teams: `~/.pi/agent/quests/teams`
 
@@ -243,6 +250,28 @@ When editing memory:
 - Agent-scoped facts are filtered by `PI_AGENT_NAME`, category, or tags.
 - Keep prompt output budgeted. Do not dump large memory files into the system prompt.
 
+### Agent extension
+
+Agent is a read-only performance dashboard over quest, eval, and session-meta state.
+
+Tools registered by agent:
+
+- `agent_dashboard` — markdown or JSON recap (live steps, eval cycles, daily trends, retry/burst health)
+
+Command:
+
+```text
+/agent
+/agent json
+```
+
+When editing agent:
+
+- Import shared readers from `../../core` (`readSessionMeta`, `readAllEvalEntries`, `computeEvalStats`, `computeEvalTimeSeries`, `DEFAULT_RETRY_POLICY`). Do not invent cwd-relative ledger paths.
+- Load the active quest via `loadQuest` from `extensions/quest/storage.ts`. Treat a missing quest as empty agents/goals, not an error.
+- Do not write `writeSessionMeta("agent", …)` — `"agent"` is not an `ExtensionKey`. Status-bar text may use `ctx.ui.setStatus("agent", …)`.
+- `fetchDashboard` is best-effort and must not throw on missing or corrupt sources.
+
 ## Code style
 
 Use the existing style:
@@ -276,6 +305,7 @@ Add or update tests when you touch:
 - Quest graph/dependency behavior.
 - Todo display order or command index behavior.
 - Memory detection or profile reconciliation.
+- Agent dashboard mapping from quest/eval/session-meta into `DashboardStats`.
 - Any migration item in `MIGRATION.md`.
 
 ## Common workflows
@@ -311,3 +341,10 @@ Add or update tests when you touch:
 2. Preserve full-list replacement semantics for `todo_write`.
 3. Update `display.ts` if display order or command indexing changes.
 4. Preserve quest metadata unless you are intentionally clearing quest items.
+
+### Adding agent dashboard behavior
+
+1. Keep mapping in `dashboard.ts`; keep recap rendering in `report.ts`.
+2. Return `DashboardStats` from `dashboard-types.ts` — do not inline a looser shape.
+3. Read shared files through `core/` (and `loadQuest` for the active quest).
+4. Do not add an `"agent"` session-meta key unless the contract, docs, and tests change together.

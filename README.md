@@ -2,20 +2,22 @@
 
 ![pi-suite article header](docs/assets/pi_suite_article_header.png)
 
-A loop-engineering toolkit for [pi](https://pi.dev) — three extensions, previously
-maintained as separate repos, now consolidated here behind one cross-extension contract:
+A loop-engineering toolkit for [pi](https://pi.dev) — four extensions, previously
+maintained as separate repos (quest/todo/memory), now consolidated here behind one
+cross-extension contract:
 
 | Extension     | Role                                                                                                                                 |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | **pi-quest**  | Proactive AI project manager — plans, delegates to sub-agents, verifies, tracks git, and applies sandbox/policy guidance for tasks.  |
 | **pi-todo**   | Persistent task ledger with sub-agent delegation.                                                                                    |
 | **pi-memory** | Persistent project & user memory — tech-stack detection, conventions, structured facts, quest research, and sub-agent model choices. |
+| **pi-agent**  | Read-only performance dashboard — live steps, eval cycles, daily trends, retry/burst health (`/agent`, `agent_dashboard`).           |
 
 They were built to work together (quest syncs tasks into todo and conventions/research
-into memory). Consolidating them into one repo makes that relationship explicit: a single
-shared [`core/`](core/README.md) module owns the storage contract, so the three can no
-longer drift apart silently. The standalone `pi-quest`, `pi-todo`, and `pi-memory` repos
-are now deprecated in favor of this suite.
+into memory; agent reads that shared state). Consolidating them into one repo makes that
+relationship explicit: a single shared [`core/`](core/README.md) module owns the storage
+contract, so the writers can no longer drift apart silently. The standalone `pi-quest`,
+`pi-todo`, and `pi-memory` repos are now deprecated in favor of this suite.
 
 ## Feature-to-tool map
 
@@ -35,6 +37,7 @@ config and the quest auto-pilot loop.
 | **Memory & conventions**  | `memory_status`, `memory_project`, `memory_user`; `/memory` command; auto-detected tech stack + saved conventions                                                                                         |
 | **Memory graph**          | `memory_graph` — list/add/link/remove typed nodes (loop-pattern, sandbox-log, artifact-set, design-decision, knowledge, eval-result) and edges on the project knowledge graph                             |
 | **Eval stats**            | `quest_eval_stats` — per-(agent, model) verified pass rates plus a daily table of pass rates, average durations, and model-ladder escalations from the eval JSONL trail                                   |
+| **Agent dashboard**       | `agent_dashboard` / `/agent` — live/queued/failed steps by role, eval cycle health, daily trends, and retry/burst limits from quest + eval + session-meta                                                 |
 | **Git tracking**          | `quest_commit` to record per-step commits; `quest_git_summary` for a PR-ready change log with auto-branch and auto-PR hints                                                                               |
 | **Research memory**       | `quest_memory_save` stores findings keyed by topic; mirrored to project memory for cross-quest awareness                                                                                                  |
 | **Decision points**       | `quest_decide` presents tradeoff options to the user during planning or execution                                                                                                                         |
@@ -87,6 +90,14 @@ inspection.
 | `memory_lint`    | Audit memory for duplicates, empties, oversize entries  |
 | `memory_graph`   | Manage typed knowledge graph nodes and edges            |
 
+### Agent (pi-agent)
+
+| Tool              | Purpose                                                                |
+| ----------------- | ---------------------------------------------------------------------- |
+| `agent_dashboard` | Markdown or JSON recap of live agents, eval cycles, trends, and health |
+
+Commands: `/agent` (markdown), `/agent json`.
+
 ## Demo
 
 ![pi-suite quest kanban demo](docs/assets/quest-demo.gif)
@@ -119,7 +130,8 @@ pi-suite/
 │   │   ├── sandbox-guard.ts  #   per-call tool-call enforcement (bash/edit/write)
 │   │   └── verifier.ts       #   structured verification loop + sandbox compliance checks
 │   ├── todo/              # pi-todo    → extensions/todo/index.ts
-│   └── memory/            # pi-memory  → extensions/memory/index.ts
+│   ├── memory/            # pi-memory  → extensions/memory/index.ts
+│   └── agent/             # pi-agent   → extensions/agent/index.ts (dashboard)
 ├── docs/                  # architecture & design notes
 ├── tsconfig.json          # one typecheck gate over core + all extensions
 └── .prettierrc.json       # one formatting convention for the whole suite
@@ -233,18 +245,20 @@ alongside quest research and model choices.
 ## Why one repo
 
 `pi`'s installer reads the **root** `package.json` of a git source and loads every
-entry in its `pi.extensions` array. So one repo can ship all three extensions, and a
-single `pi install` pulls them together — while `pi config` still lets a user disable any
-one of them. A monorepo is therefore a first-class, `git:`-installable unit. The
-alternative (three repos sharing a published `core` package) is only needed for
-independent npm installation, which `pi`'s `git:` route cannot do for a subdirectory.
+entry in its `pi.extensions` array. A directory entry is auto-discovered for each
+subdirectory that contains an `index.ts`, so adding `extensions/agent/` ships with the
+suite on the next `pi update` — no extra install source and no `package.json` edit.
+`pi config` still lets a user disable any one of them. A monorepo is therefore a
+first-class, `git:`-installable unit. The alternative (separate repos sharing a published
+`core` package) is only needed for independent npm installation, which `pi`'s `git:`
+route cannot do for a subdirectory.
 
 See [docs/architecture.md](docs/architecture.md) for the full rationale and the
 evidence from `pi`'s package manager.
 
 ## Install
 
-Install all three extensions together with a single command:
+Install the suite (quest, todo, memory, agent) with a single command:
 
 ```bash
 pi install git:github.com/dvictor357/pi-suite
@@ -265,9 +279,10 @@ CI runs `typecheck`, `test`, and `format:check` on every push and PR.
 
 ## Status
 
-All three extensions have been migrated in from their standalone repos onto the shared
-`core/` contract; those repos are now deprecated and archived. See
-[MIGRATION.md](MIGRATION.md) for the migration record.
+Quest, todo, and memory were migrated in from their standalone repos onto the shared
+`core/` contract; those repos are now deprecated and archived. The agent dashboard is a
+new in-suite extension that only reads that contract. See [MIGRATION.md](MIGRATION.md)
+for the migration record.
 
 ## License
 

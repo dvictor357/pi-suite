@@ -14,7 +14,7 @@ pi-quest, pi-todo, and pi-memory were three independent repos that nonetheless f
 
 Because every cross-extension read is best-effort (`try/catch` → fallback), a drift
 between the copies doesn't error — it corrupts silently. The fix is a single shared
-contract module (`core/`) that all three import.
+contract module (`core/`) that every suite extension imports.
 
 ## Why one repo
 
@@ -32,10 +32,10 @@ We verified `pi`'s installer behavior directly from
 
 ### The two viable approaches
 
-| Approach                 | Shape                                                                         | Install                                     | Trade-off                                                                                               |
-| ------------------------ | ----------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| **Single repo** (chosen) | One repo, `pi.extensions` lists all three; shared `core/` via relative import | `pi install git:…/pi-suite` loads all three | No npm publish needed; `pi config` toggles individual extensions off. Not independently installable.    |
-| Published packages       | Monorepo publishing three npm packages that depend on a published `core`      | `pi install npm:@you/pi-quest`              | Independent install — but **requires npm publishing**, because `git:` cannot target a workspace subdir. |
+| Approach                 | Shape                                                                                                               | Install                                           | Trade-off                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Single repo** (chosen) | One repo, `pi.extensions` lists `./extensions` (auto-discovers each `index.ts`); shared `core/` via relative import | `pi install git:…/pi-suite` loads every extension | No npm publish needed; `pi config` toggles individual extensions off. Not independently installable.    |
+| Published packages       | Monorepo publishing npm packages that depend on a published `core`                                                  | `pi install npm:@you/pi-quest`                    | Independent install — but **requires npm publishing**, because `git:` cannot target a workspace subdir. |
 
 The single-repo approach was chosen because:
 
@@ -51,15 +51,17 @@ does not need to gate the consolidation now.
 ## Module boundaries
 
 ```
-core/  ──────────────► owned by no extension; imported by all three
+core/  ──────────────► owned by no extension; imported by every suite extension
   contract.ts            shared on-disk shapes + CONTRACT_VERSION
   paths.ts               AGENT_DIR, shared path builders
   hash.ts, fs.ts         primitives
-  session-meta.ts        shared status handoff
+  session-meta.ts        shared status handoff (keys: memory, todo, quest)
+  eval-stats.ts          eval JSONL readers used by quest and agent
 
 extensions/quest/  ────► imports ../../core; keeps quest-private state local
 extensions/todo/   ────► imports ../../core
 extensions/memory/ ────► imports ../../core
+extensions/agent/  ────► imports ../../core; read-only dashboard (no ExtensionKey)
 ```
 
 The guiding rule: **`core` owns only what crosses an extension boundary.** Anything a
@@ -97,8 +99,10 @@ Two additive observability features built on the shared contract:
   verified pass rates (used by the model ladder and shown in `quest_eval_stats`);
   `computeEvalTimeSeries` produces daily buckets with pass rates, average durations, and
   model-ladder escalation counts. Both views are formatted by `formatEvalStatsReport` and
-  exposed via `quest_eval_stats` in the quest extension. Pure Node — no new deps — reusing
-  the existing `coerce` helpers for defensive reading of untrusted eval rows.
+  exposed via `quest_eval_stats` in the quest extension. The agent dashboard (`/agent`,
+  `agent_dashboard`) maps the same aggregations plus live quest steps into a recap. Pure
+  Node — no new deps — reusing the existing `coerce` helpers for defensive reading of
+  untrusted eval rows.
 
 - **Memory graph** (`core/contract.ts` `MemoryGraph`): typed nodes (loop-pattern,
   sandbox-log, artifact-set, design-decision, knowledge, eval-result) and directed edges
