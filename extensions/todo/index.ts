@@ -12,7 +12,7 @@
  *     them completed when results come back.
  *   • Persisted per-project to ~/.pi/agent/tmp/todos/<cwd-hash>.json.
  *   • Archives completed lists so you can browse history.
- *   • Live status-bar badge: ▶ 3/8 (with ☑ when all done).
+ *   • Live status-bar badge: ● 3/8.
  *
  * Commands:
  *   /todo                  — show current list
@@ -283,10 +283,10 @@ function listArchives(cwd: string): ArchiveListing[] {
 // ── Display ──────────────────────────────────────────────────────────────────
 
 const ICON: Record<Status, string> = {
-	pending: "☐",
-	in_progress: "▶",
-	completed: "☑",
-	delegated: "⇢",
+	pending: "○",
+	in_progress: "●",
+	completed: "✓",
+	delegated: "◐",
 };
 
 function usesTree(items: TodoItem[]): boolean {
@@ -361,9 +361,9 @@ function renderStatus(ctx: ExtensionContext, list: TodoList) {
 	const done = list.items.filter((i) => i.status === "completed").length;
 	const active = list.items.some((i) => i.status === "in_progress");
 	const delegated = list.items.some((i) => i.status === "delegated");
-	const icon = active ? "▶" : delegated ? "⇢" : "☑";
+	const icon = active ? "●" : delegated ? "◐" : "○";
 	const label = `${icon} ${done}/${list.items.length}`;
-	const color = done === list.items.length ? "success" : active ? "warning" : "dim";
+	const color = done === list.items.length ? "success" : active || delegated ? "accent" : "dim";
 	ctx.ui.setStatus?.("todo", theme?.fg ? theme.fg(color, label) : label);
 }
 
@@ -533,10 +533,10 @@ export default function (pi: ExtensionAPI) {
 			if (items.length === 0) return new Text("(no todos)", 0, 0);
 
 			const colorFor: Record<Status, { fg: string; icon: string }> = {
-				completed: { fg: "success", icon: "☑" },
-				in_progress: { fg: "warning", icon: "▶" },
-				delegated: { fg: "accent", icon: "⇢" },
-				pending: { fg: "muted", icon: "☐" },
+				completed: { fg: "success", icon: "✓" },
+				in_progress: { fg: "accent", icon: "●" },
+				delegated: { fg: "accent", icon: "◐" },
+				pending: { fg: "muted", icon: "○" },
 			};
 			const done = items.filter((i) => i.status === "completed").length;
 			const total = items.length;

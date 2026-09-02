@@ -972,7 +972,12 @@ export function pushActivityUI(
 		rt2.activity.hasActivity || snap ? buildActivityWidgetFn(rt2.activity, snap) : undefined,
 		{ placement: "aboveEditor" },
 	);
-	ctx.ui.setStatus("quest-activity", buildActivityFooter(rt2.activity, snap) ?? undefined);
+	const footer = buildActivityFooter(rt2.activity, snap);
+	const theme = (ctx.ui as { theme?: { fg?: (color: string, text: string) => string } }).theme;
+	ctx.ui.setStatus(
+		"quest-activity",
+		footer ? (theme?.fg ? theme.fg("accent", footer) : footer) : undefined,
+	);
 	ctx.ui.setWorkingIndicator(buildActivityWorkingIndicator(rt2.activity));
 }
 

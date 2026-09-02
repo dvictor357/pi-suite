@@ -12,10 +12,10 @@ function renderAgentStatus(ctx: ExtensionContext, stats: DashboardStats): void {
 	}
 	const live = stats.agents.reduce((n, a) => n + a.activeSteps, 0);
 	const queued = stats.agents.reduce((n, a) => n + a.queuedSteps, 0);
-	const icon = stats.health.pausedQuests > 0 ? "◐" : "●";
-	const label = `${icon} ${live} live / ${queued} queued`;
+	const icon = stats.health.pausedQuests > 0 ? "◆" : "●";
+	const label = `${icon} ${live} live · ${queued} queued`;
 	const theme = (ctx.ui as { theme?: { fg?: (color: string, text: string) => string } }).theme;
-	const color = stats.health.pausedQuests > 0 ? "dim" : "accent";
+	const color = stats.health.pausedQuests > 0 ? "warning" : "accent";
 	ctx.ui.setStatus?.("agent", theme?.fg ? theme.fg(color, label) : label);
 }
 

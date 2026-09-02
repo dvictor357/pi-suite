@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import {
 	ActivityTracker,
 	buildActivityWidgetFn,
@@ -338,6 +339,31 @@ test("buildActivityWidget shows active runs", () => {
 	assert.ok(lines.some((l) => l.includes("worker")));
 });
 
+test("buildActivityWidget applies semantic theme colors", () => {
+	const t = new ActivityTracker();
+	const q = quest();
+	t.onStart("call-1", "subagent", { agent: "worker" }, q);
+	const theme = {
+		fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
+		bold: (text: string) => `<b>${text}</b>`,
+	};
+	const lines = buildActivityWidgetFn(t, t.questSnapshot(q))(null, theme).render();
+
+	assert.ok(lines[0].includes("<accent>"));
+	assert.ok(lines.some((line) => line.includes("<dim>")));
+	assert.ok(lines.some((line) => line.includes("<b>worker</b>")));
+});
+
+test("buildActivityWidget truncates every line to the available width", () => {
+	const t = new ActivityTracker();
+	const q = quest({ name: "A very long quest name that cannot fit in a narrow terminal" });
+	t.onStart("call-1", "subagent", { agent: "worker", model: "provider/a-very-long-model" }, q);
+	t.onUpdate("call-1", "A very long activity description that cannot fit either");
+	const lines = buildActivityWidgetFn(t, t.questSnapshot(q))(null, null).render(32);
+
+	assert.ok(lines.every((line) => visibleWidth(line) <= 32));
+});
+
 test("buildActivityWidget shows verification pending", () => {
 	const t = new ActivityTracker();
 	const snap: ActivityQuestState = {
@@ -391,7 +417,7 @@ test("buildActivityFooter returns verifying when no active runs", () => {
 		hasVerifierPending: true,
 		nextStepContent: "",
 	};
-	assert.equal(buildActivityFooter(t, snap), "🔍 verifying");
+	assert.equal(buildActivityFooter(t, snap), "◐ verifying");
 });
 
 test("buildActivityFooter shows active run info", () => {
@@ -434,7 +460,7 @@ test("buildActivityStatus shows quest progress", () => {
 		nextStepContent: "",
 	};
 	const status = buildActivityStatus(t, snap);
-	assert.equal(status, "⚔ 2/5");
+	assert.equal(status, "● 2/5");
 });
 
 test("buildActivityStatus shows running indicator when active", () => {
@@ -443,7 +469,7 @@ test("buildActivityStatus shows running indicator when active", () => {
 	t.onStart("call-1", "subagent", { agent: "worker" }, q);
 	const snap = t.questSnapshot(q);
 	const status = buildActivityStatus(t, snap);
-	assert.equal(status, "⚔ 1/3 ▶");
+	assert.equal(status, "● 1/3 ●");
 });
 
 test("buildActivityStatus shows verifying indicator", () => {
@@ -457,7 +483,7 @@ test("buildActivityStatus shows verifying indicator", () => {
 		nextStepContent: "",
 	};
 	const status = buildActivityStatus(t, snap);
-	assert.equal(status, "⚔ 2/5 🔍");
+	assert.equal(status, "● 2/5 ◐");
 });
 
 // ── Working indicator ────────────────────────────────────────────────────

@@ -10,6 +10,7 @@
  * module calls into it and pushes results into `ctx.ui.setWidget` / `setStatus`.
  */
 
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { Quest } from "./types";
 import { nextPendingStep } from "./steering";
 
@@ -300,6 +301,22 @@ function guessWriteClaim(partialResult: unknown): string | undefined {
 
 // ── Widget renderer (setWidget-compatible) ───────────────────────────────
 
+interface ActivityTheme {
+	fg(color: string, text: string): string;
+	bold(text: string): string;
+}
+
+const plainTheme: ActivityTheme = {
+	fg: (_color, text) => text,
+	bold: (text) => text,
+};
+
+function questVisual(status: string): { icon: string; color: string } {
+	if (status === "active") return { icon: "●", color: "accent" };
+	if (status === "paused") return { icon: "◆", color: "warning" };
+	return { icon: "○", color: "dim" };
+}
+
 /**
  * Build a widget factory suitable for `ctx.ui.setWidget`. Returns a function
  * `(tui, theme) => Component` that renders active sub-agent runs and recently
@@ -308,50 +325,62 @@ function guessWriteClaim(partialResult: unknown): string | undefined {
 export function buildActivityWidgetFn(
 	tracker: ActivityTracker,
 	quest: ActivityQuestState | null,
-): (_tui: unknown, _theme: unknown) => { render: () => string[]; invalidate: () => void } {
-	return (_tui: unknown, _theme: unknown) => ({
-		render: () => renderWidgetLines(tracker, quest),
+): (
+	_tui: unknown,
+	theme: ActivityTheme | null,
+) => { render: (width?: number) => string[]; invalidate: () => void } {
+	return (_tui: unknown, theme: ActivityTheme | null) => ({
+		render: (width = Number.MAX_SAFE_INTEGER) =>
+			renderWidgetLines(tracker, quest, theme ?? plainTheme).map((line) =>
+				truncateToWidth(line, width),
+			),
 		invalidate: () => {},
 	});
 }
 
-function renderWidgetLines(tracker: ActivityTracker, quest: ActivityQuestState | null): string[] {
+function renderWidgetLines(
+	tracker: ActivityTracker,
+	quest: ActivityQuestState | null,
+	theme: ActivityTheme,
+): string[] {
 	const lines: string[] = [];
 	const active = tracker.activeRuns;
 	const recent = tracker.recentRuns;
 
 	if (!quest && active.length === 0 && recent.length === 0) return [];
 
-	// ── Quest header ──
 	if (quest) {
-		const icon = quest.status === "active" ? "⚔" : quest.status === "planning" ? "📋" : "⏸";
-		const header = `${icon} ${quest.name} — ${quest.done}/${quest.total} done`;
-		lines.push(header);
+		const visual = questVisual(quest.status);
+		const title = theme.fg(visual.color, theme.bold(`${visual.icon} ${quest.name}`));
+		lines.push(`${title}${theme.fg("dim", `  ${quest.done}/${quest.total} done`)}`);
 	}
 
-	// ── Active runs ──
 	for (const run of active) {
-		const phaseIcon = run.waitingVerifier ? "🔍" : "▶";
-		const elapsed = formatElapsed(Date.now() - run.startedAt);
-		const modelStr = run.model ? ` · ${shortModel(run.model)}` : "";
-		const writeStr = run.writeClaim ? ` · 📄${run.writeClaim}` : "";
-		const stepStr = run.stepIndex >= 0 ? `Step #${run.stepIndex + 1}: ` : "";
-		const line = `  ${phaseIcon} ${run.agent} · ${stepStr}${run.currentActivity} · ${elapsed}${modelStr}${writeStr}`;
-		lines.push(line);
+		const verifying = run.waitingVerifier;
+		const icon = theme.fg(verifying ? "warning" : "accent", verifying ? "◐" : "●");
+		const agent = theme.fg("text", theme.bold(run.agent));
+		const step = run.stepIndex >= 0 ? `#${run.stepIndex + 1} ` : "";
+		const activity = theme.fg("muted", `${step}${run.currentActivity}`);
+		const metadata = [
+			formatElapsed(Date.now() - run.startedAt),
+			run.model ? shortModel(run.model) : "",
+			run.writeClaim ?? "",
+		].filter(Boolean);
+		lines.push(`  ${icon} ${agent}  ${activity}${theme.fg("dim", `  ${metadata.join(" · ")}`)}`);
 	}
 
-	// ── Verification pending ──
 	if (quest?.hasVerifierPending && active.length === 0) {
-		const nextStr = quest.nextStepContent ? ` — next: ${quest.nextStepContent.slice(0, 50)}` : "";
-		lines.push(`  🔍 verifying${nextStr}`);
+		const next = quest.nextStepContent ? `  next: ${quest.nextStepContent.slice(0, 50)}` : "";
+		lines.push(
+			`  ${theme.fg("accent", "◐")} ${theme.fg("text", theme.bold("verifying"))}${theme.fg("dim", next)}`,
+		);
 	}
 
-	// ── Recent completions (max 2) ──
 	for (const run of recent.slice(0, 2)) {
-		const icon = run.isError ? "✗" : "✓";
-		const stepStr = run.stepIndex >= 0 ? `Step #${run.stepIndex + 1}: ` : "";
-		const line = `  ${icon} ${run.agent} · ${stepStr}${run.currentActivity}`;
-		lines.push(line);
+		const icon = theme.fg(run.isError ? "error" : "success", run.isError ? "×" : "✓");
+		const agent = theme.fg("text", theme.bold(run.agent));
+		const step = run.stepIndex >= 0 ? `#${run.stepIndex + 1} ` : "";
+		lines.push(`  ${icon} ${agent}  ${theme.fg("dim", `${step}${run.currentActivity}`)}`);
 	}
 
 	return lines;
@@ -369,7 +398,7 @@ export function buildActivityFooter(
 ): string | null {
 	const active = tracker.activeRuns;
 	if (active.length === 0) {
-		if (quest?.hasVerifierPending) return "🔍 verifying";
+		if (quest?.hasVerifierPending) return "◐ verifying";
 		return null;
 	}
 
@@ -396,10 +425,10 @@ export function buildActivityStatus(
 ): string | null {
 	if (!quest) return null;
 	const active = tracker.activeRuns;
-	const icon = quest.status === "active" ? "⚔" : quest.status === "planning" ? "📋" : "⏸";
+	const icon = questVisual(quest.status).icon;
 	const label = quest.total > 0 ? `${icon} ${quest.done}/${quest.total}` : `${icon} plan`;
-	if (active.length > 0) return `${label} ▶`;
-	if (quest.hasVerifierPending) return `${label} 🔍`;
+	if (active.length > 0) return `${label} ●`;
+	if (quest.hasVerifierPending) return `${label} ◐`;
 	return label;
 }
 

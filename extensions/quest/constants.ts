@@ -157,12 +157,12 @@ export { AGENT_DIR };
 export const TEAMS_DIR = join(AGENT_DIR, "quests", "teams");
 
 export const ICON: Record<StepStatus, string> = {
-	pending: "☐",
-	running: "▶",
-	verifying: "🔍",
-	done: "☑",
-	failed: "✗",
-	skipped: "⏭",
+	pending: "○",
+	running: "●",
+	verifying: "◐",
+	done: "✓",
+	failed: "×",
+	skipped: "–",
 };
 
 export const BUILT_IN_TEAMS: Record<string, TeamConfig> = {

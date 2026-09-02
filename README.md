@@ -266,6 +266,9 @@ pi install git:github.com/dvictor357/pi-suite
 
 To run just one extension, install the suite and disable the others with `pi config`.
 
+The package also includes the `pi-suite-kanagawa` theme. Select it from `/settings` after
+installation; pi-suite never changes the active theme automatically.
+
 ## Develop
 
 ```bash

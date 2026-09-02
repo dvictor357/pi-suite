@@ -28,15 +28,15 @@ export interface KanbanColumn {
 /** Group steps into TODO / DOING / DONE / FAILED columns. */
 export function buildColumns(steps: QuestStep[]): KanbanColumn[] {
 	return [
-		{ title: "TODO", steps: steps.filter((t) => t.status === "pending"), color: "muted" },
+		{ title: "Todo", steps: steps.filter((t) => t.status === "pending"), color: "muted" },
 		{
-			title: "DOING",
+			title: "Doing",
 			steps: steps.filter((t) => t.status === "running" || t.status === "verifying"),
 			color: "accent",
 		},
-		{ title: "DONE", steps: steps.filter((t) => t.status === "done"), color: "success" },
+		{ title: "Done", steps: steps.filter((t) => t.status === "done"), color: "success" },
 		{
-			title: "FAILED",
+			title: "Failed",
 			steps: steps.filter((t) => t.status === "failed" || t.status === "skipped"),
 			color: "error",
 		},
@@ -76,7 +76,7 @@ export function formatDuration(ms: number): string {
 /** Build a compact metadata label summarising the task's key fields. */
 export function buildMetadataLabel(task: QuestStep): string {
 	const parts: string[] = [];
-	if (task.verified) parts.push("✅verified");
+	if (task.verified) parts.push("✓ verified");
 	if (task.commitHash) parts.push(`\`${task.commitHash.slice(0, 8)}\``);
 	if (task.attempts > 1) parts.push(`${task.attempts} attempts`);
 	if (task.startedAt) {
@@ -192,7 +192,7 @@ export function buildStatusLine(quest: Quest, steps: QuestStep[]): string {
 	const p = progressSummary(steps);
 	const parts: string[] = [];
 
-	parts.push(`[${quest.status.toUpperCase()}]`);
+	parts.push(quest.status);
 	parts.push(`${p.done}/${p.total} done`);
 
 	if (p.running > 0) parts.push(`${p.running} running`);
@@ -203,7 +203,7 @@ export function buildStatusLine(quest: Quest, steps: QuestStep[]): string {
 	if (quest.sandbox?.mode) parts.push(`sandbox:${quest.sandbox.mode}`);
 	if (quest.team) parts.push(`team:${quest.team}`);
 	if (quest.planningMode === "approve" && !quest.planApproved && quest.steps.length > 0) {
-		parts.push("[awaiting approval]");
+		parts.push("awaiting approval");
 	}
 
 	return parts.join(" · ");
@@ -243,11 +243,9 @@ export function buildTaskSuffix(task: QuestStep, colWidth: number): string {
 		}
 	}
 
-	// Sandbox indicator — compact badge when step has sandbox overrides.
-	// Differentiate: restricted → 🔒, isolated → 🔒i, any sandbox → 🔒
+	// Compact sandbox badge: isolated or restricted/default.
 	if (task.sandbox && colWidth >= 22) {
-		const sbIcon = task.sandbox.mode === "isolated" ? "🔒i" : "🔒";
-		parts.push(sbIcon);
+		parts.push(task.sandbox.mode === "isolated" ? "[I]" : "[R]");
 	}
 
 	// Verification checkmark
@@ -433,11 +431,11 @@ export function buildTaskDetail(
 	// ── Verification ──
 	if (task.verified) {
 		const vLine = task.verifyResult
-			? `Verification: ✅ ${task.verifyResult}`
-			: "Verification: ✅ passed";
+			? `Verification: ✓ ${task.verifyResult}`
+			: "Verification: ✓ passed";
 		for (const line of wrapLines(vLine, maxW)) lines.push(line);
 	} else if (task.status === "verifying") {
-		lines.push(`Verification: 🔍 in progress (retries: ${task.verifyRetries})`);
+		lines.push(`Verification: ◐ in progress (retries: ${task.verifyRetries})`);
 	}
 
 	// ── Sandbox ──
@@ -813,10 +811,13 @@ export class QuestKanban {
 		const lines: string[] = [];
 
 		// ── Header ──
-		const title = `Quest: ${this.quest.name}`;
-		lines.push(theme.fg("accent", theme.bold(title)));
+		const statusIcon =
+			this.quest.status === "active" ? "●" : this.quest.status === "paused" ? "◆" : "○";
+		const titleColor = this.quest.status === "paused" ? "warning" : "accent";
+		const title = truncate(`${statusIcon} ${this.quest.name}`, width);
+		lines.push(theme.fg(titleColor, theme.bold(title)));
 		const statusLine = buildStatusLine(this.quest, this.quest.steps);
-		lines.push(theme.fg("dim", `  ${statusLine}`));
+		lines.push(theme.fg("dim", truncate(`  ${statusLine}`, width)));
 		lines.push("");
 
 		if (totalSteps === 0) {
@@ -854,11 +855,9 @@ export class QuestKanban {
 
 		lines.push("");
 		const actionHints = buildActionHints(this.quest, this.actions);
-		const footerLine = "←→ columns  ↑↓ steps  enter detail  ? help  esc close";
-		lines.push(theme.fg("dim", footerLine));
-		if (actionHints) {
-			lines.push(theme.fg("dim", `  ${actionHints}`));
-		}
+		const navigation = "←→ columns · ↑↓ steps · enter detail · ? help · esc close";
+		const footer = actionHints ? `${navigation} · ${actionHints}` : navigation;
+		lines.push(theme.fg("dim", truncate(footer, width)));
 
 		this.cachedWidth = width;
 		this.cachedLines = lines;

@@ -23,8 +23,9 @@ export function renderStatus(ctx: ExtensionContext, quest: Quest | null) {
 	}
 	const done = quest.steps.filter((t) => t.status === "done").length;
 	const total = quest.steps.length;
-	const icon = quest.status === "active" ? "⚔" : quest.status === "planning" ? "📋" : "⏸";
+	const icon = quest.status === "active" ? "●" : quest.status === "planning" ? "○" : "◆";
 	const label = total ? `${icon} ${done}/${total}` : `${icon} plan`;
-	const color = quest.status === "active" ? "warning" : "dim";
+	const color =
+		quest.status === "active" ? "accent" : quest.status === "paused" ? "warning" : "dim";
 	ctx.ui.setStatus?.("quest", theme?.fg ? theme.fg(color, label) : label);
 }

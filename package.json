@@ -11,6 +11,9 @@
   "pi": {
     "extensions": [
       "./extensions"
+    ],
+    "themes": [
+      "./themes"
     ]
   },
   "scripts": {

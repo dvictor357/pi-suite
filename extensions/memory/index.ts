@@ -246,7 +246,7 @@ function renderMemoryStatus(ctx: ExtensionContext, project: ProjectProfile): voi
 			ctx.ui.setStatus?.("memory", "");
 			return;
 		}
-		const label = `🧠 ${memoryLabel(project)}`;
+		const label = `◇ ${memoryLabel(project)}`;
 		ctx.ui.setStatus?.("memory", theme?.fg ? theme.fg("accent", label) : label);
 	} catch {
 		/* best-effort UI */

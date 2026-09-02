@@ -68,10 +68,10 @@ test("buildColumns groups steps into four columns", () => {
 	];
 	const cols = buildColumns(ts);
 	assert.equal(cols.length, 4);
-	assert.equal(cols[0].title, "TODO");
-	assert.equal(cols[1].title, "DOING");
-	assert.equal(cols[2].title, "DONE");
-	assert.equal(cols[3].title, "FAILED");
+	assert.equal(cols[0].title, "Todo");
+	assert.equal(cols[1].title, "Doing");
+	assert.equal(cols[2].title, "Done");
+	assert.equal(cols[3].title, "Failed");
 	assert.equal(cols[0].steps.length, 1); // pending
 	assert.equal(cols[1].steps.length, 2); // running + verifying
 	assert.equal(cols[2].steps.length, 1); // done
@@ -153,7 +153,7 @@ test("buildMetadataLabel empty for fresh task", () => {
 
 test("buildMetadataLabel includes verified", () => {
 	const task = t({ verified: true });
-	assert.ok(buildMetadataLabel(task).includes("✅verified"));
+	assert.ok(buildMetadataLabel(task).includes("✓ verified"));
 });
 
 test("buildMetadataLabel includes commit hash", () => {
@@ -185,7 +185,7 @@ test("buildMetadataLabel combines all fields", () => {
 		startedAt: Date.now() - 125000,
 	});
 	const label = buildMetadataLabel(task);
-	assert.ok(label.includes("✅verified"));
+	assert.ok(label.includes("✓ verified"));
 	assert.ok(label.includes("`12345678`"));
 	assert.ok(label.includes("2 attempts"));
 	assert.ok(label.includes("2m 5s"));
@@ -386,7 +386,7 @@ function q(overrides: Partial<Quest> = {}): Quest {
 test("buildStatusLine includes status and progress", () => {
 	const ts = [t({ status: "done" }), t({ status: "pending" })];
 	const line = buildStatusLine(q({ status: "active" }), ts);
-	assert.ok(line.includes("[ACTIVE]"));
+	assert.ok(line.includes("active"));
 	assert.ok(line.includes("1/2 done"));
 });
 
@@ -420,7 +420,7 @@ test("buildStatusLine shows approval hint", () => {
 	const line = buildStatusLine(q({ planningMode: "approve", planApproved: false, steps: [t()] }), [
 		t(),
 	]);
-	assert.ok(line.includes("[awaiting approval]"));
+	assert.ok(line.includes("awaiting approval"));
 });
 
 test("buildStatusLine hides approval hint when already approved", () => {
@@ -539,26 +539,26 @@ test("buildTaskSuffix progressive disclosure", () => {
 	assert.ok(buildTaskSuffix(task, 40).includes("↳"));
 });
 
-test("buildTaskSuffix shows sandbox lock when task.sandbox set", () => {
+test("buildTaskSuffix shows restricted sandbox badge", () => {
 	const task = t({ agent: "worker", sandbox: { mode: "restricted" } });
-	assert.ok(buildTaskSuffix(task, 22).includes("🔒"));
-	assert.ok(!buildTaskSuffix(task, 22).includes("🔒i"));
+	assert.ok(buildTaskSuffix(task, 22).includes("[R]"));
+	assert.ok(!buildTaskSuffix(task, 22).includes("[I]"));
 });
 
-test("buildTaskSuffix shows isolated badge when step sandbox mode is isolated", () => {
+test("buildTaskSuffix shows isolated sandbox badge", () => {
 	const task = t({ agent: "worker", sandbox: { mode: "isolated" } });
-	assert.ok(buildTaskSuffix(task, 22).includes("🔒i"));
+	assert.ok(buildTaskSuffix(task, 22).includes("[I]"));
 });
 
 test("buildTaskSuffix hides sandbox below colWidth 22", () => {
 	const task = t({ agent: "worker", sandbox: {} });
 	const suffix = buildTaskSuffix(task, 20);
-	assert.ok(!suffix.includes("🔒"));
+	assert.ok(!suffix.includes("[R]"));
 });
 
 test("buildTaskSuffix hides sandbox when task.sandbox not set", () => {
 	const task = t({ agent: "worker" });
-	assert.ok(!buildTaskSuffix(task, 40).includes("🔒"));
+	assert.ok(!buildTaskSuffix(task, 40).includes("[R]"));
 });
 
 test("buildTaskSuffix empty when no metadata fields", () => {
@@ -743,7 +743,7 @@ test("buildTaskDetail shows verification", () => {
 	const quest = q({ steps: [task] });
 	const lines = buildTaskDetail(task, 0, quest, 80, { done: "☑" });
 	const joined = lines.join("\n");
-	assert.ok(joined.includes("✅"));
+	assert.ok(joined.includes("✓"));
 	assert.ok(joined.includes("All tests pass"));
 });
 
@@ -1269,10 +1269,10 @@ test("render board mode includes column headers", () => {
 	const kb = new QuestKanban(quest, identityTheme);
 	const lines = kb.render(100);
 	const joined = lines.join("\n");
-	assert.ok(joined.includes("TODO"), "should have TODO column");
-	assert.ok(joined.includes("DOING"), "should have DOING column");
-	assert.ok(joined.includes("DONE"), "should have DONE column");
-	assert.ok(joined.includes("FAILED"), "should have FAILED column");
+	assert.ok(joined.includes("Todo"), "should have Todo column");
+	assert.ok(joined.includes("Doing"), "should have Doing column");
+	assert.ok(joined.includes("Done"), "should have Done column");
+	assert.ok(joined.includes("Failed"), "should have Failed column");
 });
 
 test("render board mode includes footer hints", () => {
