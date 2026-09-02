@@ -95,7 +95,7 @@ describe("fetchDashboard", () => {
 		assert.equal(stats.health.activeQuests, 0);
 		assert.equal(stats.health.pausedQuests, 0);
 		assert.equal(stats.health.stalled, 0);
-		assert.match(stats.health.defaultRetryPolicy, /retries=/);
+		assert.match(stats.health.defaultRetryPolicy, /retries/);
 		assert.equal(stats.sessionMetaTimestamp, DAY);
 	});
 
@@ -220,6 +220,7 @@ describe("fetchDashboard", () => {
 		assert.ok(worker);
 		assert.equal(worker.steps, 2);
 		assert.equal(worker.done, 1);
+		assert.equal(worker.active, 0, "historical failures are not live-active steps");
 		assert.ok(scout);
 		assert.equal(scout.done, 1);
 
@@ -306,7 +307,7 @@ describe("recap", () => {
 		health: {
 			maxConcurrent: 1,
 			maxBurst: 6,
-			defaultRetryPolicy: "retries=2 burst=6 verify=2",
+			defaultRetryPolicy: "2 retries, burst 6, 2 verify retries",
 			activeQuests: 1,
 			pausedQuests: 0,
 			stalled: 0,
@@ -319,13 +320,53 @@ describe("recap", () => {
 	test("buildRecapMarkdown renders sections from DashboardStats", () => {
 		const markdown = buildRecapMarkdown(sample);
 		assert.match(markdown, /^# Agent Performance Recap/m);
-		assert.match(markdown, /generated: 2023-11-14T/);
+		assert.match(markdown, /generated: 2023-11-14 22:13 UTC/);
 		assert.doesNotMatch(markdown, /1970-01-01/);
-		assert.match(markdown, /\*\*worker\*\*: 1 active \/ 2 done/);
+		assert.match(markdown, /\*\*worker\*\*: 1 running \/ 2 done \(3 steps\)/);
 		assert.match(markdown, /\*\*worker\*\* \(worker → ornith-1\.0\)/);
-		assert.match(markdown, /\| 2023-11-14 \| 3 \| 1 \| 2 \| 1500 \| 1 \|/);
+		assert.match(markdown, /\| 2023-11-14 \| 3 \| 2 \| 1 \| 1\.5s \| 1 \|/);
 		assert.match(markdown, /Max concurrent: 1/);
-		assert.match(markdown, /Retry policy: retries=2 burst=6 verify=2/);
+		assert.match(markdown, /Retry policy: 2 retries, burst 6, 2 verify retries/);
+	});
+
+	test("idle recap does not call historical eval failures live-active", () => {
+		const idle: DashboardStats = {
+			...sample,
+			agents: [],
+			goals: [],
+			health: { ...sample.health, activeQuests: 0, pausedQuests: 0 },
+			cycles: [
+				{
+					name: "worker",
+					status: "completed",
+					active: 0,
+					completed: 35,
+					startedToday: 0,
+					completedToday: 0,
+					steps: 36,
+					done: 35,
+				},
+			],
+			trends: [
+				{
+					date: "2026-08-06",
+					totalSteps: 9,
+					active: 0,
+					completed: 9,
+					completedToday: 0,
+					averageTurnDurationMs: 105545,
+					escalations: 0,
+				},
+			],
+		};
+		const markdown = buildRecapMarkdown(idle);
+		assert.match(markdown, /generated: 2023-11-14 22:13 UTC/);
+		assert.match(markdown, /\*\*worker\*\*: 35\/36 verified \(1 failed\)/);
+		assert.match(markdown, /No active quest\./);
+		assert.doesNotMatch(markdown, /No agent steps recorded/);
+		assert.doesNotMatch(markdown, /1 active/);
+		assert.match(markdown, /\| 2026-08-06 \| 9 \| 9 \| 0 \| 1\.8min \| 0 \|/);
+		assert.match(markdown, /Defaults: 1 concurrent, burst 6/);
 	});
 
 	test("buildRecapJson exposes health as an object and includes goals", () => {

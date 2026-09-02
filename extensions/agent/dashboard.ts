@@ -140,7 +140,8 @@ function buildCycles(index: EvalStatsIndex, quest: Quest | null, now: number): D
 		const steps = quest?.steps.filter((s) => (s.agent.trim() || "worker") === role) ?? [];
 		const liveActive = steps.filter((s) => isLiveStep(s) || s.status === "pending").length;
 		const liveDone = steps.filter((s) => s.status === "done").length;
-		let status: DashboardCycle["status"] = "active";
+		const historical = steps.length === 0;
+		let status: DashboardCycle["status"] = historical ? "completed" : "active";
 		if (quest?.status === "paused") status = "paused";
 		else if (quest?.status === "idle") status = "abandoned";
 		else if (
@@ -152,12 +153,12 @@ function buildCycles(index: EvalStatsIndex, quest: Quest | null, now: number): D
 		cycles.push({
 			name: role,
 			status,
-			active: liveActive || Math.max(0, samples - verifiedPasses),
-			completed: liveDone || verifiedPasses,
+			active: historical ? 0 : liveActive,
+			completed: historical ? verifiedPasses : liveDone,
 			startedToday: steps.filter((s) => s.startedAt != null && s.startedAt >= today).length,
 			completedToday: steps.filter((s) => s.completedAt != null && s.completedAt >= today).length,
-			steps: steps.length || samples,
-			done: liveDone || verifiedPasses,
+			steps: historical ? samples : steps.length,
+			done: historical ? verifiedPasses : liveDone,
 		});
 	}
 	return cycles;
@@ -180,7 +181,7 @@ function buildTrends(series: EvalTimeSeries, now: number): DashboardTrend[] {
 }
 
 function retryPolicyLabel(): string {
-	return `retries=${DEFAULT_RETRY_POLICY.maxRetries} burst=${DEFAULT_RETRY_POLICY.maxBurst} verify=${DEFAULT_RETRY_POLICY.maxVerifyRetries}`;
+	return `${DEFAULT_RETRY_POLICY.maxRetries} retries, burst ${DEFAULT_RETRY_POLICY.maxBurst}, ${DEFAULT_RETRY_POLICY.maxVerifyRetries} verify retries`;
 }
 
 function buildHealth(quest: Quest | null): DashboardHealth {
