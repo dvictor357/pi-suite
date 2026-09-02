@@ -332,7 +332,6 @@ export function createQuestRuntime(
 					if (!Array.isArray(graph.nodes)) graph.nodes = [];
 
 					const id = `eval-${entry.questSlug}-${entry.taskIndex}-${entry.timestamp}`;
-					/* ponytail: a few stacked ternary ops is shorter than separate if/else blocks */
 					const glyph = entry.status === "done" ? "✅" : entry.status === "failed" ? "❌" : "⏭️";
 					const label = `${glyph} ${entry.agent}/${entry.model ?? "?"} — ${entry.taskContent}`;
 					const parts: string[] = [`status=${entry.status}`];

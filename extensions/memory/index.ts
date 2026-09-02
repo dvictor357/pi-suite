@@ -940,7 +940,7 @@ export default function (pi: ExtensionAPI) {
 							details: {},
 						};
 					}
-					// ponytail: duplicate-edge check is O(n) over edges; fine for a memory graph
+					// ponytail: O(n) duplicate-edge scan; index by edge key above 1,000 edges or if profiling shows latency
 					const dup = graph.edges.findIndex(
 						(e) => e.from === params.from && e.to === params.to && e.kind === params.edgeKind,
 					);

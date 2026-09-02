@@ -377,7 +377,7 @@ export function createWorktree(worktree: WorktreeConfig, cwd: string): string | 
 			timeout: 30_000,
 			stdio: "pipe",
 		});
-		// ponytail: sync git call is fine for one sub-agent spawn; switch to async only if it blocks UI.
+		// ponytail: synchronous git call; switch to async if spawn latency exceeds 100 ms or blocks UI
 		return target;
 	} catch {
 		return null;

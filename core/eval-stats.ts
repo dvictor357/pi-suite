@@ -198,7 +198,6 @@ export function statsFor(
  * model are excluded. Entries with no timestamp are skipped.
  */
 export function computeEvalTimeSeries(entries: unknown[]): EvalTimeSeries {
-	// ponytail: single-pass Map keyed by YYYY-MM-DD, sort at end
 	const days = new Map<
 		string,
 		{ samples: number; passes: number; totalDurationMs: number; escalations: number }
