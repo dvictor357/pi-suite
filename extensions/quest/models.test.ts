@@ -121,6 +121,75 @@ test("ModelSelectList filters by id, name, and provider, case-insensitively", ()
 	assert.equal(visible(list).length, 3, "whitespace-only filter is treated as empty");
 });
 
+type PromptComponent = {
+	render(width: number): string[];
+	invalidate(): void;
+	handleInput?(data: string): void;
+};
+
+type PromptFactory = (
+	tui: { requestRender(): void },
+	theme: {
+		fg(color: string, text: string): string;
+		bold(text: string): string;
+	},
+	keybindings: unknown,
+	done: (result: ModelAssignment) => void,
+) => PromptComponent;
+
+test("TUI filtering selects the intended model for each sub-agent role", async (t) => {
+	const cases = [
+		{ role: "scout", proposed: "deepseek-v4-flash", filter: "deepseek", expected: MODELS[0] },
+		{ role: "worker", proposed: "claude-opus-4-5", filter: "anthropic", expected: MODELS[1] },
+		{ role: "verifier", proposed: "gpt-5", filter: "openai", expected: MODELS[2] },
+	];
+
+	for (const testCase of cases) {
+		await t.test(testCase.role, async () => {
+			let rendersRequested = 0;
+			let filteredScreen = "";
+			const ctx = {
+				hasUI: true,
+				modelRegistry: { getAvailable: () => MODELS.slice(0, 3) },
+				ui: {
+					notify: () => {},
+					custom: async (factory: PromptFactory) =>
+						new Promise<ModelAssignment>((resolve, reject) => {
+							try {
+								const component = factory(
+									{ requestRender: () => rendersRequested++ },
+									{ fg: (_color, text) => text, bold: (text) => text },
+									{},
+									resolve,
+								);
+								for (const char of testCase.filter) component.handleInput?.(char);
+								filteredScreen = component.render(120).join("\n");
+								component.handleInput?.("\r");
+							} catch (error) {
+								reject(error);
+							}
+						}),
+				},
+			} as unknown as ExtensionContext;
+
+			const result = await promptModelAssignment(ctx, {
+				role: testCase.role,
+				proposed: testCase.proposed,
+			});
+
+			assert.equal(rendersRequested, testCase.filter.length);
+			assert.match(filteredScreen, new RegExp(testCase.expected.id));
+			for (const model of MODELS.slice(0, 3)) {
+				if (model !== testCase.expected) assert.doesNotMatch(filteredScreen, new RegExp(model.id));
+			}
+			assert.deepEqual(result, {
+				outcome: "assigned",
+				model: testCase.expected,
+			} satisfies ModelAssignment);
+		});
+	}
+});
+
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 	let resolve!: (value: T) => void;
 	const promise = new Promise<T>((r) => {

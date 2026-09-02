@@ -255,6 +255,7 @@ export async function promptModelAssignment(
 				filter = next;
 				selectList.setFilter(filter);
 				filterText.setText(filter ? theme.fg("muted", `filter: ${filter}`) : "");
+				tui.requestRender();
 			};
 
 			return {
