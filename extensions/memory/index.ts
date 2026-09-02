@@ -52,6 +52,7 @@ import type {
 	EdgeKind,
 	MemoryGraph,
 } from "../../core";
+import { upsertGraphEdge } from "./graph";
 import { withForeignFromDisk } from "./profile";
 import { buildUserPromptBits } from "./user-bits";
 
@@ -940,22 +941,16 @@ export default function (pi: ExtensionAPI) {
 							details: {},
 						};
 					}
-					// ponytail: O(n) duplicate-edge scan; index by edge key above 1,000 edges or if profiling shows latency
-					const dup = graph.edges.findIndex(
-						(e) => e.from === params.from && e.to === params.to && e.kind === params.edgeKind,
-					);
-					if (dup >= 0) {
-						graph.edges[dup].label = params.label;
-						msg = `Updated edge \`${params.from}\` → \`${params.to}\`.`;
-					} else {
-						graph.edges.push({
-							from: params.from,
-							to: params.to,
-							kind: params.edgeKind as EdgeKind,
-							label: params.label,
-						});
-						msg = `Linked \`${params.from}\` →[${params.edgeKind}]→ \`${params.to}\`.`;
-					}
+					const result = upsertGraphEdge(graph.edges, {
+						from: params.from,
+						to: params.to,
+						kind: params.edgeKind as EdgeKind,
+						label: params.label,
+					});
+					msg =
+						result === "updated"
+							? `Updated edge \`${params.from}\` → \`${params.to}\`.`
+							: `Linked \`${params.from}\` →[${params.edgeKind}]→ \`${params.to}\`.`;
 					break;
 				}
 				case "remove": {

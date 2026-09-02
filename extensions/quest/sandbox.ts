@@ -5,10 +5,13 @@
  * sub-agent spawn time. All functions are pure and SDK-free so they can be
  * unit-tested (like delegate.ts).
  */
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { isReadOnlyRole } from "./roles";
 import type { SandboxMode, SandboxPolicy, SandboxOverrides, WorktreeConfig } from "./types";
+
+const execFileAsync = promisify(execFile);
 
 export type { SandboxCallRecord, SandboxArtifacts } from "./types";
 
@@ -369,15 +372,16 @@ export function isDestructiveCommand(cmd: string): boolean {
  * Returns the absolute worktree path on success, null if creation failed
  * (missing git, dirty repo, or any error). Best-effort — never throws.
  */
-export function createWorktree(worktree: WorktreeConfig, cwd: string): string | null {
+export async function createWorktree(
+	worktree: WorktreeConfig,
+	cwd: string,
+): Promise<string | null> {
 	try {
 		const target = join(cwd, worktree.path);
-		execFileSync("git", ["worktree", "add", "--detach", target, worktree.baseBranch], {
+		await execFileAsync("git", ["worktree", "add", "--detach", target, worktree.baseBranch], {
 			cwd,
 			timeout: 30_000,
-			stdio: "pipe",
 		});
-		// ponytail: synchronous git call; switch to async if spawn latency exceeds 100 ms or blocks UI
 		return target;
 	} catch {
 		return null;

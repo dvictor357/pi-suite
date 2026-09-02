@@ -1,5 +1,9 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	resolveSandboxProfile,
 	isSandboxActive,
@@ -10,6 +14,7 @@ import {
 	isPackageInstallCommand,
 	isDestructiveCommand,
 	DEFAULT_SANDBOX_POLICY,
+	createWorktree,
 	type SandboxProfile,
 } from "./sandbox";
 import type { SandboxPolicy, SandboxOverrides, WorktreeConfig } from "./types";
@@ -20,6 +25,32 @@ const WORKTREE: WorktreeConfig = {
 	path: ".pi/worktrees/test-quest",
 	autoCleanup: true,
 };
+
+test("createWorktree is asynchronous and fails closed", async () => {
+	const missingCwd = join(tmpdir(), `pi-suite-missing-${process.pid}-${Date.now()}`);
+	const pending = createWorktree(WORKTREE, missingCwd);
+	assert.ok(pending instanceof Promise);
+	assert.equal(await pending, null);
+});
+
+test("createWorktree creates a detached Git worktree", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "pi-suite-sandbox-"));
+	try {
+		execFileSync("git", ["init"], { cwd });
+		execFileSync("git", ["config", "user.email", "test@example.com"], { cwd });
+		execFileSync("git", ["config", "user.name", "Test"], { cwd });
+		writeFileSync(join(cwd, "README.md"), "test\n");
+		execFileSync("git", ["add", "README.md"], { cwd });
+		execFileSync("git", ["commit", "-m", "initial"], { cwd });
+
+		const worktree = { ...WORKTREE, baseBranch: "HEAD", path: "isolated" };
+		const target = await createWorktree(worktree, cwd);
+		assert.equal(target, join(cwd, "isolated"));
+		assert.ok(existsSync(join(target!, "README.md")));
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
 
 describe("sandboxToolPlan", () => {
 	const restricted = (allowCommands: string[] = []) =>

@@ -161,7 +161,7 @@ export async function runSubAgent(
 		// Isolated mode: create a real git worktree and run the sub-agent inside it.
 		let sessionCwd = ctx.cwd;
 		if (sandboxed && req.sandboxProfile!.worktree) {
-			worktreePath = createWorktree(req.sandboxProfile!.worktree, ctx.cwd);
+			worktreePath = await createWorktree(req.sandboxProfile!.worktree, ctx.cwd);
 			if (!worktreePath) {
 				return {
 					ok: false,
