@@ -134,3 +134,13 @@ policy in the child process.
 Migrate **pi-memory** and **pi-todo** first (they are leaf producers of the shared
 state), then **pi-quest** (the consumer that reads both). That way quest is rewired
 against a contract its dependencies already satisfy.
+
+## Agent dashboard (I10) — no contract change
+
+`extensions/agent/` is a new in-suite reader. It does **not** add an `ExtensionKey`, a
+new on-disk shape, or a `CONTRACT_VERSION` bump. It reads `readSessionMeta`,
+`readAllEvalEntries` / `computeEvalStats` / `computeEvalTimeSeries`, `DEFAULT_RETRY_POLICY`,
+and the active quest via `loadQuest`. Status-bar text uses `ctx.ui.setStatus("agent", …)`
+only. `pi.extensions: ["./extensions"]` auto-discovers `index.ts`, so existing
+`git:github.com/dvictor357/pi-suite` installs pick it up on `pi update` after this lands
+on the tracked ref.

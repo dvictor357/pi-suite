@@ -2,7 +2,7 @@
   "name": "pi-suite",
   "version": "0.1.0",
   "private": true,
-  "description": "Loop-engineering toolkit for pi — pi-quest (autonomous project manager), pi-todo (task ledger), and pi-memory (project/user memory), sharing one cross-extension contract.",
+  "description": "Loop-engineering toolkit for pi — pi-quest (autonomous project manager), pi-todo (task ledger), pi-memory (project/user memory), and pi-agent (performance dashboard), sharing one cross-extension contract.",
   "keywords": [
     "pi-package"
   ],

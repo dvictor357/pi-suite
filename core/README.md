@@ -1,10 +1,10 @@
 # core — the cross-extension contract
 
-`core/` is the single module that pi-quest, pi-todo, and pi-memory all depend on. It
-exists because the three extensions share state on disk under `~/.pi/agent`, and before
-this module each one re-declared the shapes and re-built the paths by hand — so a change
-in one drifted silently from the others (every read is best-effort, so mismatches
-corrupt quietly rather than erroring).
+`core/` is the single module that pi-quest, pi-todo, pi-memory, and pi-agent all depend
+on. It exists because the suite extensions share state on disk under `~/.pi/agent`, and
+before this module each writer re-declared the shapes and re-built the paths by hand —
+so a change in one drifted silently from the others (every read is best-effort, so
+mismatches corrupt quietly rather than erroring).
 
 Everything here is **pure Node** (no `pi` host imports), so it typechecks strictly and
 could be unit-tested in isolation.

@@ -8,7 +8,8 @@ extension is just landing its folder here.
 extensions/
 ├── quest/    → index.ts   (pi-quest)
 ├── todo/     → index.ts   (pi-todo)
-└── memory/   → index.ts   (pi-memory)
+├── memory/   → index.ts   (pi-memory)
+└── agent/    → index.ts   (pi-agent)
 ```
 
 ## Conventions
