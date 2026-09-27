@@ -15,5 +15,5 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["core/**/*.ts", "extensions/**/*.ts"]
+  "include": ["core/**/*.ts", "extensions/**/*.ts", "test/**/*.ts"]
 }
