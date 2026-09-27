@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import {
 	computeEvalStats,
 	computeEvalTimeSeries,
+	computeThinkingStats,
 	coerceEvalStat,
 	formatEvalStatsReport,
 	readAllEvalEntries,
@@ -88,6 +89,42 @@ describe("eval-stats", () => {
 				entry({ tokensIn: 10, tokensOut: 5, cost: 0.0042, turns: 1 }),
 			]);
 			assert.match(formatEvalStatsReport(index, { buckets: [] }), /\$0\.0042 \(n=1\)/);
+		});
+	});
+
+	describe("computeThinkingStats", () => {
+		it("aggregates per (agent, thinking), skipping rows without a thinking level", () => {
+			const rows = computeThinkingStats([
+				entry({ thinking: "high", status: "done", verified: true, cost: 0.02, turns: 2 }),
+				entry({ thinking: "high", status: "failed", verified: false, cost: 0.02, turns: 2 }),
+				entry({ thinking: "low", status: "done", verified: true }),
+				entry({ status: "done", verified: true }), // legacy: no thinking
+				entry({ thinking: "low", status: "skipped", verified: false }),
+				entry({ agent: "scout", thinking: "minimal" }),
+			]);
+			assert.deepEqual(
+				rows.map((r) => [r.agent, r.thinking, r.samples, r.verifiedPasses]),
+				[
+					["scout", "minimal", 1, 1],
+					["worker", "low", 1, 1],
+					["worker", "high", 2, 1],
+				],
+			);
+			const high = rows[2];
+			assert.ok(Math.abs(high.usage!.costPerVerifiedPass! - 0.04) < 1e-12);
+			assert.equal(rows[1].usage, undefined, "untracked rows carry no spend");
+		});
+
+		it("renders a Role / Thinking section only when there is data", () => {
+			const index = computeEvalStats([entry({})]);
+			assert.doesNotMatch(formatEvalStatsReport(index, { buckets: [] }), /Role \/ Thinking/);
+			const text = formatEvalStatsReport(
+				index,
+				{ buckets: [] },
+				computeThinkingStats([entry({ thinking: "medium" })]),
+			);
+			assert.match(text, /## Role \/ Thinking \(1 pairs\)/);
+			assert.match(text, /\| worker \| medium \| 1 \| 100% \| — \|/);
 		});
 	});
 

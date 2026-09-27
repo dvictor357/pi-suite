@@ -46,6 +46,7 @@ export type { EvalLog, EvalEntry, FailureCode } from "./eval-logging";
 export {
 	readAllEvalEntries,
 	computeEvalStats,
+	computeThinkingStats,
 	statsFor,
 	computeEvalTimeSeries,
 	formatEvalStatsReport,
@@ -53,6 +54,7 @@ export {
 export type {
 	RoleModelStats,
 	RoleModelUsage,
+	RoleThinkingStats,
 	EvalStatsIndex,
 	EvalTimeBucket,
 	EvalTimeSeries,

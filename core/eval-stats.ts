@@ -20,6 +20,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { evalsDir } from "./eval-logging";
 import { asRecord, boolOr, numOr, optStr, strOr } from "./coerce";
+import { THINKING_LEVELS } from "./contract";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -91,6 +92,8 @@ interface EvalStatSample {
 	verified: boolean;
 	/** Present only when the row tracked sub-agent usage (has `turns`). */
 	usage?: { cost: number; tokens: number };
+	/** Thinking level the sub-agent ran with, when recorded. */
+	thinking?: string;
 }
 
 /** The fields of an eval row that time-series aggregation needs. */
@@ -148,6 +151,7 @@ export function coerceEvalStat(value: unknown): EvalStatSample | null {
 	const status = strOr(rec.status, "");
 	if (!agent || !model || !status) return null;
 	const tracked = typeof rec.turns === "number";
+	const thinking = optStr(rec.thinking)?.trim();
 	return {
 		agent,
 		model,
@@ -161,6 +165,7 @@ export function coerceEvalStat(value: unknown): EvalStatSample | null {
 					},
 				}
 			: {}),
+		...(thinking ? { thinking } : {}),
 	};
 }
 
@@ -193,14 +198,50 @@ function statsKey(agent: string, model: string): string {
 	return `${agent}\u0000${model}`;
 }
 
+/** Outcome counters shared by every stats breakdown. */
+type OutcomeCounts = Pick<RoleModelStats, "samples" | "verifiedPasses" | "passRate" | "usage">;
+
+/** Fold one terminal outcome into a breakdown row. */
+function countOutcome(stats: OutcomeCounts, sample: EvalStatSample): void {
+	const passed = sample.status === "done" && sample.verified;
+	stats.samples++;
+	if (passed) stats.verifiedPasses++;
+	stats.passRate = stats.verifiedPasses / stats.samples;
+	if (sample.usage) {
+		const u = (stats.usage ??= { samples: 0, verifiedPasses: 0, cost: 0, tokens: 0 });
+		u.samples++;
+		if (passed) u.verifiedPasses++;
+		u.cost += sample.usage.cost;
+		u.tokens += sample.usage.tokens;
+	}
+}
+
+/** Derive per-pass spend once all outcomes are counted. */
+function finishUsage(stats: OutcomeCounts): void {
+	const u = stats.usage;
+	if (u && u.verifiedPasses > 0) {
+		u.costPerVerifiedPass = u.cost / u.verifiedPasses;
+		u.tokensPerVerifiedPass = u.tokens / u.verifiedPasses;
+	}
+}
+
+/**
+ * Terminal samples only: skipped steps say nothing about whether the model
+ * could have done the work, so they don't count toward any denominator.
+ */
+function terminalSamples(entries: unknown[]): EvalStatSample[] {
+	const out: EvalStatSample[] = [];
+	for (const entry of entries) {
+		const sample = coerceEvalStat(entry);
+		if (sample && (sample.status === "done" || sample.status === "failed")) out.push(sample);
+	}
+	return out;
+}
+
 /** Aggregate raw eval entries into per-(agent, model) verified-pass rates. */
 export function computeEvalStats(entries: unknown[]): EvalStatsIndex {
 	const index: EvalStatsIndex = new Map();
-	for (const entry of entries) {
-		const sample = coerceEvalStat(entry);
-		// Skipped steps say nothing about whether the model could have done the
-		// work, so they don't count toward the denominator.
-		if (!sample || (sample.status !== "done" && sample.status !== "failed")) continue;
+	for (const sample of terminalSamples(entries)) {
 		const key = statsKey(sample.agent, sample.model);
 		let stats = index.get(key);
 		if (!stats) {
@@ -213,26 +254,53 @@ export function computeEvalStats(entries: unknown[]): EvalStatsIndex {
 			};
 			index.set(key, stats);
 		}
-		const passed = sample.status === "done" && sample.verified;
-		stats.samples++;
-		if (passed) stats.verifiedPasses++;
-		stats.passRate = stats.verifiedPasses / stats.samples;
-		if (sample.usage) {
-			const u = (stats.usage ??= { samples: 0, verifiedPasses: 0, cost: 0, tokens: 0 });
-			u.samples++;
-			if (passed) u.verifiedPasses++;
-			u.cost += sample.usage.cost;
-			u.tokens += sample.usage.tokens;
-		}
+		countOutcome(stats, sample);
 	}
-	for (const stats of index.values()) {
-		const u = stats.usage;
-		if (u && u.verifiedPasses > 0) {
-			u.costPerVerifiedPass = u.cost / u.verifiedPasses;
-			u.tokensPerVerifiedPass = u.tokens / u.verifiedPasses;
-		}
-	}
+	for (const stats of index.values()) finishUsage(stats);
 	return index;
+}
+
+/** Outcome history for one (agent role, thinking level) pair. */
+export interface RoleThinkingStats extends OutcomeCounts {
+	agent: string;
+	thinking: string;
+}
+
+/**
+ * Aggregate per-(agent, thinking level) pass rates and spend — the view that
+ * shows whether routing's thinking bumps buy passes. Only rows that recorded a
+ * thinking level count; sorted by agent, then thinking level (off → xhigh).
+ */
+export function computeThinkingStats(entries: unknown[]): RoleThinkingStats[] {
+	const index = new Map<string, RoleThinkingStats>();
+	for (const sample of terminalSamples(entries)) {
+		if (!sample.thinking) continue;
+		const key = statsKey(sample.agent, sample.thinking);
+		let stats = index.get(key);
+		if (!stats) {
+			stats = {
+				agent: sample.agent,
+				thinking: sample.thinking,
+				samples: 0,
+				verifiedPasses: 0,
+				passRate: 0,
+			};
+			index.set(key, stats);
+		}
+		countOutcome(stats, sample);
+	}
+	const rank = (t: string) => {
+		const i = (THINKING_LEVELS as readonly string[]).indexOf(t);
+		return i === -1 ? THINKING_LEVELS.length : i;
+	};
+	const rows = [...index.values()];
+	for (const stats of rows) finishUsage(stats);
+	return rows.sort(
+		(a, b) =>
+			a.agent.localeCompare(b.agent) ||
+			rank(a.thinking) - rank(b.thinking) ||
+			a.thinking.localeCompare(b.thinking),
+	);
 }
 
 /** Look up the history for one (agent role, model) pair, if any. */
@@ -335,12 +403,16 @@ export function sortRoleModelStats(index: EvalStatsIndex): RoleModelStats[] {
  *
  * Pure: no I/O. Unit-testable without quest tool registration.
  */
-export function formatEvalStatsReport(index: EvalStatsIndex, series: EvalTimeSeries): string {
+export function formatEvalStatsReport(
+	index: EvalStatsIndex,
+	series: EvalTimeSeries,
+	thinking: readonly RoleThinkingStats[] = [],
+): string {
 	const roleRows = sortRoleModelStats(index);
 	const hasRoles = roleRows.length > 0;
 	const hasSeries = series.buckets.length > 0;
 
-	if (!hasRoles && !hasSeries) {
+	if (!hasRoles && !hasSeries && thinking.length === 0) {
 		return "No eval data recorded yet. Eval entries are written as quest tasks complete.";
 	}
 
@@ -356,6 +428,21 @@ export function formatEvalStatsReport(index: EvalStatsIndex, series: EvalTimeSer
 		for (const r of roleRows) {
 			lines.push(
 				`| ${r.agent} | ${r.model} | ${r.samples} | ${formatPassPct(r.passRate)} | ${formatCostPerPass(r.usage)} |`,
+			);
+		}
+		sections.push(lines.join("\n"));
+	}
+
+	if (thinking.length > 0) {
+		const lines: string[] = [
+			`## Role / Thinking (${thinking.length} pairs)`,
+			"",
+			`| Agent | Thinking | Samples | Verified Pass % | Cost / Verified Pass |`,
+			`|-------|----------|---------|-----------------|----------------------|`,
+		];
+		for (const r of thinking) {
+			lines.push(
+				`| ${r.agent} | ${r.thinking} | ${r.samples} | ${formatPassPct(r.passRate)} | ${formatCostPerPass(r.usage)} |`,
 			);
 		}
 		sections.push(lines.join("\n"));

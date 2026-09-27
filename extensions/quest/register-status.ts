@@ -10,6 +10,7 @@ import type { QuestRuntime } from "./runtime";
 import {
 	CONTRACT_VERSION,
 	computeEvalStats,
+	computeThinkingStats,
 	computeEvalTimeSeries,
 	formatEvalStatsReport,
 	isFutureContract,
@@ -428,21 +429,24 @@ export function registerStatusTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 		name: "quest_eval_stats",
 		label: "Quest Eval Stats",
 		description: [
-			"Show eval stats for this project: per-(agent, model) verified pass rates",
-			"and a daily time series of pass rates, average durations, and model-ladder",
-			"escalations, aggregated from all past quest eval logs.",
+			"Show eval stats for this project: per-(agent, model) and per-(agent, thinking)",
+			"verified pass rates with cost per verified pass, plus a daily time series of",
+			"pass rates, average durations, and model-ladder escalations, aggregated from",
+			"all past quest eval logs.",
 		].join(" "),
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
 			const entries = readAllEvalEntries(ctx.cwd);
 			const roleStats = computeEvalStats(entries);
 			const series = computeEvalTimeSeries(entries);
-			const text = formatEvalStatsReport(roleStats, series);
+			const thinkingStats = computeThinkingStats(entries);
+			const text = formatEvalStatsReport(roleStats, series, thinkingStats);
 
 			return {
 				content: [{ type: "text", text }],
 				details: {
 					roleStats: [...roleStats.values()],
+					thinkingStats,
 					series,
 				},
 			};
