@@ -161,6 +161,7 @@ function buildFailBookkeeping(
 	evidence: string | undefined,
 	inferred: boolean,
 	now: number,
+	failureCode?: FailureCode,
 ): VerifyFailBookkeeping {
 	const verifyRetries = step.verifyRetries + 1;
 	const failureBrief = buildFailureBrief({
@@ -170,6 +171,7 @@ function buildFailBookkeeping(
 		evidence: evidence ?? "",
 		attempted: step.result,
 		inferred,
+		failureCode,
 	});
 	// Stabilize timestamp for pure callers that pass `now`.
 	failureBrief.timestamp = now;
@@ -340,7 +342,13 @@ export function planVerifyFail(input: PlanVerifyFailInput): PlanVerifyFailResult
 	const policy = input.policy ?? DEFAULT_RETRY_POLICY;
 	const now = input.now ?? Date.now();
 	const step = input.step;
-	const bookkeeping = buildFailBookkeeping(step, input.evidence, input.inferred, now);
+	const bookkeeping = buildFailBookkeeping(
+		step,
+		input.evidence,
+		input.inferred,
+		now,
+		input.failureCode,
+	);
 	const ladderRungs = input.ladderRungs ?? [];
 	const ladderLength = input.ladderLength;
 	const decision = decideVerifyFailAction({

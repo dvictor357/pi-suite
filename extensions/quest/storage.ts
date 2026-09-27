@@ -31,6 +31,8 @@ import type {
 import { coerceStepHandoff } from "./context-broker";
 import { coerceFailureBrief } from "./ladder";
 import { coerceStepUsage } from "./usage";
+import { ROUTING } from "./constants";
+import { asThinkingLevel, routeStep, type RoutableStep, type RuntimeDecision } from "./routing";
 import {
 	loadProjectMemory,
 	questActivePath,
@@ -622,4 +624,20 @@ export function listArchives(
 		console.error("[pi-quest] listArchives:", e);
 		return [];
 	}
+}
+
+/**
+ * {@link routeStep} with its inputs loaded from project state: approved ladder,
+ * remembered role model, and the role's approved thinking level. Shared by
+ * steering, the `subagent` tool_call enforcement hook, and `quest_delegate`, so
+ * all three run a step with the same model and thinking.
+ */
+export function routeStepFromDisk(cwd: string, step: RoutableStep): RuntimeDecision {
+	const remembered = loadAgentModels(cwd)[step.agent];
+	return routeStep(step, {
+		ladder: step.rung !== undefined ? loadModelLadder(cwd) : null,
+		rememberedModel: remembered?.model,
+		baselineThinking: asThinkingLevel(remembered?.thinkingLevel),
+		cfg: ROUTING,
+	});
 }

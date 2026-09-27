@@ -23,8 +23,7 @@ import {
 } from "./write-claim";
 import type { DispatchGuard } from "./phase-loop";
 import { DEFAULT_STEP_TIMEOUT_MS, checkTimeout, resolvePhase } from "./phase-loop";
-import { loadAgentModels, loadModelLadder } from "./storage";
-import { rungModel } from "./ladder";
+import { routeStepFromDisk } from "./storage";
 import { isSandboxActive, resolveSandboxProfile } from "./sandbox";
 
 // ── Config ──────────────────────────────────────────────────────────────────
@@ -370,23 +369,16 @@ export function buildBatchSteering(
 	cwd: string,
 	buildPrompt?: (step: QuestStep, index: number, model?: string) => string,
 ): string {
-	const remembered = loadAgentModels(cwd);
-	const ladder = loadModelLadder(cwd);
 	const tasks = indices.map((index) => {
 		const step = quest.steps[index];
 		const worktree =
 			step.sandboxArtifacts?.worktreePath ?? stepWorktreePath(cwd, quest.name, index);
-		const model =
-			step.model?.trim() ||
-			(step.rung !== undefined && ladder ? rungModel(ladder, step.rung) : undefined) ||
-			remembered[step.agent]?.model;
+		const { model, thinking } = routeStepFromDisk(cwd, step);
 		return {
 			agent: step.agent,
 			cwd: worktree,
 			...(model ? { model } : {}),
-			...(remembered[step.agent]?.thinkingLevel
-				? { thinking: remembered[step.agent].thinkingLevel }
-				: {}),
+			...(thinking ? { thinking } : {}),
 			...(step.readClaim?.length ? { readClaim: step.readClaim } : {}),
 			...(step.writeClaim?.length ? { writeClaim: step.writeClaim } : {}),
 			task:

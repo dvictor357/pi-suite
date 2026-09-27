@@ -10,6 +10,7 @@ import {
 	loadModelLadder,
 	rememberAgentModel,
 	rememberModelLadder,
+	routeStepFromDisk,
 } from "./storage";
 import {
 	buildStepContext,
@@ -343,7 +344,6 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 
 			const rememberedChoice = loadAgentModels(ctx.cwd)[role];
 			const remembered = rememberedChoice?.model;
-			const thinkingLevel = rememberedChoice?.thinkingLevel;
 
 			// Approved ladder: initialize the step's rung from project history on
 			// first delegation, then resolve the rung's model. Every rung was
@@ -376,6 +376,8 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				...prepared,
 				lastModel: undefined,
 			});
+			// Same routed thinking as the minion path (steering + tool_call hook).
+			const thinkingLevel = routeStepFromDisk(ctx.cwd, task).thinking;
 
 			let modelId = prepared.model;
 

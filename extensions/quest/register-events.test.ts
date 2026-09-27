@@ -12,7 +12,8 @@ import { join } from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createQuestRuntime } from "./runtime";
-import { emptyQuest, loadQuest, saveQuest } from "./storage";
+import { emptyQuest, loadQuest, rememberAgentModel, saveQuest } from "./storage";
+import { buildFailureBrief } from "./ladder";
 import { handleAgentEnd, recoverAgentEndCrash, registerEvents } from "./register-events";
 import type { QuestStep } from "./types";
 
@@ -304,6 +305,74 @@ describe("sub-agent usage telemetry", () => {
 			const again = rt.makeEval(quest, quest.steps[0], 0, "done", true, "ok");
 			assert.equal(again.tokensIn, 0);
 			assert.equal(again.turns, undefined, "no double counting");
+		} finally {
+			h.cleanup();
+		}
+	});
+});
+
+describe("subagent runtime routing enforcement", () => {
+	test("tool_call rewrites a deviating subagent call to the routed model + thinking", async () => {
+		const h = harness();
+		try {
+			const quest = emptyQuest("Routing Demo", "demo goal");
+			quest.status = "active";
+			quest.planApproved = true;
+			quest.lastFiredStepIndex = 0;
+			quest.steps = [
+				makeStep({
+					status: "running",
+					phase: "running",
+					attempts: 1,
+					// One verified quality failure on this (unladdered) step.
+					failureBriefs: [
+						buildFailureBrief({
+							attempt: 1,
+							evidence: "wrong behaviour",
+							attempted: null,
+							inferred: false,
+							failureCode: "MODEL_QUALITY",
+						}),
+					],
+				}),
+			];
+			saveQuest(quest, h.cwd);
+			rememberAgentModel(h.cwd, "worker", {
+				model: "approved-model",
+				thinkingLevel: "low",
+				timestamp: 1,
+			});
+
+			type Handler = (event: unknown, ctx: ExtensionContext) => unknown;
+			const handlers = new Map<string, Handler>();
+			const pi = {
+				...h.pi,
+				on: (name: string, handler: Handler) => handlers.set(name, handler),
+			} as unknown as ExtensionAPI;
+			const rt = createQuestRuntime(pi);
+			rt.setQuest(quest);
+			registerEvents(pi, rt);
+
+			const input: Record<string, unknown> = {
+				agent: "worker",
+				task: "go",
+				model: "something-else",
+				thinking: "minimal",
+			};
+			const res = await handlers.get("tool_call")!(
+				{ toolCallId: "c1", toolName: "subagent", input },
+				h.ctx,
+			);
+
+			assert.equal((res as { block?: boolean } | undefined)?.block, undefined);
+			assert.equal(input.model, "approved-model");
+			// Baseline "low" + one quality failure → "medium".
+			assert.equal(input.thinking, "medium");
+			assert.ok(
+				h.notifies.some((n) =>
+					/Quest routing: step #1 model something-else → approved-model/.test(n.msg),
+				),
+			);
 		} finally {
 			h.cleanup();
 		}

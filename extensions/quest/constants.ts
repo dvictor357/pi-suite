@@ -10,6 +10,7 @@ import {
 } from "../../core";
 import type { StepStatus, TeamConfig } from "./types";
 import { DEFAULT_LADDER_ROLES, type LadderConfig } from "./ladder";
+import type { RoutingConfig } from "./routing";
 
 export { MAX_BURST, MAX_RETRIES, MAX_VERIFY_RETRIES, MAX_DEPENDENCY_DEPTH };
 
@@ -30,6 +31,21 @@ export const LADDER: LadderConfig = {
 	// at the injection site via budgetForModel.
 	briefBudget: 700,
 	maxBriefs: 3,
+};
+
+// ── Runtime routing ──────────────────────────────────────────────────────────
+/**
+ * Tunable knobs for per-step thinking routing (see routing.ts). A verified
+ * quality failure buys the same-rung retry one more thinking level before the
+ * ladder escalates to a bigger model; mechanical failures don't.
+ */
+export const ROUTING: RoutingConfig = {
+	roles: [...DEFAULT_LADDER_ROLES],
+	defaultThinking: "medium",
+	maxThinking: "high",
+	bumpOn: ["MODEL_QUALITY", "CONTEXT_MISSING", "BAD_PLAN", "TEST_FAILURE"],
+	bumpOnUncoded: true,
+	downshift: { enabled: false, maxStepChars: 300, thinking: "low" },
 };
 
 /**

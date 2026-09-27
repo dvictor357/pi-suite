@@ -1,6 +1,6 @@
 import type { Quest, QuestStep } from "./types";
 import { MAX_BURST, MAX_RETRIES, ICON, LADDER } from "./constants";
-import { loadAgentModels, loadModelLadder } from "./storage";
+import { loadModelLadder, routeStepFromDisk } from "./storage";
 import { briefBudgetForModel, renderFailureBriefs, rungModel } from "./ladder";
 import { resolveSandboxProfile } from "./sandbox";
 import { buildStepContext, collectDependencyHandoffs } from "./context-broker";
@@ -236,12 +236,13 @@ export function buildSteeringMessage(
 	// the current approved ladder rung, else the project's remembered role choice.
 	// Unsandboxed work goes through pi-minions; active Quest sandboxes retain the
 	// guarded compatibility path because that enforcement is local to pi-suite.
-	const rememberedChoice = loadAgentModels(cwd)[task.agent];
-	const remembered = rememberedChoice?.model;
-	const thinkingLevel = rememberedChoice?.thinkingLevel;
+	// Thinking comes from the routing policy (routing.ts); the tool_call hook
+	// enforces the same decision if the orchestrator deviates from this call.
 	const ladder = task.rung !== undefined ? loadModelLadder(cwd) : null;
 	const ladderModel = ladder && !task.model?.trim() ? rungModel(ladder, task.rung ?? 0) : undefined;
-	const assignedModel = task.model?.trim() || ladderModel?.trim() || remembered?.trim();
+	const decision = routeStepFromDisk(cwd, task);
+	const assignedModel = decision.model;
+	const thinkingLevel = decision.thinking;
 
 	// Build the complete sub-agent prompt via the shared context broker so the
 	// pi-minions child agent receives actual step content, dependency handoffs,
@@ -278,13 +279,16 @@ export function buildSteeringMessage(
 	]
 		.filter(Boolean)
 		.join(", ");
+	const thinkingNote = thinkingLevel
+		? ` · thinking \`${thinkingLevel}\`${decision.reasons.length > 0 ? ` (${decision.reasons.join("; ")})` : ""}`
+		: "";
 	const modelLine = assignedModel
 		? sandboxActive
-			? `**Model:** \`${assignedModel}\`${thinkingLevel ? ` · thinking \`${thinkingLevel}\`` : ""}.\n**Guarded call:** \`quest_delegate(index=${index})\``
+			? `**Model:** \`${assignedModel}\`${thinkingNote}.\n**Guarded call:** \`quest_delegate(index=${index})\``
 			: [
 					ladderModel
-						? `**Model:** rung ${task.rung! + 1}/${ladder!.rungs.length} — \`${assignedModel}\` (ladder).`
-						: `**Model:** \`${assignedModel}\`${thinkingLevel ? ` · thinking \`${thinkingLevel}\`` : ""}.`,
+						? `**Model:** rung ${task.rung! + 1}/${ladder!.rungs.length} — \`${assignedModel}\` (ladder)${thinkingNote}.`
+						: `**Model:** \`${assignedModel}\`${thinkingNote}.`,
 					`**Minion call:** \`subagent(${minionArgs})\``,
 				].join("\n")
 		: sandboxActive

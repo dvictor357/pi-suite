@@ -24,7 +24,8 @@ import {
 	type ModelLadderConfig,
 	type RetryPolicy,
 } from "../../core";
-import { asRecord, boolOr, numOr, optNum, optStr, strOr } from "../../core";
+import { asRecord, boolOr, numOr, oneOf, optNum, optStr, strOr, FAILURE_CODES } from "../../core";
+import type { FailureCode } from "../../core";
 import { isReadOnlyRole } from "./roles";
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -318,6 +319,8 @@ export interface FailureBrief {
 	attempted: string;
 	/** True when the verdict was prose-inferred rather than explicitly flagged. */
 	inferred: boolean;
+	/** Typed failure reason, when known; drives same-rung thinking bumps (routing.ts). */
+	failureCode?: FailureCode;
 	timestamp: number;
 }
 
@@ -328,6 +331,7 @@ export function buildFailureBrief(opts: {
 	evidence: string;
 	attempted: string | null;
 	inferred: boolean;
+	failureCode?: FailureCode;
 }): FailureBrief {
 	return {
 		attempt: opts.attempt,
@@ -336,6 +340,7 @@ export function buildFailureBrief(opts: {
 		evidence: opts.evidence.trim() || "no details recorded",
 		attempted: (opts.attempted ?? "").trim(),
 		inferred: opts.inferred,
+		...(opts.failureCode ? { failureCode: opts.failureCode } : {}),
 		timestamp: Date.now(),
 	};
 }
@@ -389,6 +394,7 @@ export function coerceFailureBrief(value: unknown): FailureBrief | null {
 		evidence,
 		attempted: strOr(rec.attempted, ""),
 		inferred: boolOr(rec.inferred, false),
+		...(oneOf(rec.failureCode, FAILURE_CODES) ? { failureCode: rec.failureCode } : {}),
 		timestamp: numOr(rec.timestamp, 0),
 	};
 }

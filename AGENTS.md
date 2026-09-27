@@ -79,6 +79,7 @@ extensions/
     delegate.ts       Pure delegation logic: tool scope, model precedence, prompt building
     ladder.ts         Pure verified model-ladder decisions and failure-brief rendering
     usage.ts          Pure sub-agent token/cost telemetry: attribute subagent results to steps
+    routing.ts        Pure per-step runtime decision: model precedence + thinking bumps on quality fails
     subagent.ts       Live isolated sub-agent spawn (only SDK-value import; not test-loaded)
     kanban.ts         TUI kanban board
     status.ts         Status badge and session meta
@@ -193,6 +194,7 @@ When editing quest:
 - Quest-created todo items must keep `source: "quest"`, `sourceId`, and `sourceIndex`.
 - Syncing quest steps to todo must not delete user-created todo items.
 - Verification is expected to default on for new and legacy quests.
+- Per-step model/thinking comes from `routeStepFromDisk` (storage.ts → routing.ts). Steering, `buildBatchSteering`, `quest_delegate`, and the `subagent` `tool_call` hook (which rewrites deviating args in place) must all use it. Knobs live in `constants.ts` `ROUTING`; judge/exploration roles are never adjusted.
 - Sub-agent usage (tokens/cost/turns) is read from `subagent` tool results in `tool_execution_end`, accumulated on `step.usage`, and consumed once by `makeEval`. Don't add a second writer of eval usage.
 - Ladder-eligible execution roles default to `worker` and `quick-worker`; judge/exploration roles (`scout`, `verifier`, `reviewer`, `planner`) must never be laddered.
 

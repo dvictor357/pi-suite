@@ -269,6 +269,20 @@ describe("planVerifyPass", () => {
 // ── planVerifyFail (retry / escalate / auto-fail) ────────────────────────────
 
 describe("planVerifyFail", () => {
+	test("the failure brief records the failure code (drives thinking routing)", () => {
+		const plan = planVerifyFail({
+			step: step({ verifyRetries: 0 }),
+			stepIndex: 0,
+			evidence: "tests red",
+			inferred: false,
+			failureCode: "TEST_FAILURE",
+			ladderLength: 0,
+			now: NOW,
+			policy,
+		});
+		assert.equal(plan.bookkeeping.failureBrief.failureCode, "TEST_FAILURE");
+	});
+
 	test("retry when verify budget remains", () => {
 		const plan = planVerifyFail({
 			step: step({ verifyRetries: 0 }),

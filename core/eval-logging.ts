@@ -21,17 +21,20 @@ import { runsDir } from "./run-ledger";
  * the *_FAILURE codes; the others are available for the orchestrator/verifier
  * to attribute non-check failures.
  */
-export type FailureCode =
-	| "TEST_FAILURE"
-	| "TYPECHECK_FAILURE"
-	| "LINT_FAILURE"
-	| "FORMAT_FAILURE"
-	| "BAD_PLAN"
-	| "CONTEXT_MISSING"
-	| "TOOL_FAILURE"
-	| "POLICY_BLOCKED"
-	| "MODEL_QUALITY"
-	| "HUMAN_DECISION_REQUIRED";
+export const FAILURE_CODES = [
+	"TEST_FAILURE",
+	"TYPECHECK_FAILURE",
+	"LINT_FAILURE",
+	"FORMAT_FAILURE",
+	"BAD_PLAN",
+	"CONTEXT_MISSING",
+	"TOOL_FAILURE",
+	"POLICY_BLOCKED",
+	"MODEL_QUALITY",
+	"HUMAN_DECISION_REQUIRED",
+] as const;
+
+export type FailureCode = (typeof FAILURE_CODES)[number];
 
 export interface EvalEntry {
 	/** Quest name. */

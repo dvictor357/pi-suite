@@ -437,4 +437,11 @@ describe("failure briefs", () => {
 		assert.equal(partial?.attempt, 1);
 		assert.equal(partial?.inferred, false);
 	});
+
+	it("coerceFailureBrief keeps a known failureCode and drops an unknown one", () => {
+		const coded = { ...brief({ model: "m", rung: 0 }), failureCode: "MODEL_QUALITY" as const };
+		assert.deepEqual(coerceFailureBrief(JSON.parse(JSON.stringify(coded))), coded);
+		const bogus = coerceFailureBrief({ evidence: "e", failureCode: "NOT_A_CODE" });
+		assert.equal(bogus && "failureCode" in bogus, false);
+	});
 });

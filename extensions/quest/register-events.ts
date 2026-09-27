@@ -6,6 +6,7 @@ import {
 	clearActiveQuest,
 	loadModelLadder,
 	loadQuest,
+	routeStepFromDisk,
 	saveQuest,
 	syncConventionsToMemory,
 } from "./storage";
@@ -21,6 +22,7 @@ import {
 	resolveSubagentStepTargets,
 } from "./tool-call-guard";
 import { applyAttributedUsage, attributeSubagentUsage } from "./usage";
+import { enforceSubagentRuntime } from "./routing";
 import { normalizeClaims, validateClaims } from "./write-claim";
 import { buildQuestRecap } from "./recap";
 import {
@@ -375,6 +377,27 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 					ctx.ui.notify?.(decision.reason ?? "Sandbox: tool call blocked.", "warning");
 					return { block: true, reason: decision.reason };
 				}
+			}
+		}
+
+		// ── Runtime routing enforcement: pi-minions subagent spawn ────────
+		// Rewrite each targeted step's model/thinking to the routed decision
+		// (routing.ts) so a small orchestrator that drops or alters the steered
+		// args still runs the step as decided. pi applies in-place input edits.
+		if (event.toolName === "subagent" && quest?.status === "active") {
+			const input = (event.input as Record<string, unknown> | undefined) ?? {};
+			const targets = resolveSubagentStepTargets(quest, input);
+			const rewrites = enforceSubagentRuntime(input, targets, (i) =>
+				routeStepFromDisk(ctx.cwd, quest.steps[i]),
+			);
+			const deviations = rewrites.filter((r) => r.from !== undefined);
+			if (deviations.length > 0) {
+				ctx.ui.notify?.(
+					`Quest routing: ${deviations
+						.map((r) => `step #${r.stepIndex + 1} ${r.field} ${r.from} → ${r.to}`)
+						.join(", ")}`,
+					"info",
+				);
 			}
 		}
 
