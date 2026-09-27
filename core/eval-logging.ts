@@ -54,9 +54,24 @@ export interface EvalEntry {
 	verifyEvidence: string | null;
 	/** Wall-clock duration in ms. */
 	durationMs: number;
-	/** Token usage for the sub-agent run, when tracked. */
+	/**
+	 * Sub-agent token usage attributed to this entry (all attempts since the
+	 * step's previous entry). 0 when untracked — legacy rows, or a run whose
+	 * tool result carried no usage; check {@link turns} to tell the two apart.
+	 */
 	tokensIn: number;
 	tokensOut: number;
+	/** Prompt-cache tokens read / written. Absent when usage was not tracked. */
+	cacheRead?: number;
+	cacheWrite?: number;
+	/** Provider-reported cost in USD. Absent when usage was not tracked. */
+	cost?: number;
+	/** Peak context size (tokens) of any attributed run. */
+	contextTokens?: number;
+	/** Assistant turns across attributed runs; present iff usage was tracked. */
+	turns?: number;
+	/** Thinking level the sub-agent ran with, when reported. */
+	thinking?: string;
 	/** How many sub-agent attempts were made (0 means first try succeeded). */
 	attempts: number;
 	/** Model-ladder rung the task finished on, when laddered. */

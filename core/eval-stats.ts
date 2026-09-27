@@ -33,6 +33,31 @@ export interface RoleModelStats {
 	verifiedPasses: number;
 	/** verifiedPasses / samples. */
 	passRate: number;
+	/**
+	 * Spend over the subset of outcomes whose sub-agent usage was tracked (rows
+	 * with `turns`); absent until at least one is. Kept separate from
+	 * {@link samples} because legacy rows carry `tokensIn: 0` and would drag
+	 * every average toward free.
+	 */
+	usage?: RoleModelUsage;
+}
+
+/** Aggregated spend for one (agent role, model) pair over usage-tracked outcomes. */
+export interface RoleModelUsage {
+	/** Outcomes with tracked usage. */
+	samples: number;
+	/** Tracked outcomes that finished "done" with verifier approval. */
+	verifiedPasses: number;
+	/** Total provider cost in USD. */
+	cost: number;
+	/** Total input + output tokens. */
+	tokens: number;
+	/**
+	 * Total spend (passes and failures alike) divided by verified passes — the
+	 * real price of one success. Absent when no tracked outcome passed.
+	 */
+	costPerVerifiedPass?: number;
+	tokensPerVerifiedPass?: number;
 }
 
 /** Index of stats keyed by (agent, model); see {@link statsKey}. */
@@ -64,6 +89,8 @@ interface EvalStatSample {
 	model: string;
 	status: string;
 	verified: boolean;
+	/** Present only when the row tracked sub-agent usage (has `turns`). */
+	usage?: { cost: number; tokens: number };
 }
 
 /** The fields of an eval row that time-series aggregation needs. */
@@ -120,7 +147,21 @@ export function coerceEvalStat(value: unknown): EvalStatSample | null {
 	const model = optStr(rec.model)?.trim() ?? "";
 	const status = strOr(rec.status, "");
 	if (!agent || !model || !status) return null;
-	return { agent, model, status, verified: boolOr(rec.verified, false) };
+	const tracked = typeof rec.turns === "number";
+	return {
+		agent,
+		model,
+		status,
+		verified: boolOr(rec.verified, false),
+		...(tracked
+			? {
+					usage: {
+						cost: Math.max(0, numOr(rec.cost, 0)),
+						tokens: Math.max(0, numOr(rec.tokensIn, 0)) + Math.max(0, numOr(rec.tokensOut, 0)),
+					},
+				}
+			: {}),
+	};
 }
 
 /**
@@ -172,9 +213,24 @@ export function computeEvalStats(entries: unknown[]): EvalStatsIndex {
 			};
 			index.set(key, stats);
 		}
+		const passed = sample.status === "done" && sample.verified;
 		stats.samples++;
-		if (sample.status === "done" && sample.verified) stats.verifiedPasses++;
+		if (passed) stats.verifiedPasses++;
 		stats.passRate = stats.verifiedPasses / stats.samples;
+		if (sample.usage) {
+			const u = (stats.usage ??= { samples: 0, verifiedPasses: 0, cost: 0, tokens: 0 });
+			u.samples++;
+			if (passed) u.verifiedPasses++;
+			u.cost += sample.usage.cost;
+			u.tokens += sample.usage.tokens;
+		}
+	}
+	for (const stats of index.values()) {
+		const u = stats.usage;
+		if (u && u.verifiedPasses > 0) {
+			u.costPerVerifiedPass = u.cost / u.verifiedPasses;
+			u.tokensPerVerifiedPass = u.tokens / u.verifiedPasses;
+		}
 	}
 	return index;
 }
@@ -249,6 +305,16 @@ function formatDurationMs(ms: number): string {
 }
 
 /**
+ * Cost of one verified pass, with how many tracked outcomes back it. "—" when
+ * usage was never tracked for the pair, "no pass" when spend bought nothing.
+ */
+function formatCostPerPass(usage: RoleModelUsage | undefined): string {
+	if (!usage) return "—";
+	if (usage.costPerVerifiedPass === undefined) return `no pass (n=${usage.samples})`;
+	return `$${usage.costPerVerifiedPass.toFixed(4)} (n=${usage.samples})`;
+}
+
+/**
  * Stable sort of role/model stats: agent ASC, then model ASC, then samples DESC.
  * Deterministic so formatted output is snapshot-testable.
  */
@@ -284,11 +350,13 @@ export function formatEvalStatsReport(index: EvalStatsIndex, series: EvalTimeSer
 		const lines: string[] = [
 			`## Role / Model Pass Rates (${roleRows.length} pairs)`,
 			"",
-			`| Agent | Model | Samples | Verified Pass % |`,
-			`|-------|-------|---------|-----------------|`,
+			`| Agent | Model | Samples | Verified Pass % | Cost / Verified Pass |`,
+			`|-------|-------|---------|-----------------|----------------------|`,
 		];
 		for (const r of roleRows) {
-			lines.push(`| ${r.agent} | ${r.model} | ${r.samples} | ${formatPassPct(r.passRate)} |`);
+			lines.push(
+				`| ${r.agent} | ${r.model} | ${r.samples} | ${formatPassPct(r.passRate)} | ${formatCostPerPass(r.usage)} |`,
+			);
 		}
 		sections.push(lines.join("\n"));
 	}

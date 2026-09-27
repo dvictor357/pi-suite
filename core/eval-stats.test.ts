@@ -37,6 +37,60 @@ function entry(overrides: Partial<EvalEntry>): EvalEntry {
 }
 
 describe("eval-stats", () => {
+	describe("computeEvalStats usage", () => {
+		it("prices a verified pass from tracked rows only", () => {
+			const index = computeEvalStats([
+				// Legacy row: tokensIn 0, no turns — counts for pass rate, not for cost.
+				entry({ status: "done", verified: true }),
+				entry({
+					status: "failed",
+					verified: false,
+					tokensIn: 900,
+					tokensOut: 100,
+					cost: 0.01,
+					turns: 2,
+				}),
+				entry({
+					status: "done",
+					verified: true,
+					tokensIn: 1800,
+					tokensOut: 200,
+					cost: 0.02,
+					turns: 3,
+				}),
+			]);
+			const worker = statsFor(index, "worker", "ornith-1.0")!;
+			assert.equal(worker.samples, 3);
+			assert.ok(worker.usage);
+			assert.equal(worker.usage.samples, 2);
+			assert.equal(worker.usage.verifiedPasses, 1);
+			assert.equal(worker.usage.tokens, 3000);
+			// The failed attempt's spend is part of what the one success cost.
+			assert.ok(Math.abs(worker.usage.costPerVerifiedPass! - 0.03) < 1e-12);
+			assert.equal(worker.usage.tokensPerVerifiedPass, 3000);
+		});
+
+		it("omits usage when no row was tracked, and cost/pass when nothing passed", () => {
+			const legacy = computeEvalStats([entry({})]);
+			assert.equal(statsFor(legacy, "worker", "ornith-1.0")!.usage, undefined);
+
+			const failing = computeEvalStats([
+				entry({ status: "failed", verified: false, tokensIn: 10, cost: 0.001, turns: 1 }),
+			]);
+			const u = statsFor(failing, "worker", "ornith-1.0")!.usage!;
+			assert.equal(u.samples, 1);
+			assert.equal(u.costPerVerifiedPass, undefined);
+			assert.match(formatEvalStatsReport(failing, { buckets: [] }), /no pass \(n=1\)/);
+		});
+
+		it("renders cost per verified pass in the report", () => {
+			const index = computeEvalStats([
+				entry({ tokensIn: 10, tokensOut: 5, cost: 0.0042, turns: 1 }),
+			]);
+			assert.match(formatEvalStatsReport(index, { buckets: [] }), /\$0\.0042 \(n=1\)/);
+		});
+	});
+
 	describe("computeEvalStats", () => {
 		it("aggregates verified-pass rates per (agent, model)", () => {
 			const index = computeEvalStats([
@@ -218,7 +272,10 @@ describe("eval-stats", () => {
 			const text = formatEvalStatsReport(index, { buckets: [] });
 
 			assert.match(text, /## Role \/ Model Pass Rates \(2 pairs\)/);
-			assert.match(text, /\| Agent \| Model \| Samples \| Verified Pass % \|/);
+			assert.match(
+				text,
+				/\| Agent \| Model \| Samples \| Verified Pass % \| Cost \/ Verified Pass \|/,
+			);
 			assert.match(text, /\| scout \| mythos-5 \| 1 \| 100% \|/);
 			assert.match(text, /\| worker \| ornith-1\.0 \| 3 \| 67% \|/);
 			// Daily series section omitted when empty

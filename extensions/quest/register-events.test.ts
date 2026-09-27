@@ -242,3 +242,70 @@ describe("recoverAgentEndCrash", () => {
 		}
 	});
 });
+
+describe("sub-agent usage telemetry", () => {
+	test("subagent tool result usage lands on the step, then on the eval entry once", async () => {
+		const h = harness();
+		try {
+			const quest = emptyQuest("Usage Demo", "demo goal");
+			quest.status = "active";
+			quest.planApproved = true;
+			quest.lastFiredStepIndex = 0;
+			quest.steps = [makeStep({ status: "running", phase: "running", attempts: 1 })];
+			saveQuest(quest, h.cwd);
+
+			type Handler = (event: unknown, ctx: ExtensionContext) => unknown;
+			const handlers = new Map<string, Handler>();
+			const pi = {
+				...h.pi,
+				on: (name: string, handler: Handler) => handlers.set(name, handler),
+			} as unknown as ExtensionAPI;
+			const rt = createQuestRuntime(pi);
+			rt.setQuest(quest);
+			registerEvents(pi, rt);
+
+			const usage = {
+				input: 1200,
+				output: 300,
+				cacheRead: 400,
+				cacheWrite: 50,
+				cost: 0.0125,
+				contextTokens: 1900,
+				turns: 3,
+			};
+			await handlers.get("tool_execution_start")!(
+				{ toolCallId: "call-1", toolName: "subagent", args: { agent: "worker", task: "go" } },
+				h.ctx,
+			);
+			await handlers.get("tool_execution_end")!(
+				{
+					toolCallId: "call-1",
+					toolName: "subagent",
+					isError: false,
+					result: {
+						details: { mode: "single", results: [{ usage, thinking: "medium" }] },
+					},
+				},
+				h.ctx,
+			);
+
+			assert.equal(quest.steps[0].usage?.input, 1200);
+			assert.equal(loadQuest(h.cwd)?.steps[0].usage?.cost, 0.0125, "usage persisted");
+
+			const entry = rt.makeEval(quest, quest.steps[0], 0, "done", true, "ok");
+			assert.equal(entry.tokensIn, 1200);
+			assert.equal(entry.tokensOut, 300);
+			assert.equal(entry.cacheRead, 400);
+			assert.equal(entry.cost, 0.0125);
+			assert.equal(entry.turns, 3);
+			assert.equal(entry.thinking, "medium");
+			assert.equal(quest.steps[0].usage, undefined, "usage consumed by makeEval");
+
+			const again = rt.makeEval(quest, quest.steps[0], 0, "done", true, "ok");
+			assert.equal(again.tokensIn, 0);
+			assert.equal(again.turns, undefined, "no double counting");
+		} finally {
+			h.cleanup();
+		}
+	});
+});

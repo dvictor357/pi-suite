@@ -15,7 +15,12 @@ import { renderStatus, writeQuestSessionMeta } from "./status";
 import { clearQuestFromTodo, syncQuestToTodo } from "./todo-sync";
 import { isSandboxActive } from "./sandbox";
 import { evaluateToolCall } from "./sandbox-guard";
-import { effectiveSandboxProfile, resolveSubagentClaimTargets } from "./tool-call-guard";
+import {
+	effectiveSandboxProfile,
+	resolveSubagentClaimTargets,
+	resolveSubagentStepTargets,
+} from "./tool-call-guard";
+import { applyAttributedUsage, attributeSubagentUsage } from "./usage";
 import { normalizeClaims, validateClaims } from "./write-claim";
 import { buildQuestRecap } from "./recap";
 import {
@@ -298,7 +303,12 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 		pushActivityUI(ctx, rt);
 	});
 
+	// Step targets of in-flight `subagent` calls, resolved at start while the
+	// steps are still active, so the end event can credit usage per step.
+	const usageTargets = new Map<string, (number | null)[]>();
+
 	pi.on("session_shutdown", async (_event, ctx) => {
+		usageTargets.clear();
 		clearActivityUI(ctx, rt);
 	});
 
@@ -310,6 +320,11 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 		if (!TRACKED_TOOLS.has(event.toolName)) return;
 		const quest = getQuest(ctx.cwd);
 		if (!quest) return;
+		if (event.toolName === "subagent" && quest.status === "active") {
+			const args = (event.args as Record<string, unknown> | undefined) ?? {};
+			const targets = resolveSubagentStepTargets(quest, args);
+			if (targets.some((t) => t !== null)) usageTargets.set(event.toolCallId, targets);
+		}
 		rt.activity.onStart(
 			event.toolCallId,
 			event.toolName as "subagent" | "quest_delegate",
@@ -327,6 +342,14 @@ export function registerEvents(pi: ExtensionAPI, rt: QuestRuntime): void {
 
 	pi.on("tool_execution_end", async (event, ctx) => {
 		if (!TRACKED_TOOLS.has(event.toolName)) return;
+		const targets = usageTargets.get(event.toolCallId);
+		usageTargets.delete(event.toolCallId);
+		if (targets) {
+			// Best-effort telemetry: a failed or malformed result credits nothing.
+			const quest = getQuest(ctx.cwd);
+			const attributed = attributeSubagentUsage(targets, event.result?.details);
+			if (quest && applyAttributedUsage(quest.steps, attributed)) rt.persist(ctx, quest);
+		}
 		rt.activity.onEnd(
 			event.toolCallId,
 			event.isError,

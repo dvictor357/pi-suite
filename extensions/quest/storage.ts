@@ -30,6 +30,7 @@ import type {
 } from "./types";
 import { coerceStepHandoff } from "./context-broker";
 import { coerceFailureBrief } from "./ladder";
+import { coerceStepUsage } from "./usage";
 import {
 	loadProjectMemory,
 	questActivePath,
@@ -337,6 +338,9 @@ export function loadQuest(cwd: string): Quest | null {
 					? t.failureBriefs.map(coerceFailureBrief).filter((b: unknown) => b !== null)
 					: [],
 				lastModel: typeof t.lastModel === "string" && t.lastModel.trim() ? t.lastModel : undefined,
+				lastThinking:
+					typeof t.lastThinking === "string" && t.lastThinking.trim() ? t.lastThinking : undefined,
+				usage: coerceStepUsage(t.usage),
 				sandbox:
 					t.sandbox && typeof t.sandbox === "object"
 						? normalizeSandboxOverrides(t.sandbox)

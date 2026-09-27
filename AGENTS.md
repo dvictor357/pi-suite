@@ -28,7 +28,7 @@ npm run format
 What they do:
 
 - `npm run typecheck` runs `tsc --noEmit`.
-- `npm test` runs `node --import tsx --test core/*.test.ts extensions/*/*.test.ts`.
+- `npm test` runs `node --import tsx --import ./test/isolate-home.ts --test core/*.test.ts extensions/*/*.test.ts`. The preload redirects HOME to a temp dir; always run tests through it, never with a bare `node --test`, or they write into the real `~/.pi/agent`.
 - `npm run format:check` checks Prettier formatting.
 - `npm run format` writes Prettier formatting.
 
@@ -78,6 +78,7 @@ extensions/
     models.ts         Pure model matching + user-approval dialog for sub-agent models
     delegate.ts       Pure delegation logic: tool scope, model precedence, prompt building
     ladder.ts         Pure verified model-ladder decisions and failure-brief rendering
+    usage.ts          Pure sub-agent token/cost telemetry: attribute subagent results to steps
     subagent.ts       Live isolated sub-agent spawn (only SDK-value import; not test-loaded)
     kanban.ts         TUI kanban board
     status.ts         Status badge and session meta
@@ -99,6 +100,9 @@ extensions/
     dashboard.ts      fetchDashboard: quest + eval-stats + session-meta → DashboardStats
     dashboard-types.ts  DashboardStats / agent / cycle / trend / health shapes
     report.ts         Markdown and JSON recap builders (pure)
+
+test/
+  isolate-home.ts     Test preload: points HOME at a temp dir so tests never touch ~/.pi/agent
 
 docs/                 Architecture notes
 MIGRATION.md          Migration checklist and drift history
@@ -189,6 +193,7 @@ When editing quest:
 - Quest-created todo items must keep `source: "quest"`, `sourceId`, and `sourceIndex`.
 - Syncing quest steps to todo must not delete user-created todo items.
 - Verification is expected to default on for new and legacy quests.
+- Sub-agent usage (tokens/cost/turns) is read from `subagent` tool results in `tool_execution_end`, accumulated on `step.usage`, and consumed once by `makeEval`. Don't add a second writer of eval usage.
 - Ladder-eligible execution roles default to `worker` and `quick-worker`; judge/exploration roles (`scout`, `verifier`, `reviewer`, `planner`) must never be laddered.
 
 **Terminology note (task → step rename):** Quest uses `steps` as the canonical term (e.g.

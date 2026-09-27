@@ -31,6 +31,7 @@ import { enqueueUiPrompt, matchModel, promptModelAssignment, toModelLike } from 
 import { renderStatus, writeQuestSessionMeta } from "./status";
 import { resolveSandboxProfile } from "./sandbox";
 import { runSubAgent } from "./subagent";
+import { addUsage } from "./usage";
 import { contextWindowsFor, type QuestRuntime } from "./runtime";
 import { normalizeClaims, validateClaims } from "./write-claim";
 import { resolvePhase } from "./phase-loop";
@@ -448,6 +449,11 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				signal,
 			);
 
+			if (res.usage) {
+				task.usage = addUsage(task.usage, res.usage);
+				if (thinkingLevel) task.lastThinking = thinkingLevel;
+			}
+
 			if (!res.ok) {
 				const error = res.error ?? "unknown error";
 				task.result = `Sub-agent failed: ${error}`;
@@ -495,10 +501,8 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			}
 
 			// Store sandbox artifacts on the step for later surface in status/detail/recap.
-			if (res.sandboxArtifacts) {
-				task.sandboxArtifacts = res.sandboxArtifacts;
-				persist(ctx, quest);
-			}
+			if (res.sandboxArtifacts) task.sandboxArtifacts = res.sandboxArtifacts;
+			if (res.sandboxArtifacts || res.usage) persist(ctx, quest);
 
 			return {
 				content: [

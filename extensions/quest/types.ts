@@ -1,5 +1,6 @@
 import type { FailureBrief } from "./ladder";
 import type { StepEvidence } from "./evidence";
+import type { StepUsage } from "./usage";
 
 export type QuestStatus = "planning" | "active" | "paused" | "done" | "idle";
 /** Backward-compatible summary consumed by todo/kanban and older pi-suite releases. */
@@ -85,6 +86,16 @@ export interface QuestStep {
 	 * entries always know the model — {@link model} is only the explicit override.
 	 */
 	lastModel?: string;
+	/**
+	 * Thinking level the last attributed sub-agent run actually used, as
+	 * reported by pi-minions. Recorded on the eval entry next to {@link lastModel}.
+	 */
+	lastThinking?: string;
+	/**
+	 * Sub-agent token/cost spend accumulated across attempts since the last eval
+	 * entry. Consumed (and cleared) by `makeEval`, so every run is counted once.
+	 */
+	usage?: StepUsage;
 	/**
 	 * Per-step sandbox overrides. When present, these tighten (but never loosen)
 	 * the quest-level {@link SandboxPolicy}. Absent/undefined means "inherit

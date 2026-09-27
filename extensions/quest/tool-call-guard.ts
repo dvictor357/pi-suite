@@ -10,6 +10,7 @@
  */
 
 import { isAbsolute, normalize, resolve } from "node:path";
+import { asRecord } from "../../core";
 import type { SandboxProfile } from "./sandbox";
 import { resolveSandboxProfile } from "./sandbox";
 import type { Quest, QuestStep, SandboxMode, SandboxPolicy } from "./types";
@@ -172,6 +173,28 @@ export function resolveSubagentClaimTargets(
 	}
 
 	return targets;
+}
+
+/**
+ * Resolve the quest step each `subagent` task entry runs, index-aligned with the
+ * call's `tasks[]` (or a one-element array for the single-agent form): entry `i`
+ * maps to a step index, or null when it is malformed or matches no step. Same
+ * matching rules as {@link resolveSubagentClaimTargets}; the alignment is what
+ * lets parallel results (index-aligned with `tasks[]`) be credited per step.
+ */
+export function resolveSubagentStepTargets(
+	quest: Quest,
+	input: Record<string, unknown>,
+): (number | null)[] {
+	const raws = Array.isArray(input.tasks) && input.tasks.length > 0 ? input.tasks : [input];
+	const used = new Set<number>();
+	return raws.map((raw) => {
+		const entry = raw && typeof raw === "object" ? entryFromRecord(asRecord(raw)) : null;
+		if (!entry) return null;
+		const stepIndex = matchStepIndex(quest, entry, used);
+		if (stepIndex !== null) used.add(stepIndex);
+		return stepIndex;
+	});
 }
 
 // ── Internals ────────────────────────────────────────────────────────────────

@@ -37,6 +37,7 @@ import {
 import { execSync } from "node:child_process";
 import type { SandboxProfile, SandboxCallRecord, SandboxArtifacts } from "./sandbox";
 import { evaluateToolCall, extractPath } from "./sandbox-guard";
+import { usageFromSessionStats, type SessionStatsLike, type StepUsage } from "./usage";
 
 /** Extended result that carries sandbox artifacts when a sandbox was active. */
 export interface SubAgentResult {
@@ -45,6 +46,8 @@ export interface SubAgentResult {
 	error?: string;
 	/** Sandbox artifacts collected during delegation; absent when sandbox is off. */
 	sandboxArtifacts?: SandboxArtifacts;
+	/** Token/cost spend of the sub-agent session, when it got far enough to spend. */
+	usage?: StepUsage;
 }
 
 export interface SubAgentRequest {
@@ -214,9 +217,19 @@ export async function runSubAgent(
 			if (changed) sandboxArtifacts.changedFiles = changed;
 		}
 
-		return { ok: true, output: extractFinalText(messages), sandboxArtifacts };
+		return {
+			ok: true,
+			output: extractFinalText(messages),
+			sandboxArtifacts,
+			usage: sessionUsage(session),
+		};
 	} catch (err) {
-		return { ok: false, output: "", error: err instanceof Error ? err.message : String(err) };
+		return {
+			ok: false,
+			output: "",
+			error: err instanceof Error ? err.message : String(err),
+			usage: sessionUsage(session),
+		};
 	} finally {
 		cleanup?.();
 		session?.dispose();
@@ -272,5 +285,16 @@ function gitChangedFiles(cwd: string): string[] | null {
 			.filter(Boolean);
 	} catch {
 		return null;
+	}
+}
+
+/** Best-effort session spend; stats are telemetry and must never fail a delegation. */
+function sessionUsage(
+	session: { getSessionStats(): SessionStatsLike } | undefined,
+): StepUsage | undefined {
+	try {
+		return usageFromSessionStats(session?.getSessionStats());
+	} catch {
+		return undefined;
 	}
 }

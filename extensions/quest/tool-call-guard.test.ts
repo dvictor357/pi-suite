@@ -9,6 +9,7 @@ import {
 	maxRestrictiveProfile,
 	parseSubagentTaskEntries,
 	resolveSubagentClaimTargets,
+	resolveSubagentStepTargets,
 } from "./tool-call-guard";
 import { resolveSandboxProfile } from "./sandbox";
 
@@ -484,5 +485,45 @@ describe("multi-task claim conflict simulation", () => {
 		const conflict = reg.register(cwd, targets[1].stepIndex, "B", second);
 		assert.ok(conflict);
 		assert.equal(conflict.stepIndex, 0);
+	});
+});
+
+describe("resolveSubagentStepTargets", () => {
+	test("stays index-aligned with tasks[] when an entry is malformed or unmatched", () => {
+		const wt0 = "/tmp/wt/0";
+		const wt2 = "/tmp/wt/2";
+		const quest = makeQuest({
+			steps: [
+				makeStep({
+					status: "running",
+					phase: "running",
+					sandboxArtifacts: { calls: [], touchedPaths: [], worktreePath: wt0 },
+				}),
+				makeStep({ status: "pending" }),
+				makeStep({
+					status: "running",
+					phase: "running",
+					sandboxArtifacts: { calls: [], touchedPaths: [], worktreePath: wt2 },
+				}),
+			],
+		});
+		const targets = resolveSubagentStepTargets(quest, {
+			tasks: [
+				{ agent: "worker", cwd: wt0 },
+				{ task: "no agent" },
+				{ agent: "scout" },
+				{ agent: "worker", cwd: wt2 },
+			],
+		});
+		assert.deepEqual(targets, [0, null, null, 2]);
+	});
+
+	test("single-agent form resolves to a one-element array", () => {
+		const quest = makeQuest({
+			lastFiredStepIndex: 0,
+			steps: [makeStep({ status: "running", phase: "running" })],
+		});
+		assert.deepEqual(resolveSubagentStepTargets(quest, { agent: "worker", task: "go" }), [0]);
+		assert.deepEqual(resolveSubagentStepTargets(quest, { agent: "scout" }), [null]);
 	});
 });

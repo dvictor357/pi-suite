@@ -50,7 +50,13 @@ export {
 	computeEvalTimeSeries,
 	formatEvalStatsReport,
 } from "./eval-stats";
-export type { RoleModelStats, EvalStatsIndex, EvalTimeBucket, EvalTimeSeries } from "./eval-stats";
+export type {
+	RoleModelStats,
+	RoleModelUsage,
+	EvalStatsIndex,
+	EvalTimeBucket,
+	EvalTimeSeries,
+} from "./eval-stats";
 export { asRecord, strArray, boolOr, numOr, strOr, optStr, optNum, oneOf } from "./coerce";
 export {
 	CONTEXT_BUDGET,

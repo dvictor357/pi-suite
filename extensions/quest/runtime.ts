@@ -390,6 +390,11 @@ export function createQuestRuntime(
 		evidence: string | null | undefined,
 		failureCode?: FailureCode,
 	): EvalEntry {
+		// Usage is consumed here: a step re-run after a terminal outcome starts a
+		// fresh total, so summing eval rows never double-counts a sub-agent run.
+		// Callers always persist after recording the entry.
+		const usage = step.usage;
+		step.usage = undefined;
 		return {
 			quest: quest.name,
 			questSlug: questSlug(quest.name),
@@ -412,8 +417,18 @@ export function createQuestRuntime(
 			changedFiles: step.evidence?.changedFiles,
 			checksSummary: step.evidence ? summarizeChecks(step.evidence.checks) : undefined,
 			durationMs: step.startedAt ? (step.completedAt ?? Date.now()) - step.startedAt : 0,
-			tokensIn: 0,
-			tokensOut: 0,
+			tokensIn: usage?.input ?? 0,
+			tokensOut: usage?.output ?? 0,
+			...(usage
+				? {
+						cacheRead: usage.cacheRead,
+						cacheWrite: usage.cacheWrite,
+						cost: usage.cost,
+						contextTokens: usage.contextTokens,
+						turns: usage.turns,
+					}
+				: {}),
+			thinking: step.lastThinking,
 			attempts: step.attempts,
 			timestamp: Date.now(),
 		};
