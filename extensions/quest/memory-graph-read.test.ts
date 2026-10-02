@@ -166,6 +166,25 @@ describe("selectGraphNodesForPrompt", () => {
 		});
 		assert.deepEqual(selected, []);
 	});
+
+	test("deduplicates both legacy planning and awareness lines, preserving changed lessons", () => {
+		const graph = fixtureGraph();
+		const knowledge = graph.nodes.find((n) => n.id === "know-graph")!;
+		const planning = `[Memory graph]\n- [${knowledge.kind}] ${knowledge.label}: ${knowledge.detail}`;
+		for (const existingContext of [planning, renderGraphContextBlock([knowledge], 1000)]) {
+			assert.ok(
+				selectGraphNodesForPrompt(graph, { maxNodes: 20, existingContext }).every(
+					(n) => n.id !== knowledge.id,
+				),
+			);
+		}
+		knowledge.detail = "New evidence: graph rescans need reconciliation.";
+		assert.ok(
+			selectGraphNodesForPrompt(graph, { maxNodes: 20, existingContext: planning }).some(
+				(n) => n.id === knowledge.id,
+			),
+		);
+	});
 });
 
 describe("renderGraphContextBlock", () => {

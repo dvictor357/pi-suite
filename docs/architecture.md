@@ -113,8 +113,11 @@ Two additive observability features built on the shared contract:
   **Read path (pi-quest):** `extensions/quest/memory-graph-read.ts` selects a budgeted set of
   non-eval nodes (`selectGraphNodesForPrompt`) and renders them with line-safe
   `clampToBudget` (`renderGraphContextBlock`). Injected into:
-  - Project awareness (`compactAwarenessBlock` in `todo-sync.ts`) — top N recent preferred
-    kinds; constrained models get fewer nodes.
+  - Project awareness (`compactAwarenessBlock` in `todo-sync.ts`) — step prompts prefer
+    task-keyword matches and omit graph lines already present in the supplied context.
+    No matches (or no task) retains recent preferred-kind selection; constrained models
+    get fewer nodes. Deduplication recognizes existing planning/awareness text without
+    changing persisted step shapes.
   - `quest_plan` step context — 1–2 keyword-overlapping nodes via
     `enrichStepsWithMemoryGraph`. Eval-result is excluded from prompt dumps by default.
 

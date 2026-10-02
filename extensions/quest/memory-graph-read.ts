@@ -89,6 +89,8 @@ export interface SelectGraphNodesOpts {
 	keywords?: readonly string[];
 	/** Min keyword hits when keywords are provided. Default 1. */
 	minKeywordHits?: number;
+	/** Omit nodes already rendered in this step's context (including legacy planning blocks). */
+	existingContext?: string;
 }
 
 export interface GraphEnrichmentResult<T extends { content: string; context: string }> {
@@ -169,6 +171,14 @@ export function selectGraphNodesForPrompt(
 	const minHits = Math.max(1, opts.minKeywordHits ?? 1);
 
 	let candidates = nodes.filter((n) => n && typeof n.id === "string" && n.kind && n.label);
+	if (opts.existingContext) {
+		const lines = new Set(opts.existingContext.split("\n").map((line) => line.trim()));
+		candidates = candidates.filter((node) => {
+			const planningLine = formatPlanningGraphBlock([node]).split("\n")[1];
+			const awarenessLine = renderGraphContextBlock([node], 10_000).split("\n")[1];
+			return !lines.has(planningLine) && !lines.has(awarenessLine);
+		});
+	}
 
 	if (excludeEval) {
 		candidates = candidates.filter((n) => n.kind !== "eval-result");

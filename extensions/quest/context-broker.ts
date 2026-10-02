@@ -177,7 +177,12 @@ function buildStepSections(
 	if (includeModelDependent) {
 		sections.push(
 			{
-				text: opts.cwd ? compactAwarenessBlock(opts.cwd, opts.modelInfo) : "",
+				text: opts.cwd
+					? compactAwarenessBlock(opts.cwd, opts.modelInfo, {
+							task: opts.content,
+							existingContext: sections.map((section) => section.text).join("\n\n"),
+						})
+					: "",
 				priority: SECTION_PRIORITY.awareness,
 			},
 			{ text: formatDirectiveFor(opts.modelInfo), priority: SECTION_PRIORITY.format },

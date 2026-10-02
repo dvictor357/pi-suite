@@ -15,6 +15,7 @@ import type { Quest, QuestStep, SyncedTodoItem, SyncedTodoList } from "./types";
 import {
 	CONSTRAINED_MAX_AWARENESS_NODES,
 	DEFAULT_MAX_AWARENESS_NODES,
+	extractKeywords,
 	renderGraphContextBlock,
 	selectGraphNodesForPrompt,
 } from "./memory-graph-read";
@@ -116,7 +117,11 @@ export function clearQuestFromTodo(cwd: string): void {
 	}
 }
 
-export function compactAwarenessBlock(cwd: string, model?: BudgetModelInfo): string {
+export function compactAwarenessBlock(
+	cwd: string,
+	model?: BudgetModelInfo,
+	context?: { task: string; existingContext: string },
+): string {
 	try {
 		const memory = loadProjectMemory(cwd);
 		const todo = readJSON<SyncedTodoList | null>(todoPath(cwd), null);
@@ -189,9 +194,17 @@ export function compactAwarenessBlock(cwd: string, model?: BudgetModelInfo): str
 			const maxNodes = isConstrainedModel(model)
 				? CONSTRAINED_MAX_AWARENESS_NODES
 				: DEFAULT_MAX_AWARENESS_NODES;
+			const keywords = context ? extractKeywords(context.task) : [];
+			// Probe before deduplication: an already-present match must not trigger
+			// the unrelated fallback. No keyword match keeps historical awareness.
+			const hasMatches =
+				keywords.length > 0 &&
+				selectGraphNodesForPrompt(graph, { keywords, maxNodes: 1 }).length > 0;
 			const selected = selectGraphNodesForPrompt(graph, {
 				maxNodes,
 				excludeEvalResults: true,
+				keywords: hasMatches ? keywords : undefined,
+				existingContext: context?.existingContext,
 			});
 			if (selected.length) {
 				// Reserve a slice of the total budget for the graph section; the
