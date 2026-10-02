@@ -2,16 +2,17 @@
 
 ![pi-suite article header](docs/assets/pi_suite_article_header.png)
 
-A loop-engineering toolkit for [pi](https://pi.dev) — four extensions, previously
+A loop-engineering toolkit for [pi](https://pi.dev) — five extensions, previously
 maintained as separate repos (quest/todo/memory), now consolidated here behind one
 cross-extension contract:
 
-| Extension     | Role                                                                                                                                 |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| **pi-quest**  | Proactive AI project manager — plans, delegates to sub-agents, verifies, tracks git, and applies sandbox/policy guidance for tasks.  |
-| **pi-todo**   | Persistent task ledger with sub-agent delegation.                                                                                    |
-| **pi-memory** | Persistent project & user memory — tech-stack detection, conventions, structured facts, quest research, and sub-agent model choices. |
-| **pi-agent**  | Read-only performance dashboard — live steps, eval cycles, daily trends, retry/burst health (`/agent`, `agent_dashboard`).           |
+| Extension      | Role                                                                                                                                 |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **pi-quest**   | Proactive AI project manager — plans, delegates to sub-agents, verifies, tracks git, and applies sandbox/policy guidance for tasks.  |
+| **pi-todo**    | Persistent task ledger with sub-agent delegation.                                                                                    |
+| **pi-memory**  | Persistent project & user memory — tech-stack detection, conventions, structured facts, quest research, and sub-agent model choices. |
+| **pi-minions** | Subagent execution and codebase intelligence (`subagent`, `codebase`, `/subagent`).                                                  |
+| **pi-agent**   | Read-only performance dashboard — live steps, eval cycles, daily trends, retry/burst health (`/agent`, `agent_dashboard`).           |
 
 They were built to work together (quest syncs tasks into todo and conventions/research
 into memory; agent reads that shared state). Consolidating them into one repo makes that
@@ -89,6 +90,15 @@ inspection.
 | `memory_search`  | Search conventions and facts by keyword                 |
 | `memory_lint`    | Audit memory for duplicates, empties, oversize entries  |
 | `memory_graph`   | Manage typed knowledge graph nodes and edges            |
+
+### Subagent (pi-minions)
+
+| Tool       | Purpose                                                                                                  |
+| ---------- | -------------------------------------------------------------------------------------------------------- |
+| `subagent` | Single, parallel, chain, and pipeline execution with budgets, retries, contracts, history, and worktrees |
+| `codebase` | Scan, query, map, and impact analysis                                                                    |
+
+Command: `/subagent`. See [usage and settings](docs/subagent.md). Requires Node 22.19+ and pi SDK 1.0+.
 
 ### Agent (pi-agent)
 
@@ -290,3 +300,15 @@ for the migration record.
 ## License
 
 MIT
+
+## Migrating from pi-minions
+
+Disable or remove the separately installed `pi-minions` package in pi settings before
+loading this suite. Both packages register `subagent`, `codebase`, and `/subagent`;
+loading both causes duplicate registration. The suite bundles all agents and runner
+code in `extensions/subagent`, with no sibling runtime dependency.
+
+Settings remain in `getAgentDir()/settings.json` under `subagent`; run history stays
+in `getAgentDir()/subagent-runs/<cwdHash>`. Existing history, worktree branch naming,
+and discovery precedence (bundled → user → project) are unchanged. No stored-data
+migration is required. See [subagent usage](docs/subagent.md) for modes and options.

@@ -4,11 +4,12 @@ You are working in `pi-suite`, a TypeScript package for pi. Use this file as you
 
 ## What this project is
 
-`pi-suite` ships four pi extensions that work together:
+`pi-suite` ships five pi extensions that work together:
 
 - `pi-quest` plans work, delegates steps to sub-agents, verifies results, and tracks quest progress.
 - `pi-todo` keeps a persistent task ledger for the current project.
 - `pi-memory` remembers project/user preferences and injects that context into future agent runs.
+- `pi-minions` (`extensions/subagent`) executes subagents and owns the codebase scanner/cache/tool.
 - `pi-agent` reads quest/eval/session-meta and shows a performance dashboard (`/agent`, `agent_dashboard`).
 
 These extensions share files under `~/.pi/agent`. The main goal of this repo is to keep their shared JSON shapes and path rules in one place: `core/`.
@@ -28,7 +29,7 @@ npm run format
 What they do:
 
 - `npm run typecheck` runs `tsc --noEmit`.
-- `npm test` runs `node --import tsx --import ./test/isolate-home.ts --test core/*.test.ts extensions/*/*.test.ts`. The preload redirects HOME to a temp dir; always run tests through it, never with a bare `node --test`, or they write into the real `~/.pi/agent`.
+- `npm test` runs both the isolated Node and Vitest suites. `npm run test:node` runs the core and four original extensions through Node; `npm run test:subagent` runs all incoming tests (including nested codebase tests) through Vitest. Both redirect HOME and PI_CODING_AGENT_DIR before imports; always run tests through it, never with a bare `node --test`, or they write into the real `~/.pi/agent`.
 - `npm run format:check` checks Prettier formatting.
 - `npm run format` writes Prettier formatting.
 

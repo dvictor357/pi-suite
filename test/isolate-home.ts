@@ -22,3 +22,5 @@ if (!process.env[KEY]) {
 
 process.env.HOME = process.env[KEY];
 process.env.USERPROFILE = process.env[KEY];
+
+process.env.PI_CODING_AGENT_DIR = join(process.env[KEY]!, ".pi", "agent");

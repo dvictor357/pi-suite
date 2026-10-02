@@ -2,19 +2,21 @@
  * quest/subagent.ts — the live sub-agent spawn (Path B runtime).
  *
  * This is the ONLY quest module that imports the SDK as a value
- * (`createAgentSession`, `SessionManager`). It is therefore kept out of every
- * test path — importing the SDK runtime fails under the test runner — and holds
- * no logic that needs testing beyond what ./delegate.ts already covers.
+ * (`createAgentSession`, `SessionManager`, `ModelRuntime`). The live SDK integration is smoke-tested without model calls by the subagent
+ * Vitest integration suite. Pure delegation decisions remain in ./delegate.ts.
  *
  * Why this is safe to run from inside an extension:
- *   - `createAgentSession` does NOT load extensions, so the sub-agent does not
+ *   - The resource loader disables extensions, so the sub-agent does not
  *     recursively re-load pi-quest.
  *   - An in-memory `SessionManager` avoids polluting the session tree on disk.
- *   - Reusing `ctx.modelRegistry` shares the user's configured auth/models.
+ *   - The child stream uses `ctx.modelRegistry` for the user's configured auth/models.
  */
 import {
 	createAgentSession,
 	SessionManager,
+	DefaultResourceLoader,
+	ModelRuntime,
+	getAgentDir,
 	createReadToolDefinition,
 	createGrepToolDefinition,
 	createFindToolDefinition,
@@ -176,11 +178,26 @@ export async function runSubAgent(
 			sessionCwd = worktreePath;
 		}
 
+		const modelRuntime = await ModelRuntime.create();
+		const provider = ctx.modelRegistry.getRegisteredNativeProvider(req.model.provider);
+		const config = ctx.modelRegistry.getRegisteredProviderConfig(req.model.provider);
+		if (provider) modelRuntime.registerNativeProvider(provider);
+		if (config) modelRuntime.registerProvider(req.model.provider, config);
+		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(req.model);
+		if (!auth.ok) throw new Error(auth.error);
+		if (auth.apiKey) await modelRuntime.setRuntimeApiKey(req.model.provider, auth.apiKey);
+		const resourceLoader = new DefaultResourceLoader({
+			cwd: sessionCwd,
+			agentDir: getAgentDir(),
+			noExtensions: true,
+		});
+		await resourceLoader.reload();
 		const created = await createAgentSession({
 			cwd: sessionCwd,
 			model: req.model,
 			thinkingLevel: req.thinkingLevel,
-			modelRegistry: ctx.modelRegistry,
+			resourceLoader,
+			modelRuntime,
 			sessionManager: SessionManager.inMemory(),
 			// Sandboxed: disable built-in tools and supply guarded definitions so
 			// path/command policy is enforced per call. Otherwise: named tool scope.
@@ -192,6 +209,10 @@ export async function runSubAgent(
 				: { tools: req.tools ?? toolsForRole(req.role) }),
 		});
 		session = created.session;
+		// Extension contexts expose the registry facade, not the SDK ModelRuntime.
+		// Route requests through it to preserve in-memory providers and credentials.
+		session.agent.streamFunction = (model, context, options) =>
+			ctx.modelRegistry.streamSimple(model, context, options);
 
 		// awaitFinalTurn (delegate.ts) owns the resolve-on-final-turn / reject-on-abort
 		// wiring; it is unit-tested there with a fake session.

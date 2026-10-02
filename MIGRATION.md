@@ -144,3 +144,23 @@ and the active quest via `loadQuest`. Status-bar text uses `ctx.ui.setStatus("ag
 only. `pi.extensions: ["./extensions"]` auto-discovers `index.ts`, so existing
 `git:github.com/dvictor357/pi-suite` installs pick it up on `pi update` after this lands
 on the tracked ref.
+
+## Bundled pi-minions — RESOLVED
+
+The fifth extension, `extensions/subagent`, preserves single/parallel/chain/pipeline
+execution, budgets, retries, output contracts, run history, and worktrees. Quest owns
+planning, approved routing, verification, and progress; sandboxed steps still use its
+guarded `quest_delegate` fallback. Shared model readers, thinking levels, hashing,
+and codebase cache contracts live in `core/`. Disk formats and CONTRACT_VERSION are
+unchanged. Disable/remove the separately installed pi-minions package before loading
+the suite to avoid duplicate tools/commands; installation is never changed automatically.
+
+`npm test` runs the existing Node suite and incoming Vitest suite separately, both
+with temporary HOME and PI_CODING_AGENT_DIR. Peer messaging and runner replacement
+remain outside this migration.
+
+The suite now targets the latest pi SDK group (1.0.0) and Node >=22.19.0.
+The guarded SDK fallback supplies an extension-disabled resource loader and a
+ModelRuntime, copies the selected provider configuration, and sends child requests
+through the parent registry to preserve configured authentication and providers.
+An offline smoke test exercises that path without a provider request.

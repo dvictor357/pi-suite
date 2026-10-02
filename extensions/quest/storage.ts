@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import type { AgentModelChoice, ModelLadderConfig } from "../../core";
 import {
 	CONTRACT_VERSION,
-	THINKING_LEVELS,
+	loadAgentModels,
 	asRecord,
 	boolOr,
 	isFutureContract,
@@ -40,29 +40,7 @@ import {
 	questArchiveIndexPath,
 } from "./utils";
 
-/**
- * Read the project's remembered role → model assignments (written by
- * `quest_assign_model`). Returns an empty map when memory is absent or written
- * by a newer contract than this code understands.
- */
-export function loadAgentModels(cwd: string): Record<string, AgentModelChoice> {
-	const memory = loadProjectMemory(cwd);
-	const models = asRecord(memory?.agentModels);
-	const choices: Record<string, AgentModelChoice> = {};
-	for (const [role, value] of Object.entries(models)) {
-		const raw = asRecord(value);
-		const model = optStr(raw.model)?.trim();
-		if (!model) continue;
-		choices[role] = {
-			model,
-			provider: optStr(raw.provider),
-			thinkingLevel: oneOf(raw.thinkingLevel, THINKING_LEVELS) ? raw.thinkingLevel : undefined,
-			reason: optStr(raw.reason),
-			timestamp: numOr(raw.timestamp, 0),
-		};
-	}
-	return choices;
-}
+export { loadAgentModels } from "../../core";
 
 /**
  * Persist a user-approved model assignment for a sub-agent role onto the shared

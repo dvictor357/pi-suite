@@ -69,12 +69,15 @@ single extension touches alone stays in that extension.
 
 ## Codebase intelligence ownership split
 
-`pi-minions` owns the reusable codebase intelligence primitive. It scans repositories,
+`extensions/subagent` (the bundled pi-minions extension) owns the reusable codebase intelligence primitive. It scans repositories,
 writes the project-local cache at `.pi/codebase-index.json`, implements cache staleness
 rules, provides query/map/impact functions, and registers the `codebase` tool.
 
-`pi-suite` does **not** import `pi-minions` code and has no runtime dependency on it.
-`pi-quest` consumes the integration contract only:
+`pi-suite` bundles this execution layer; no separately installed pi-minions package is
+needed. `core/agent-models.ts` owns the approved-role reader, and
+`core/codebase-contract.ts` owns cache types, version, and path. Compatibility exports
+keep existing Quest and subagent imports working. Quest retains its tolerant cache
+reader and ranking implementation. `pi-quest` consumes the integration contract:
 
 - During quest creation/planning it detects `.pi/codebase-index.json` and tells the
   orchestrator to run `codebase(operation="scan")`, then `query`/`map`, when that tool is
@@ -88,7 +91,7 @@ rules, provides query/map/impact functions, and registers the `codebase` tool.
 - Future cache contracts (`contractVersion > 1`) are ignored gracefully rather than
   reinterpreted.
 
-This keeps scanner/cache/query/tool ownership in `pi-minions` while letting `pi-quest`
+This keeps scanner/cache/query/tool ownership in `extensions/subagent` while letting `pi-quest`
 use the stable cache/tool contract for orchestration decisions.
 
 ## Eval stats and memory graph

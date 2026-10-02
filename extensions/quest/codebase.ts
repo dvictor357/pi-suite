@@ -8,56 +8,20 @@ import {
 	type CodebaseRankingConfig,
 } from "./constants";
 
-export const CODEBASE_CACHE_PATH = ".pi/codebase-index.json";
-
-/**
- * The `.pi/codebase-index.json` cache is OWNED by `pi-minions`, not pi-suite.
- * pi-quest only reads it (a stable integration contract; see docs/architecture.md
- * "Codebase intelligence ownership split"). This is the cache shape this code
- * understands: a cache stamped with a higher `contractVersion` is treated as
- * absent (`loadCodebaseIndex` → status "future") rather than reinterpreted, so a
- * future pi-minions format can never corrupt quest orchestration decisions.
- */
-export const SUPPORTED_CODEBASE_CONTRACT_VERSION = 1;
-
-export interface CodebaseImportEntry {
-	source?: string;
-	names?: string[];
-	isDefault?: boolean;
-	isType?: boolean;
-	resolved?: string;
-}
-
-export interface CodebaseExportEntry {
-	name?: string;
-	kind?: string;
-}
-
-export interface CodebaseSymbolEntry {
-	name?: string;
-	kind?: string;
-}
-
-export interface CodebaseFileEntry {
-	path?: string;
-	name?: string;
-	relativePath: string;
-	imports?: CodebaseImportEntry[];
-	exports?: CodebaseExportEntry[];
-	symbols?: CodebaseSymbolEntry[];
-	mtime?: number;
-	hash?: string;
-}
-
-export interface CodebaseIndexV1 {
-	contractVersion: 1;
-	rootDir: string;
-	scannedAt: number;
-	fileCount: number;
-	files: Record<string, CodebaseFileEntry>;
-	dependencies: Record<string, string[]>;
-	reverseDependencies: Record<string, string[]>;
-}
+import {
+	CODEBASE_CACHE_PATH,
+	SUPPORTED_CODEBASE_CONTRACT_VERSION,
+	type CodebaseFileEntry,
+	type CodebaseIndexV1,
+} from "../../core";
+export { CODEBASE_CACHE_PATH, SUPPORTED_CODEBASE_CONTRACT_VERSION } from "../../core";
+export type {
+	CodebaseImportEntry,
+	CodebaseExportEntry,
+	CodebaseSymbolEntry,
+	CodebaseFileEntry,
+	CodebaseIndexV1,
+} from "../../core";
 
 export type CodebaseLoadResult =
 	| { status: "ok"; path: string; index: CodebaseIndexV1 }

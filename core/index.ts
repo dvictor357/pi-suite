@@ -1,6 +1,6 @@
 /**
  * @pi-suite/core — the shared cross-extension contract for the pi-suite
- * extensions (pi-quest, pi-todo, pi-memory, pi-agent).
+ * extensions (pi-quest, pi-todo, pi-memory, pi-agent, pi-minions).
  *
  * Extensions import from here instead of re-declaring storage shapes, paths, or
  * helpers. This is the only module they all depend on; see ./contract for the
@@ -96,3 +96,6 @@ setErrorSink((context, error) => {
 	const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
 	appendLine(ERROR_LOG_PATH, `[${new Date().toISOString()}] ${context}: ${detail}`);
 });
+
+export { loadAgentModels } from "./agent-models";
+export * from "./codebase-contract";
