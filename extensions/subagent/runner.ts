@@ -23,6 +23,7 @@ import { checkContract, contractInstructions, type JsonSchema, repairTask } from
 import { RunBudget } from "./budget.js";
 import { HEARTBEAT_MS, KILL_GRACE_MS } from "./constants.js";
 import {
+	emptyUsage,
 	type SingleResult,
 	type SubagentDetails,
 	type SubagentPhase,
@@ -244,15 +245,7 @@ export async function runSingleAgent(
 			exitCode: 1,
 			messages: [],
 			stderr: `Unknown agent: "${agentName}". Available agents: ${available}.`,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				cost: 0,
-				contextTokens: 0,
-				turns: 0,
-			},
+			usage: emptyUsage(),
 			step,
 		};
 	}
@@ -274,14 +267,8 @@ export async function runSingleAgent(
 	// frontmatter. Without --thinking, subagents inherit the global
 	// defaultThinkingLevel (often xhigh) — wasteful for recon/mechanical agents.
 	const runtime = resolveAgentRuntime(agent, defaultCwd, runtimeOverride);
-	const args: string[] = ["--mode", "json", "-p", "--no-session"];
-	if (runtime.model) args.push("--model", runtime.model);
-	if (runtime.thinking) args.push("--thinking", runtime.thinking);
 	const messaging = messagingEnabled(agent.name);
-	if (agent.tools && agent.tools.length > 0) {
-		const tools = messaging ? [...agent.tools, "subagent_message"] : agent.tools;
-		args.push("--tools", [...new Set(tools)].join(","));
-	}
+	const args = buildChildArgs(agent, runtime, messaging);
 
 	const peerInbox = messaging
 		? new PeerInbox(process.env[PROJECT_CWD_ENV] || defaultCwd, childPeerId(runId))
@@ -296,15 +283,7 @@ export async function runSingleAgent(
 		exitCode: 0,
 		messages: [],
 		stderr: "",
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			cost: 0,
-			contextTokens: 0,
-			turns: 0,
-		},
+		usage: emptyUsage(),
 		peerId: peerInbox?.peerId,
 		model: runtime.model,
 		thinking: runtime.thinking,
@@ -487,20 +466,8 @@ export async function runSingleAgent(
 					currentResult.messages.push(msg);
 
 					if (msg.role === "assistant") {
-						currentResult.usage.turns++;
+						applyAssistantTurn(currentResult, msg);
 						const usage = msg.usage;
-						if (usage) {
-							currentResult.usage.input += usage.input || 0;
-							currentResult.usage.output += usage.output || 0;
-							currentResult.usage.cacheRead += usage.cacheRead || 0;
-							currentResult.usage.cacheWrite += usage.cacheWrite || 0;
-							currentResult.usage.cost += usage.cost?.total || 0;
-							currentResult.usage.contextTokens = usage.totalTokens || 0;
-						}
-						if (!currentResult.model && msg.model) currentResult.model = msg.model;
-						if (msg.stopReason) currentResult.stopReason = msg.stopReason;
-						if (msg.errorMessage) currentResult.errorMessage = msg.errorMessage;
-
 						const toolCallPart = msg.content.find((p) => p.type === "toolCall");
 						finalTurn = !toolCallPart;
 						if (budget && usage)
@@ -613,19 +580,56 @@ export async function runSingleAgent(
 		} catch {
 			/* Preserve the execution result if messaging storage is unavailable. */
 		}
-		if (tmpPromptPath)
-			try {
-				fs.unlinkSync(tmpPromptPath);
-			} catch {
-				/* ignore */
-			}
-		if (tmpPromptDir)
-			try {
-				fs.rmdirSync(tmpPromptDir);
-			} catch {
-				/* ignore */
-			}
+		removeTempPrompt(tmpPromptDir, tmpPromptPath);
 	}
+}
+
+/** CLI args for a child `pi` run (task and system-prompt file appended later). */
+function buildChildArgs(
+	agent: AgentConfig,
+	runtime: { model?: string; thinking?: string },
+	messaging: boolean,
+): string[] {
+	const args: string[] = ["--mode", "json", "-p", "--no-session"];
+	if (runtime.model) args.push("--model", runtime.model);
+	if (runtime.thinking) args.push("--thinking", runtime.thinking);
+	if (agent.tools && agent.tools.length > 0) {
+		const tools = messaging ? [...agent.tools, "subagent_message"] : agent.tools;
+		args.push("--tools", [...new Set(tools)].join(","));
+	}
+	return args;
+}
+
+/** Fold one finished assistant turn's usage and stop metadata into the result. */
+function applyAssistantTurn(result: SingleResult, msg: Extract<Message, { role: "assistant" }>) {
+	result.usage.turns++;
+	const usage = msg.usage;
+	if (usage) {
+		result.usage.input += usage.input || 0;
+		result.usage.output += usage.output || 0;
+		result.usage.cacheRead += usage.cacheRead || 0;
+		result.usage.cacheWrite += usage.cacheWrite || 0;
+		result.usage.cost += usage.cost?.total || 0;
+		result.usage.contextTokens = usage.totalTokens || 0;
+	}
+	if (!result.model && msg.model) result.model = msg.model;
+	if (msg.stopReason) result.stopReason = msg.stopReason;
+	if (msg.errorMessage) result.errorMessage = msg.errorMessage;
+}
+
+function removeTempPrompt(dir: string | null, filePath: string | null): void {
+	if (filePath)
+		try {
+			fs.unlinkSync(filePath);
+		} catch {
+			/* ignore */
+		}
+	if (dir)
+		try {
+			fs.rmdirSync(dir);
+		} catch {
+			/* ignore */
+		}
 }
 
 /**
@@ -674,15 +678,7 @@ export async function runAgentWithRetry(
 						exitCode: -1,
 						messages: [],
 						stderr: "",
-						usage: {
-							input: 0,
-							output: 0,
-							cacheRead: 0,
-							cacheWrite: 0,
-							cost: 0,
-							contextTokens: 0,
-							turns: 0,
-						},
+						usage: emptyUsage(),
 						step,
 					},
 				]),
