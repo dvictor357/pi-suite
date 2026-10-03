@@ -2,9 +2,10 @@
  * Single source of truth for retry, burst, and dependency-depth limits used
  * across pi-quest's steering, verification, and sub-agent delegation flows.
  *
- * Before this module, these values were scattered between pi-quest's
- * constants.ts and pi-minions' subagent/index.ts with no shared contract. This
- * consolidation lets one change tune both layers together.
+ * These are quest-level budgets. The subagent tool's `MAX_RETRIES`
+ * (extensions/subagent/constants.ts) is deliberately separate: it caps the
+ * per-call `retries` param for transient child-process failures (default 0),
+ * not quest step retries, so it is not derived from this policy.
  */
 
 export interface RetryPolicy {

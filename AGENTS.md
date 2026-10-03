@@ -103,6 +103,26 @@ extensions/
     dashboard-types.ts  DashboardStats / agent / cycle / trend / health shapes
     report.ts         Markdown and JSON recap builders (pure)
 
+  subagent/           pi-minions
+    index.ts          Thin entry point: wires register-* modules, re-exports public API
+    register-subagent.ts  subagent tool (render + execute wiring)
+    register-codebase.ts  codebase tool (scan/query/map/impact)
+    register-command.ts   /subagent command (routing, runs, show, rerun)
+    register-messaging.ts subagent_message tool + peer inbox hooks
+    execute.ts        Mode dispatch (single/parallel/chain/pipeline) + run history
+    runner.ts         Child pi spawn, runtime resolution, retry, output-contract enforcement
+    isolation.ts      Worktree isolation + concurrent write-claim validation
+    render.ts         Result types, formatting, progress payloads
+    schema.ts         typebox params for subagent/codebase tools
+    constants.ts      Concurrency, retry cap, timeout, output caps
+    agents.ts         Agent discovery/config (bundled agents/*.md + user/project)
+    budget.ts         Per-call cost/token caps
+    contract.ts       Structured output contracts (JSON Schema)
+    history.ts        Run history + rerun planning
+    messaging.ts      Project-scoped peer inboxes
+    worktree.ts       Git worktree create/finalize
+    codebase/         Scanner, cache, query (owns the codebase index)
+
 test/
   isolate-home.ts     Test preload: points HOME at a temp dir so tests never touch ~/.pi/agent
 
