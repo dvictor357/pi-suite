@@ -48,9 +48,9 @@ These were real mismatches found while extracting the contract:
    (no data loss): pi-memory owns `lastScanned` (last tech-stack scan); pi-quest writes
    `lastModified` and it survives rescans. Unifying them into one timestamp semantics is
    still open, but no longer causes data loss.
-3. **`verifyOnComplete` default. — OPEN.** pi-quest's loader defaults a legacy quest
-   missing this field to `false`, while `emptyQuest` and the docs default to `true`.
-   Quest-internal; tracked as a Tier-2 fix, not yet applied.
+3. **`verifyOnComplete` default. — RESOLVED.** pi-quest's loader
+   (`extensions/quest/storage.ts`) now defaults a legacy quest missing this field to
+   `true`, matching `emptyQuest` and the docs. Quest-internal.
 
 Cross-extension on-disk shapes now carry a `contractVersion` (stamped on write, checked
 on read via `isFutureContract`): a file written by a newer suite is not misread or
