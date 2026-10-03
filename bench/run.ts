@@ -4,8 +4,8 @@
  *   npm run bench -- validate [--tasks a,b]          check every task is fail→pass (no API calls)
  *   npm run bench -- run [--arms plain,suite] [--tasks a,b] [--trials N]
  *                        [--model provider/id] [--thinking level] [--concurrency N]
- *                        [--real-tiers] [--keep] [--dry-run]
- *   npm run bench -- report <results dir or .jsonl>
+ *                        [--suite-rev <commit>|worktree] [--real-tiers] [--keep] [--dry-run]
+ *   npm run bench -- report <results dir or .jsonl> [more ...]   (several runs merge, e.g. two --suite-rev)
  *
  * `run` spends real API money: (#tasks × #arms × trials) agent runs.
  */
@@ -24,6 +24,9 @@ import type { BenchArm, BenchResult, BenchTask } from "./types";
 import {
 	changedFiles,
 	createWorkspace,
+	exportSnapshot,
+	isDirty,
+	shortSha,
 	gradeWorkspace,
 	injectHiddenTests,
 	runProcess,
@@ -95,6 +98,11 @@ interface RunOptions {
 	thinking: string;
 	concurrency: number;
 	realTiers: boolean;
+	/** Commit of pi-suite to load into suite arms, or "worktree" for the live checkout. */
+	suiteRev: string;
+	/** Resolved at run start: where suite arms load pi-suite from, and its label. */
+	suiteRoot?: string;
+	suiteLabel?: string;
 	keep: boolean;
 	dryRun: boolean;
 }
@@ -107,7 +115,7 @@ interface Job {
 
 function sandboxOptions(opts: RunOptions): SandboxOptions {
 	return {
-		suiteRoot: REPO,
+		suiteRoot: opts.suiteRoot ?? REPO,
 		model: opts.model,
 		thinking: opts.thinking,
 		realTiers: opts.realTiers,
@@ -134,6 +142,7 @@ async function runOne(job: Job, opts: RunOptions, outDir: string): Promise<Bench
 		arm: arm.id,
 		model: opts.model,
 		thinking: opts.thinking,
+		...(arm.suite && opts.suiteLabel ? { suiteRev: opts.suiteLabel } : {}),
 		trial,
 		agentExitCode: null,
 		timedOut: false,
@@ -217,6 +226,23 @@ async function run(opts: RunOptions): Promise<void> {
 	}
 	checkAuth(opts);
 
+	let suiteDir: string | undefined;
+	if (opts.arms.some((a) => a.suite)) {
+		if (opts.suiteRev === "worktree") {
+			opts.suiteRoot = REPO;
+			opts.suiteLabel = `${shortSha(REPO, "HEAD")}${isDirty(REPO) ? "+dirty" : ""}`;
+		} else {
+			opts.suiteLabel = shortSha(REPO, opts.suiteRev);
+			if (opts.suiteRev === "HEAD" && isDirty(REPO)) {
+				console.log(`Note: uncommitted changes are NOT loaded; suite arms run ${opts.suiteLabel}.`);
+			}
+			suiteDir = mkdtempSync(join(tmpdir(), `pi-bench-suite-${opts.suiteLabel}-`));
+			exportSnapshot(REPO, opts.suiteLabel, suiteDir);
+			opts.suiteRoot = suiteDir;
+		}
+		console.log(`Suite arms load pi-suite @ ${opts.suiteLabel}`);
+	}
+
 	const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 	const outDir = join(REPO, "bench", "results", stamp);
 	mkdirSync(join(outDir, "transcripts"), { recursive: true });
@@ -243,6 +269,7 @@ async function run(opts: RunOptions): Promise<void> {
 				` $${r.usage.cost.toFixed(4)} ${Math.round(r.durationMs / 1000)}s${r.timedOut ? " TIMEOUT" : ""}`;
 		console.log(`[${done}/${jobs.length}] ${r.runId}: ${verdict}`);
 	});
+	if (suiteDir) rmSync(suiteDir, { recursive: true, force: true });
 	if (stopped) console.log(`\nStopped early after ${done}/${jobs.length} runs: ${stopped}`);
 	const report = formatReport(results);
 	writeFileSync(join(outDir, "report.md"), report + "\n");
@@ -273,17 +300,21 @@ async function main(argv: string[]): Promise<number> {
 			thinking: { type: "string" },
 			concurrency: { type: "string" },
 			"real-tiers": { type: "boolean" },
+			"suite-rev": { type: "string" },
 			keep: { type: "boolean" },
 			"dry-run": { type: "boolean" },
 		},
 	});
-	const [command, target] = positionals;
+	const [command] = positionals;
 	const tasks = pickById(TASKS, values.tasks, "task");
 
 	if (command === "validate") return (await validate(tasks)) ? 0 : 1;
 	if (command === "report") {
-		if (!target) throw new Error("Usage: bench report <results dir or results.jsonl>");
-		console.log(formatReport(loadResults(target)));
+		const targets = positionals.slice(1);
+		if (targets.length === 0) {
+			throw new Error("Usage: bench report <results dir or results.jsonl> [more ...]");
+		}
+		console.log(formatReport(targets.flatMap(loadResults)));
 		return 0;
 	}
 	if (command === "run") {
@@ -302,6 +333,7 @@ async function main(argv: string[]): Promise<number> {
 			thinking: values.thinking ?? BENCH.thinking,
 			concurrency: int(values.concurrency, BENCH.concurrency, "concurrency"),
 			realTiers: values["real-tiers"] ?? false,
+			suiteRev: values["suite-rev"] ?? "HEAD",
 			keep: values.keep ?? false,
 			dryRun: values["dry-run"] ?? false,
 		});

@@ -67,6 +67,8 @@ export interface BenchResult {
 	arm: string;
 	model: string;
 	thinking: string;
+	/** pi-suite commit the agent loaded (suite arms only). */
+	suiteRev?: string;
 	trial: number;
 	/** Agent process exit code (null when killed by the timeout). */
 	agentExitCode: number | null;

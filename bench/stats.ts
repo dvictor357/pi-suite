@@ -60,8 +60,8 @@ export function aggregate(results: readonly BenchResult[]): Aggregate {
 }
 
 /** Group key for an arm on a model — the unit two configurations are compared on. */
-export function armKey(r: Pick<BenchResult, "arm" | "model" | "thinking">): string {
-	return `${r.arm} · ${r.model}:${r.thinking}`;
+export function armKey(r: Pick<BenchResult, "arm" | "model" | "thinking" | "suiteRev">): string {
+	return `${r.arm}${r.suiteRev ? `@${r.suiteRev}` : ""} · ${r.model}:${r.thinking}`;
 }
 
 export function groupBy<T>(items: readonly T[], key: (t: T) => string): Map<string, T[]> {

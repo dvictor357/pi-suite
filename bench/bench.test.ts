@@ -12,7 +12,7 @@ import {
 	providersUsed,
 	sandboxSettings,
 } from "./sandbox";
-import { aggregate, median, pairedCompare, wilson } from "./stats";
+import { aggregate, armKey, median, pairedCompare, wilson } from "./stats";
 import { TASKS } from "./tasks";
 import type { BenchResult } from "./types";
 import { parseTapCounts, stripNodeModulesBin } from "./workspace";
@@ -271,4 +271,12 @@ test("populateAgentDir copies agents and only the run's credentials", () => {
 		rmSync(real, { recursive: true, force: true });
 		rmSync(sandbox, { recursive: true, force: true });
 	}
+});
+
+test("armKey labels suite arms with the pi-suite revision they loaded", () => {
+	assert.equal(armKey({ arm: "plain", model: "m", thinking: "low" }), "plain · m:low");
+	assert.equal(
+		armKey({ arm: "quest", model: "m", thinking: "low", suiteRev: "abc1234" }),
+		"quest@abc1234 · m:low",
+	);
 });

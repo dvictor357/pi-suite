@@ -172,4 +172,62 @@ it what failed before. Add a failure-brief block to sub-agent prompts:
 3. Wire it up: on a verification FAIL, render the step's failure briefs within that budget and
    pass them into the retry's sub-agent prompt and the orchestrator steering block.`,
 	},
+	{
+		id: "parallel-write-claims",
+		commit: "e570c60",
+		difficulty: "hard",
+		testFiles: [
+			"extensions/quest/write-claim.test.ts",
+			"extensions/quest/parallel.test.ts",
+			"extensions/quest/parallel-integration.test.ts",
+		],
+		prompt: `Parallel quest steps can silently overwrite each other's files.
+
+When quest parallel mode is enabled (\`ParallelConfig.enabled\`), execution-role steps that
+declare no write claim are still dispatched concurrently, so two workers can edit the same
+file. Require write claims for parallel writers:
+
+1. In extensions/quest/write-claim.ts export:
+   - \`hasNonEmptyWriteClaim(writeClaim: string[] | undefined): boolean\`
+   - \`missingParallelWriteClaimIndices(steps: ReadonlyArray<{ agent: string; writeClaim?: string[] }>): number[]\`
+     — 0-based indices of execution-role steps whose writeClaim is missing or empty.
+     Read-only roles (scout, verifier, reviewer, planner; see \`isReadOnlyRole\`) are exempt.
+   - \`validateParallelWriteClaims(steps): string | null\` — null when valid; otherwise an
+     error message containing "Parallel mode requires", the offending steps as 1-based
+     "#N" labels (e.g. "#2, #3"), and a note that "Read-only roles" may omit writeClaim.
+2. \`quest_plan\` rejects such a plan with that message when parallel mode is enabled.
+3. As defense in depth, \`selectDispatchBatch\` (extensions/quest/parallel.ts) never dispatches
+   an execution-role step without a non-empty write claim: it is reported in \`conflicts\` with
+   \`blockedBy: -1\`. Read-only roles are still dispatched without claims.`,
+	},
+	{
+		id: "sandbox-guard-bypass",
+		commit: "6466fab",
+		difficulty: "hard",
+		testFiles: ["extensions/quest/sandbox-guard.test.ts", "extensions/quest/storage.test.ts"],
+		prompt: `Close sandbox-guard bypasses and an archive-index write race in pi-quest.
+
+\`evaluateToolCall(profile, toolName, args)\` in extensions/quest/sandbox-guard.ts decides
+whether a sandboxed step's tool call is blocked. It has holes:
+
+1. Chained shell commands bypass every check: "echo ok && rm -rf src" is allowed because only
+   the whole string is classified. Split commands on &&, ||, ;, | and newlines and classify
+   every segment, so destructive commands, network commands (when network is denied),
+   package installs (when installs are denied) and \`denyCommands\` patterns are caught in any
+   segment. Also inspect \`$(...)\` and backtick substitutions: "echo $(rm -rf src)" and
+   "echo \`rm -rf src\`" must block. With \`allowCommands\` set, every segment must match an
+   allowed prefix ("echo hi && echo there" passes with ["echo"]; "echo hi && curl x" blocks),
+   and a destructive substitution still blocks even when the outer command is allowed.
+2. Write tools (\`write\`, \`edit\`) called without a path must fail closed (block). Remove tool
+   names that don't exist from the write-tool set.
+3. Unknown tools that carry a \`path\` argument must be checked against denied paths, the
+   built-in sensitive globs (e.g. .env), and \`allowedPaths\` when set. Unknown tools without a
+   path are allowed. Non-write tools like \`read\` on a denied/sensitive path are blocked.
+
+Separately, \`archiveQuest\` (extensions/quest/storage.ts) overwrites the archive index, so an
+entry written by another process between our read and write is lost. Make the index update
+read-merge-write (use the core \`updateJSON\` helper), keep existing entries, and deduplicate
+entries by archive path so archiving the same quest twice leaves one entry. Apply the same
+read-merge-write treatment to quest→todo syncing.`,
+	},
 ];

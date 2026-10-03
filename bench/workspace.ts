@@ -49,6 +49,30 @@ export function createWorkspace(repo: string, rev: string, root: string): Worksp
 	return { dir, home };
 }
 
+/**
+ * Export `rev` of `repo` into `dir` (no git metadata), with `node_modules`
+ * symlinked from the source repo. Used to load a frozen pi-suite into the agent
+ * so edits to the working tree can't leak into a running benchmark.
+ */
+export function exportSnapshot(repo: string, rev: string, dir: string): void {
+	mkdirSync(dir, { recursive: true });
+	const tar = git(repo, ["archive", "--format=tar", rev]);
+	execFileSync("tar", ["-x", "-C", dir], { input: tar, maxBuffer: 256 * 1024 * 1024 });
+	symlinkSync(join(repo, "node_modules"), join(dir, "node_modules"));
+}
+
+/** Resolve a revision to its short sha. */
+export function shortSha(repo: string, rev: string): string {
+	return git(repo, ["rev-parse", "--short", `${rev}^{commit}`])
+		.toString()
+		.trim();
+}
+
+/** True when the repo has uncommitted changes to tracked files. */
+export function isDirty(repo: string): boolean {
+	return git(repo, ["status", "--porcelain", "--untracked-files=no"]).toString().trim() !== "";
+}
+
 /** Files changed in the snapshot since its base commit, including untracked ones. */
 export function changedFiles(dir: string): string[] {
 	const out = git(dir, ["status", "--porcelain", "-uall", "--no-renames"]).toString();

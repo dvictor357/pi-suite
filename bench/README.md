@@ -23,6 +23,8 @@ Cost and tokens come from the JSON event stream: assistant `message_end` usage, 
 | `suite` | pi with this repo's pi-suite loaded (memory, todo, quest tools, pi-minions sub-agents)                   |
 | `quest` | `suite`, plus a prompt prefix telling the agent to run the task as a pi-quest (plan → delegate → verify) |
 
+Suite arms load pi-suite from a frozen `git archive` of `--suite-rev` (default `HEAD`), so editing quest code while a batch runs can't contaminate it. Uncommitted changes aren't loaded unless you pass `--suite-rev worktree`. The report labels suite arms `suite@<sha>`, so two pi-suite versions compare side by side: run the same tasks with `--suite-rev <old>` and `--suite-rev <new>`, then pass both result files to `report`.
+
 By default every sub-agent tier is pinned to the run's model, so `suite` vs `plain` measures the harness, not a stronger model hidden in a tier. `--real-tiers` uses your `settings.json` tiers instead.
 
 `suite` has the tools available but leaves it to the agent to use them. `quest` forces orchestration, so `quest` vs `suite` isolates what the orchestration itself costs and buys.
@@ -33,7 +35,7 @@ By default every sub-agent tier is pinned to the run's model, so `suite` vs `pla
 npm run bench -- validate                       # every task fails on parent, passes on commit ($0)
 npm run bench -- run --dry-run                  # list the runs without spending anything
 npm run bench -- run --tasks verify-prose --trials 1 --keep   # one cheap smoke run
-npm run bench -- run                            # full matrix: 8 tasks × 3 arms × 3 trials
+npm run bench -- run                            # full matrix: 10 tasks × 3 arms × 3 trials
 npm run bench -- run --model openai-codex/gpt-6-sol --thinking high --arms suite
 npm run bench -- report bench/results/<stamp>   # re-render a report
 ```
