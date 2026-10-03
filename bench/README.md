@@ -34,16 +34,17 @@ npm run bench -- validate                       # every task fails on parent, pa
 npm run bench -- run --dry-run                  # list the runs without spending anything
 npm run bench -- run --tasks verify-prose --trials 1 --keep   # one cheap smoke run
 npm run bench -- run                            # full matrix: 8 tasks × 3 arms × 3 trials
-npm run bench -- run --model deepseek/deepseek-v4-pro --arms suite
+npm run bench -- run --model openai-codex/gpt-6-sol --thinking high --arms suite
 npm run bench -- report bench/results/<stamp>   # re-render a report
 ```
 
-Knobs (trials, default model, timeouts, concurrency) live in `config.ts`.
+Knobs (trials, default model `openai-codex/gpt-6.1-sol` at `low`, blocked providers, timeouts, concurrency) live in `config.ts`.
 
 ## Safety
 
 - Every run gets its own `HOME` and `PI_CODING_AGENT_DIR`. Nothing touches the real `~/.pi/agent`, including `npm test` runs the agent makes in old commits that predate test isolation.
-- Only API-key credentials are copied into the sandbox. OAuth entries are left out because a token refresh in the sandbox could rotate the refresh token and log you out for real. `--share-auth` symlinks the real `auth.json` when you need an OAuth provider.
+- The sandbox `auth.json` holds only the providers the run uses (the model plus every sub-agent tier). Providers in `BENCH.blockedProviders` (deepseek, which is prepaid credit) are refused outright and their keys are never copied.
+- OAuth tokens are never refreshed inside a sandbox, because that would rotate the refresh token and log you out for real. Before every run the harness checks that the token stays valid past `agentTimeoutMs` plus a margin. If it won't, the batch stops early. Refresh with any short pi call outside the bench, then run again.
 - User packages, skills and `APPEND_SYSTEM.md` are not loaded. Arms differ only in what the arm declares.
 - `run` spends real money: tasks × arms × trials agent runs.
 

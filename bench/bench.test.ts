@@ -5,7 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { usageFromJsonl } from "./events";
 import { formatReport } from "./report";
-import { apiKeyAuth, populateAgentDir, sandboxSettings } from "./sandbox";
+import {
+	assertAuthUsable,
+	pickAuth,
+	populateAgentDir,
+	providersUsed,
+	sandboxSettings,
+} from "./sandbox";
 import { aggregate, median, pairedCompare, wilson } from "./stats";
 import { TASKS } from "./tasks";
 import type { BenchResult } from "./types";
@@ -144,12 +150,59 @@ test("formatReport excludes harness errors and compares arms", () => {
 	assert.equal(formatReport([]), "No runs recorded.");
 });
 
-test("apiKeyAuth drops OAuth credentials", () => {
-	const auth = apiKeyAuth({
-		deepseek: { type: "api_key", key: "k" },
-		"openai-codex": { type: "oauth", refresh: "r" },
-	});
-	assert.deepEqual(Object.keys(auth), ["deepseek"]);
+test("pickAuth keeps only the providers a run uses", () => {
+	const auth = pickAuth(
+		{ deepseek: { type: "api_key", key: "k" }, "openai-codex": { type: "oauth", refresh: "r" } },
+		["openai-codex"],
+	);
+	assert.deepEqual(Object.keys(auth), ["openai-codex"]);
+});
+
+test("providersUsed covers the model and every sub-agent tier", () => {
+	const opts = { suiteRoot: "/s", model: "openai-codex/gpt-6.1-sol", thinking: "low" };
+	const real = { subagent: { models: { fast: "deepseek/deepseek-flash" } } };
+	assert.deepEqual(providersUsed(opts, real), ["openai-codex"]);
+	assert.deepEqual(providersUsed({ ...opts, realTiers: true }, real), ["deepseek", "openai-codex"]);
+});
+
+test("assertAuthUsable blocks providers, missing creds, and near-expiry OAuth", () => {
+	const real = mkdtempSync(join(tmpdir(), "bench-auth-"));
+	const now = 1_000_000_000_000;
+	const write = (auth: object, settings: object = {}) => {
+		writeFileSync(join(real, "auth.json"), JSON.stringify(auth));
+		writeFileSync(join(real, "settings.json"), JSON.stringify(settings));
+	};
+	const opts = {
+		realAgentDir: real,
+		suiteRoot: "/s",
+		model: "openai-codex/gpt-6.1-sol",
+		thinking: "low",
+	};
+	const hour = 3_600_000;
+	try {
+		write({ "openai-codex": { type: "oauth", expires: now + 2 * hour } });
+		assert.doesNotThrow(() => assertAuthUsable(opts, ["deepseek"], hour, now));
+		assert.throws(() => assertAuthUsable(opts, ["deepseek"], 3 * hour, now), /expires in 120 min/);
+		write({ "openai-codex": { type: "oauth", expires: (now - hour) / 1000 } });
+		assert.throws(() => assertAuthUsable(opts, [], hour, now), /expired 60 min ago/);
+		write({});
+		assert.throws(() => assertAuthUsable(opts, [], hour, now), /No credentials/);
+		write(
+			{ "openai-codex": { type: "oauth", expires: now + 9 * hour }, deepseek: { type: "api_key" } },
+			{ subagent: { models: { fast: "deepseek/deepseek-flash" } } },
+		);
+		assert.throws(
+			() => assertAuthUsable({ ...opts, realTiers: true }, ["deepseek"], hour, now),
+			/deepseek are blocked/,
+		);
+		assert.throws(
+			() =>
+				assertAuthUsable({ ...opts, model: "deepseek/deepseek-flash" }, ["deepseek"], hour, now),
+			/blocked/,
+		);
+	} finally {
+		rmSync(real, { recursive: true, force: true });
+	}
 });
 
 test("sandboxSettings pins every sub-agent tier and loads pi-suite only for suite arms", () => {
@@ -193,18 +246,25 @@ test("stripNodeModulesBin drops npm-run bin dirs and keeps the rest", () => {
 	assert.equal(stripNodeModulesBin(undefined, ":"), "");
 });
 
-test("populateAgentDir copies agents so sandbox edits never reach the real files", () => {
+test("populateAgentDir copies agents and only the run's credentials", () => {
 	const real = mkdtempSync(join(tmpdir(), "bench-real-"));
 	const sandbox = mkdtempSync(join(tmpdir(), "bench-sandbox-"));
 	try {
 		mkdirSync(join(real, "agents"));
 		writeFileSync(join(real, "agents", "worker.md"), "original");
+		writeFileSync(
+			join(real, "auth.json"),
+			JSON.stringify({ p: { type: "oauth" }, deepseek: { type: "api_key", key: "k" } }),
+		);
 		populateAgentDir(
 			sandbox,
 			{ id: "suite", description: "", suite: true },
 			{ realAgentDir: real, suiteRoot: "/suite", model: "p/m", thinking: "high" },
 		);
 		assert.equal(lstatSync(join(sandbox, "agents")).isSymbolicLink(), false);
+		assert.deepEqual(Object.keys(JSON.parse(readFileSync(join(sandbox, "auth.json"), "utf8"))), [
+			"p",
+		]);
 		writeFileSync(join(sandbox, "agents", "worker.md"), "edited by agent");
 		assert.equal(readFileSync(join(real, "agents", "worker.md"), "utf8"), "original");
 	} finally {

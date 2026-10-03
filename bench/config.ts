@@ -7,8 +7,15 @@ export const BENCH = {
 	/** Trials per (task, arm, model). 3 is the floor for seeing variance. */
 	trials: 3,
 	/** Default model for every arm (and every sub-agent tier, unless --real-tiers). */
-	model: "deepseek/deepseek-flash",
-	thinking: "high",
+	model: "openai-codex/gpt-6.1-sol",
+	thinking: "low",
+	/**
+	 * Providers the bench must never touch: refused up front, and their
+	 * credentials are never copied into a sandbox. deepseek is prepaid credit.
+	 */
+	blockedProviders: ["deepseek"] as readonly string[],
+	/** Safety margin on top of `agentTimeoutMs` an OAuth token must stay valid for before each run. */
+	oauthMarginMs: 5 * 60_000,
 	/** Wall-clock cap on one agent run. */
 	agentTimeoutMs: 15 * 60_000,
 	/** Wall-clock cap on grading one run's hidden tests. */

@@ -4,7 +4,7 @@
  *   npm run bench -- validate [--tasks a,b]          check every task is fail→pass (no API calls)
  *   npm run bench -- run [--arms plain,suite] [--tasks a,b] [--trials N]
  *                        [--model provider/id] [--thinking level] [--concurrency N]
- *                        [--real-tiers] [--share-auth] [--keep] [--dry-run]
+ *                        [--real-tiers] [--keep] [--dry-run]
  *   npm run bench -- report <results dir or .jsonl>
  *
  * `run` spends real API money: (#tasks × #arms × trials) agent runs.
@@ -18,7 +18,7 @@ import { parseArgs } from "node:util";
 import { ARMS, BENCH, PROMPT_FOOTER } from "./config";
 import { usageFromJsonl } from "./events";
 import { formatReport } from "./report";
-import { populateAgentDir } from "./sandbox";
+import { assertAuthUsable, populateAgentDir, type SandboxOptions } from "./sandbox";
 import { TASKS } from "./tasks";
 import type { BenchArm, BenchResult, BenchTask } from "./types";
 import {
@@ -95,7 +95,6 @@ interface RunOptions {
 	thinking: string;
 	concurrency: number;
 	realTiers: boolean;
-	shareAuth: boolean;
 	keep: boolean;
 	dryRun: boolean;
 }
@@ -104,6 +103,24 @@ interface Job {
 	task: BenchTask;
 	arm: BenchArm;
 	trial: number;
+}
+
+function sandboxOptions(opts: RunOptions): SandboxOptions {
+	return {
+		suiteRoot: REPO,
+		model: opts.model,
+		thinking: opts.thinking,
+		realTiers: opts.realTiers,
+	};
+}
+
+/** Blocked providers, missing credentials, or an OAuth token that could expire during one run. */
+function checkAuth(opts: RunOptions): void {
+	assertAuthUsable(
+		sandboxOptions(opts),
+		BENCH.blockedProviders,
+		BENCH.agentTimeoutMs + BENCH.oauthMarginMs,
+	);
 }
 
 async function runOne(job: Job, opts: RunOptions, outDir: string): Promise<BenchResult> {
@@ -124,13 +141,7 @@ async function runOne(job: Job, opts: RunOptions, outDir: string): Promise<Bench
 	};
 	try {
 		const ws = createWorkspace(REPO, `${task.commit}^`, root);
-		populateAgentDir(join(ws.home, ".pi", "agent"), arm, {
-			suiteRoot: REPO,
-			model: opts.model,
-			thinking: opts.thinking,
-			realTiers: opts.realTiers,
-			shareAuth: opts.shareAuth,
-		});
+		populateAgentDir(join(ws.home, ".pi", "agent"), arm, sandboxOptions(opts));
 		const args = [
 			"--mode",
 			"json",
@@ -204,6 +215,7 @@ async function run(opts: RunOptions): Promise<void> {
 		for (const j of jobs) console.log(`  ${j.task.id} · ${j.arm.id} · trial ${j.trial}`);
 		return;
 	}
+	checkAuth(opts);
 
 	const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 	const outDir = join(REPO, "bench", "results", stamp);
@@ -211,7 +223,16 @@ async function run(opts: RunOptions): Promise<void> {
 	const resultsPath = join(outDir, "results.jsonl");
 	const results: BenchResult[] = [];
 	let done = 0;
+	let stopped: string | undefined;
 	await pool(jobs, opts.concurrency, async (job) => {
+		if (stopped) return;
+		// Re-checked per run: a long batch must stop before a token could expire mid-run.
+		try {
+			checkAuth(opts);
+		} catch (err) {
+			stopped = err instanceof Error ? err.message : String(err);
+			return;
+		}
 		const r = await runOne(job, opts, outDir);
 		results.push(r);
 		appendFileSync(resultsPath, JSON.stringify(r) + "\n");
@@ -222,6 +243,7 @@ async function run(opts: RunOptions): Promise<void> {
 				` $${r.usage.cost.toFixed(4)} ${Math.round(r.durationMs / 1000)}s${r.timedOut ? " TIMEOUT" : ""}`;
 		console.log(`[${done}/${jobs.length}] ${r.runId}: ${verdict}`);
 	});
+	if (stopped) console.log(`\nStopped early after ${done}/${jobs.length} runs: ${stopped}`);
 	const report = formatReport(results);
 	writeFileSync(join(outDir, "report.md"), report + "\n");
 	console.log("\n" + report + `\n\nResults: ${resultsPath}`);
@@ -251,7 +273,6 @@ async function main(argv: string[]): Promise<number> {
 			thinking: { type: "string" },
 			concurrency: { type: "string" },
 			"real-tiers": { type: "boolean" },
-			"share-auth": { type: "boolean" },
 			keep: { type: "boolean" },
 			"dry-run": { type: "boolean" },
 		},
@@ -281,7 +302,6 @@ async function main(argv: string[]): Promise<number> {
 			thinking: values.thinking ?? BENCH.thinking,
 			concurrency: int(values.concurrency, BENCH.concurrency, "concurrency"),
 			realTiers: values["real-tiers"] ?? false,
-			shareAuth: values["share-auth"] ?? false,
 			keep: values.keep ?? false,
 			dryRun: values["dry-run"] ?? false,
 		});
