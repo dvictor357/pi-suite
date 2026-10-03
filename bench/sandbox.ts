@@ -7,7 +7,7 @@
  * and silently invalidate the real login. `shareAuth` symlinks the real file
  * instead, for runs that need an OAuth provider.
  */
-import { existsSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { BenchArm } from "./types";
@@ -90,8 +90,10 @@ export function populateAgentDir(agentDir: string, arm: BenchArm, opts: SandboxO
 		if (existsSync(src)) writeFileSync(join(agentDir, name), readFileSync(src));
 	}
 	// The user's agent definitions (tiers, prompts) are part of the suite setup.
+	// Copied, never symlinked: the agent has write tools and once "fixed" a real
+	// agent file in the user's dotfiles through a symlink.
 	if (arm.suite && existsSync(join(real, "agents"))) {
-		symlinkSync(join(real, "agents"), join(agentDir, "agents"));
+		cpSync(join(real, "agents"), join(agentDir, "agents"), { recursive: true, dereference: true });
 	}
 	const realSettings = readJsonOr<Record<string, unknown>>(join(real, "settings.json"), {});
 	writeFileSync(

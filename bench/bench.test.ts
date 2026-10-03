@@ -1,8 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { usageFromJsonl } from "./events";
 import { formatReport } from "./report";
-import { apiKeyAuth, sandboxSettings } from "./sandbox";
+import { apiKeyAuth, populateAgentDir, sandboxSettings } from "./sandbox";
 import { aggregate, median, pairedCompare, wilson } from "./stats";
 import { TASKS } from "./tasks";
 import type { BenchResult } from "./types";
@@ -188,4 +191,24 @@ test("stripNodeModulesBin drops npm-run bin dirs and keeps the rest", () => {
 		"/usr/bin:/opt/bin",
 	);
 	assert.equal(stripNodeModulesBin(undefined, ":"), "");
+});
+
+test("populateAgentDir copies agents so sandbox edits never reach the real files", () => {
+	const real = mkdtempSync(join(tmpdir(), "bench-real-"));
+	const sandbox = mkdtempSync(join(tmpdir(), "bench-sandbox-"));
+	try {
+		mkdirSync(join(real, "agents"));
+		writeFileSync(join(real, "agents", "worker.md"), "original");
+		populateAgentDir(
+			sandbox,
+			{ id: "suite", description: "", suite: true },
+			{ realAgentDir: real, suiteRoot: "/suite", model: "p/m", thinking: "high" },
+		);
+		assert.equal(lstatSync(join(sandbox, "agents")).isSymbolicLink(), false);
+		writeFileSync(join(sandbox, "agents", "worker.md"), "edited by agent");
+		assert.equal(readFileSync(join(real, "agents", "worker.md"), "utf8"), "original");
+	} finally {
+		rmSync(real, { recursive: true, force: true });
+		rmSync(sandbox, { recursive: true, force: true });
+	}
 });
