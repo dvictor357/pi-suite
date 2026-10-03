@@ -11,7 +11,7 @@ import {
 	resolveHead,
 	worktreeBranchName,
 } from "./worktree.js";
-import { type SingleResult } from "./render.js";
+import { emptyUsage, type SingleResult } from "./render.js";
 
 export const READ_ONLY_AGENTS = new Set(["scout", "planner", "reviewer", "verifier"]);
 export const WRITE_TOOLS = new Set(["write", "edit", "bash"]);
@@ -37,15 +37,7 @@ export function failedResult(agentName: string, task: string, message: string): 
 		messages: [],
 		stderr: message,
 		errorMessage: message,
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			cost: 0,
-			contextTokens: 0,
-			turns: 0,
-		},
+		usage: emptyUsage(),
 	};
 }
 

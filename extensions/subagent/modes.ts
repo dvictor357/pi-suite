@@ -17,6 +17,7 @@ import {
 	validateConcurrentWriteClaims,
 } from "./isolation.js";
 import {
+	emptyUsage,
 	getAnswerText,
 	getResultOutput,
 	isFailedResult,
@@ -100,15 +101,7 @@ function pendingResult(agent: string, task: string): SingleResult {
 		exitCode: -1, // -1 = still running
 		messages: [],
 		stderr: "",
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			cost: 0,
-			contextTokens: 0,
-			turns: 0,
-		},
+		usage: emptyUsage(),
 	};
 }
 

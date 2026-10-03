@@ -109,7 +109,8 @@ extensions/
     register-codebase.ts  codebase tool (scan/query/map/impact)
     register-command.ts   /subagent command (routing, runs, show, rerun)
     register-messaging.ts subagent_message tool + peer inbox hooks
-    execute.ts        Mode dispatch (single/parallel/chain/pipeline) + run history
+    execute.ts        Call validation, rerun + run history, mode dispatch
+    modes.ts          Per-mode runners: chain, parallel, pipeline, single
     runner.ts         Child pi spawn, runtime resolution, retry, output-contract enforcement
     isolation.ts      Worktree isolation + concurrent write-claim validation
     render.ts         Result types, formatting, progress payloads

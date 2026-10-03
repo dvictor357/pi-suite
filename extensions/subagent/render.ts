@@ -140,6 +140,10 @@ export interface UsageStats {
 	turns: number;
 }
 
+export function emptyUsage(): UsageStats {
+	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 };
+}
+
 export interface SingleResult {
 	agent: string;
 	agentSource: "user" | "project" | "bundled" | "unknown";
