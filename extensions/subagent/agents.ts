@@ -80,7 +80,15 @@ export function loadAgentsFromDir(
 			continue;
 		}
 
-		const { frontmatter, body } = parseFrontmatter<Record<string, string>>(content);
+		// One malformed file (e.g. an unquoted description containing ": ") must
+		// not take down discovery for every other agent.
+		let parsed: { frontmatter: Record<string, string>; body: string };
+		try {
+			parsed = parseFrontmatter<Record<string, string>>(content);
+		} catch {
+			continue;
+		}
+		const { frontmatter, body } = parsed;
 
 		if (!frontmatter.name || !frontmatter.description) {
 			continue;
