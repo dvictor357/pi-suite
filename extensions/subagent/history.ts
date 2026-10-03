@@ -40,6 +40,7 @@ export interface RecordedResult {
 	stopReason?: string;
 	errorMessage?: string;
 	step?: number;
+	peerId?: string;
 	model?: string;
 	worktree?: { branch?: string; diffStat: string; error?: string };
 	structured?: unknown;
@@ -340,6 +341,7 @@ export function formatRunDetail(record: RunRecord): string {
 			`── ${label} ${r.agent} · ${status} · ${r.usage?.turns ?? 0} turns${r.model ? ` · ${r.model}` : ""}`,
 			`Task: ${truncate(r.task, 300)}`,
 		);
+		if (r.peerId) lines.push(`Peer ID: ${r.peerId}`);
 		const output = isFailed(r)
 			? r.errorMessage || r.stderr || finalText(r.messages)
 			: finalText(r.messages);

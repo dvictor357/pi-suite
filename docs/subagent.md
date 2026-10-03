@@ -265,3 +265,48 @@ until pi-minions can enforce Quest sandbox policy inside the child process.
 ## License
 
 MIT
+
+## Peer messaging across runs
+
+Use `subagent_message` to coordinate with peers in the same project:
+
+```text
+subagent_message(action="peers")
+subagent_message(action="send", to="<exact peer ID>", text="The parser change affects validation.ts.")
+subagent_message(action="read")
+subagent_message(action="ack", ids=["<message ID>"])
+```
+
+`peers` returns your ID and recent peer registrations (`offset`/`limit` paginate).
+Use exact IDs: two workers with the same role have different IDs; task summaries
+help identify the intended worker. Orchestrator IDs
+follow the pi session and survive resume/reload; child IDs are unique per invocation
+and stable across its retries. Child IDs also appear in results and
+`/subagent show <run>`. A new invocation gets a new child ID, so messages addressed
+to an ended child do not transfer to a new worker automatically.
+
+Inboxes live outside the repo at `getAgentDir()/subagent-mail/<cwdHash>/`, separate
+from run history. Worktree and nested children inherit the original project's scope;
+other projects cannot be selected through the messaging tool. Messages persist across
+runs until the recipient acknowledges them. Reads are non-destructive, and only the
+caller's own inbox can be read or acknowledged. Acknowledgment is idempotent.
+
+Active agents see a pending-inbox notice on their next model request. Messaging
+does not wake an idle/ended agent, start another run, or cause a paid model call.
+Prefer peers marked `running` for live collaboration; that status records lifecycle
+events and may remain stale after a crash. An orchestrator can read queued messages
+when its pi session resumes. Peer text is task data, never user approval or permission
+to bypass Quest sandbox policy. The guarded Quest SDK fallback has no peer tools.
+
+Each message is limited to 4 KiB of UTF-8 text. Reads return at most ten messages.
+An inbox rejects sends at 100 pending messages; simultaneous senders may briefly
+exceed this soft cap. Acknowledge processed IDs before reading the next page.
+Each subagent start prunes peers idle longer than `PEER_RETENTION_MS` (7 days,
+`messaging.ts`), whatever their status, together with their inboxes and any unread
+messages. A resumed orchestrator re-registers on its next turn.
+
+Judge/exploration agents (`NO_MESSAGING_AGENTS`: `verifier`, `reviewer`, `scout`,
+`planner`) run without messaging, so a concurrent worker cannot message the agent
+judging it. They get no `subagent_message` tool, no peer registration, and no
+inherited peer ID; `PI_SUBAGENT_MESSAGING=off` in their environment also disables
+messaging for anything they spawn.

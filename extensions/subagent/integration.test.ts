@@ -88,7 +88,13 @@ it("loads all five extensions with the pi loader without model calls", async () 
 	const tools = loaded.extensions.flatMap((extension) => [...extension.tools.keys()]);
 	expect(new Set(tools).size).toBe(tools.length);
 	expect(tools).toEqual(
-		expect.arrayContaining(["subagent", "codebase", "quest_delegate", "agent_dashboard"]),
+		expect.arrayContaining([
+			"subagent",
+			"subagent_message",
+			"codebase",
+			"quest_delegate",
+			"agent_dashboard",
+		]),
 	);
 	const minions = loaded.extensions.find((extension) => extension.path === paths[4])!;
 	expect(minions.commands.has("subagent")).toBe(true);

@@ -34,16 +34,26 @@ export function readJSON<T>(path: string, fallback: T): T {
  *
  * Writes to a temp file and atomically `rename`s it into place, so a crash
  * mid-write can never leave a partially-written (corrupt) file that the
- * best-effort readers would silently discard. Best-effort: never throws.
+ * best-effort readers would silently discard. By default errors are reported to
+ * the sink; throwOnError lets callers require publication to succeed. mode applies
+ * to the temporary file before publication, without a post-rename permission race.
  */
-export function writeJSON(path: string, data: unknown): void {
+export function writeJSON(
+	path: string,
+	data: unknown,
+	options: { mode?: number; throwOnError?: boolean } = {},
+): void {
 	try {
 		mkdirSync(dirname(path), { recursive: true });
 		const tmp = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
-		writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+		writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, {
+			encoding: "utf8",
+			mode: options.mode,
+		});
 		renameSync(tmp, path);
 	} catch (e) {
 		errorSink(`writeJSON(${path})`, e);
+		if (options.throwOnError) throw e;
 	}
 }
 

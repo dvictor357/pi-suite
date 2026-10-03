@@ -1,6 +1,6 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readdirSync, writeFileSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readJSON, writeJSON, updateJSON, appendLine, setErrorSink } from "./fs";
@@ -151,3 +151,33 @@ test("appendLine appends newline-terminated lines, creating dirs", () => {
 function readJSONRaw(p: string): string[] {
 	return readFileSync(p, "utf8").split("\n").filter(Boolean);
 }
+
+test("writeJSON publishes private files with permissions set before rename", () => {
+	const dir = freshDir();
+	try {
+		const file = join(dir, "private.json");
+		writeJSON(file, { private: true }, { mode: 0o600, throwOnError: true });
+		assert.deepEqual(readJSON(file, null), { private: true });
+		assert.equal(statSync(file).mode & 0o777, 0o600);
+		assert.deepEqual(readdirSync(dir), ["private.json"]);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("writeJSON strict errors are opt-in and reach the existing error sink", () => {
+	const dir = freshDir();
+	try {
+		const blocker = join(dir, "file-not-directory");
+		writeFileSync(blocker, "original");
+		const path = join(blocker, "cannot-write.json");
+		const errors: string[] = [];
+		setErrorSink((context) => errors.push(context));
+		assert.doesNotThrow(() => writeJSON(path, {}));
+		assert.throws(() => writeJSON(path, {}, { throwOnError: true }));
+		assert.equal(errors.length, 2);
+		assert.equal(readFileSync(blocker, "utf8"), "original");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});

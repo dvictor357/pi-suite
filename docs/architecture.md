@@ -328,3 +328,16 @@ This consolidation is the precondition for the loop-engineering roadmap (determi
 verification gates, run-log observability, pluggable todo/memory backends): those all
 hook the shared contract and a single transition chokepoint rather than three drifting
 copies. See the per-extension docs once migrated.
+
+## Peer messaging ownership
+
+`extensions/subagent/messaging.ts` owns project-scoped peer registrations and inboxes;
+`register-messaging.ts` registers `subagent_message` and inbox awareness hooks.
+This state is extension-private, so it stays outside `core/`. Shared hashing and JSON
+helpers are reused. Each message gets an immutable UUID-named file published with
+the shared atomic writer, avoiding cross-process read-modify-write races. Reads
+never consume messages; explicit acknowledgment deletes only the caller's addressed
+files and safely tolerates repeated acknowledgment. Runner environment variables
+bind child identity and original project scope, including worktrees and nested runs.
+The parent records child lifecycle completion in `finally`, including cancellation.
+Quest continues to own routing, verification, budgets, and its guarded fallback.

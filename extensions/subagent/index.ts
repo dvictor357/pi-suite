@@ -20,6 +20,15 @@ import {
 	loadAgentModels as loadQuestAgentModels,
 	THINKING_LEVELS as THINKING_LEVEL_VALUES,
 } from "../../core";
+import { registerMessaging } from "./register-messaging";
+import {
+	childPeerId,
+	messagingEnabled,
+	noMessagingEnvironment,
+	peerEnvironment,
+	PeerInbox,
+	PROJECT_CWD_ENV,
+} from "./messaging";
 import { spawn } from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
@@ -236,6 +245,8 @@ export interface SingleResult {
 	stopReason?: string;
 	errorMessage?: string;
 	step?: number;
+	/** Address for project-scoped peer messaging, stable across retries. */
+	peerId?: string;
 	/** Present when the task ran in an isolated git worktree. */
 	worktree?: WorktreeOutcome;
 	/** Validated JSON answer when the run had an output contract. */
@@ -891,8 +902,15 @@ export async function runSingleAgent(
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
 	if (runtime.model) args.push("--model", runtime.model);
 	if (runtime.thinking) args.push("--thinking", runtime.thinking);
-	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
+	const messaging = messagingEnabled(agent.name);
+	if (agent.tools && agent.tools.length > 0) {
+		const tools = messaging ? [...agent.tools, "subagent_message"] : agent.tools;
+		args.push("--tools", [...new Set(tools)].join(","));
+	}
 
+	const peerInbox = messaging
+		? new PeerInbox(process.env[PROJECT_CWD_ENV] || defaultCwd, childPeerId(runId))
+		: undefined;
 	let tmpPromptDir: string | null = null;
 	let tmpPromptPath: string | null = null;
 
@@ -912,6 +930,7 @@ export async function runSingleAgent(
 			contextTokens: 0,
 			turns: 0,
 		},
+		peerId: peerInbox?.peerId,
 		model: runtime.model,
 		thinking: runtime.thinking,
 		step,
@@ -973,6 +992,14 @@ export async function runSingleAgent(
 	}
 
 	try {
+		if (peerInbox) {
+			try {
+				peerInbox.prune();
+			} catch {
+				/* Pruning is housekeeping; never block a run on it. */
+			}
+			peerInbox.register(agentName, "running", task);
+		}
 		if (agent.systemPrompt.trim()) {
 			const tmp = await writePromptToTempFile(agent.name, agent.systemPrompt);
 			tmpPromptDir = tmp.dir;
@@ -995,6 +1022,7 @@ export async function runSingleAgent(
 				shell: false,
 				detached: process.platform !== "win32",
 				stdio: ["ignore", "pipe", "pipe"],
+				env: peerInbox ? peerEnvironment(defaultCwd, runId) : noMessagingEnvironment(),
 			});
 			let buffer = "";
 			let closed = false;
@@ -1205,6 +1233,11 @@ export async function runSingleAgent(
 		if (wasAborted) throw new Error("Subagent was aborted");
 		return currentResult;
 	} finally {
+		try {
+			peerInbox?.register(agentName, "finished", task);
+		} catch {
+			/* Preserve the execution result if messaging storage is unavailable. */
+		}
 		if (tmpPromptPath)
 			try {
 				fs.unlinkSync(tmpPromptPath);
@@ -2333,6 +2366,7 @@ async function runSubagentCall(
 }
 
 export default function (pi: ExtensionAPI) {
+	registerMessaging(pi);
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",

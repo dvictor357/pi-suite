@@ -93,10 +93,11 @@ inspection.
 
 ### Subagent (pi-minions)
 
-| Tool       | Purpose                                                                                                  |
-| ---------- | -------------------------------------------------------------------------------------------------------- |
-| `subagent` | Single, parallel, chain, and pipeline execution with budgets, retries, contracts, history, and worktrees |
-| `codebase` | Scan, query, map, and impact analysis                                                                    |
+| Tool               | Purpose                                                                                                  |
+| ------------------ | -------------------------------------------------------------------------------------------------------- |
+| `subagent`         | Single, parallel, chain, and pipeline execution with budgets, retries, contracts, history, and worktrees |
+| `subagent_message` | List project peers, send messages across runs, read and acknowledge your inbox                           |
+| `codebase`         | Scan, query, map, and impact analysis                                                                    |
 
 Command: `/subagent`. See [usage and settings](docs/subagent.md). Requires Node 22.19+ and pi SDK 1.0+.
 

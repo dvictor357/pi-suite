@@ -381,6 +381,7 @@ describe("/subagent command", () => {
 		const sent: string[] = [];
 		ext({
 			registerTool() {},
+			on() {},
 			registerCommand(_name: string, opts: { handler: typeof handler }) {
 				handler = opts.handler;
 			},

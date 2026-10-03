@@ -9,7 +9,7 @@ You are working in `pi-suite`, a TypeScript package for pi. Use this file as you
 - `pi-quest` plans work, delegates steps to sub-agents, verifies results, and tracks quest progress.
 - `pi-todo` keeps a persistent task ledger for the current project.
 - `pi-memory` remembers project/user preferences and injects that context into future agent runs.
-- `pi-minions` (`extensions/subagent`) executes subagents and owns the codebase scanner/cache/tool.
+- `pi-minions` (`extensions/subagent`) executes subagents, owns the codebase scanner/cache/tool, and registers `subagent_message` for durable project-scoped peer inboxes.
 - `pi-agent` reads quest/eval/session-meta and shows a performance dashboard (`/agent`, `agent_dashboard`).
 
 These extensions share files under `~/.pi/agent`. The main goal of this repo is to keep their shared JSON shapes and path rules in one place: `core/`.
