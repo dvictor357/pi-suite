@@ -1,0 +1,9 @@
+export const MAX_PARALLEL_TASKS = 8;
+export const MAX_CONCURRENCY = 4;
+export const MAX_PIPELINE_ITEMS = 16;
+export const MAX_RETRIES = 3;
+export const DEFAULT_AGENT_TIMEOUT_MS = 3 * 60 * 1000;
+export const KILL_GRACE_MS = 5000;
+export const COLLAPSED_ITEM_COUNT = 10;
+export const PER_TASK_OUTPUT_CAP = 50 * 1024;
+export const HEARTBEAT_MS = 2000;
