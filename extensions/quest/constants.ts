@@ -97,6 +97,12 @@ export interface VerificationConfig {
 	 * first failure without spending time on slower checks.
 	 */
 	checkOrder: readonly ("typecheck" | "lint" | "test" | "format")[];
+	/**
+	 * When a check fails, re-run it at the step's baseline commit; if it fails
+	 * there too, the failure is pre-existing and doesn't fail the step (the LLM
+	 * verifier still sees it). Costs one extra run per failing check, cached.
+	 */
+	baselineAware: boolean;
 }
 
 export const VERIFICATION: VerificationConfig = {
@@ -106,6 +112,7 @@ export const VERIFICATION: VerificationConfig = {
 	outputTailChars: 1200,
 	// Fast type/lint/format signals before the (usually slower) test run.
 	checkOrder: ["typecheck", "lint", "format", "test"],
+	baselineAware: true,
 };
 
 // ── Codebase retrieval ranking ───────────────────────────────────────────────

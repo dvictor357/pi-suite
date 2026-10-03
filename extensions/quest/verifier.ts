@@ -382,7 +382,9 @@ export function buildVerifierHandoff(input: VerifierHandoffInput): VerifierHando
 
 	const checksLine =
 		input.checksSummary && input.checksSummary.trim()
-			? `Deterministic checks passed (${input.checksSummary}).`
+			? input.checksSummary.includes(":preexisting")
+				? `Deterministic checks found no new failures (${input.checksSummary}); pre-existing failures are listed in the evidence.`
+				: `Deterministic checks passed (${input.checksSummary}).`
 			: noFileHint(input);
 
 	const message = [

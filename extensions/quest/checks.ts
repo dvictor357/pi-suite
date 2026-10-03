@@ -17,7 +17,8 @@
  * (`runChecks`) is the thin process-spawning wrapper kept out of the test path.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readJSON, projectMemoryPath, type ProjectMemory } from "../../core";
 import { VERIFICATION } from "./constants";
@@ -46,6 +47,11 @@ export interface CheckResult {
 	exitCode: number;
 	/** Truncated tail of combined output, for diagnostics. Empty for "skipped". */
 	summary: string;
+	/**
+	 * Set on a "fail" that also fails at the step's baseline commit: the step
+	 * didn't cause it, so it never fails the gate (see {@link gateChecks}).
+	 */
+	preexisting?: boolean;
 }
 
 /** Node package managers that expose `<pm> run <script>`. */
@@ -242,17 +248,91 @@ export function runCheck(check: PlannedCheck, cwd: string): CheckResult {
 }
 
 /**
- * Run planned checks in order, stopping at the first failure (the gate only
- * needs one). Returns every result produced so far — the failing one last.
+ * The gate's check loop, pure over its runners: run checks in order and stop
+ * at the first failure the step caused. A failure that `runAtBaseline` reports
+ * as also failing before the step is tagged `preexisting` and the loop moves on
+ * — repo-wide checks would otherwise blame a step for redness it inherited.
+ * `runAtBaseline` returning null (no baseline, or baseline-awareness off) keeps
+ * the strict behaviour: any failure stops the gate.
  */
-export function runChecks(planned: PlannedCheck[], cwd: string): CheckResult[] {
+export function gateChecks(
+	planned: readonly PlannedCheck[],
+	run: (check: PlannedCheck) => CheckResult,
+	runAtBaseline: (check: PlannedCheck) => CheckResult | null,
+): CheckResult[] {
 	const results: CheckResult[] = [];
 	for (const check of planned) {
-		const res = runCheck(check, cwd);
+		const res = run(check);
+		if (res.status === "fail" && runAtBaseline(check)?.status === "fail") {
+			results.push({ ...res, preexisting: true });
+			continue;
+		}
 		results.push(res);
 		if (res.status === "fail") break;
 	}
 	return results;
+}
+
+/** Baseline outcomes per (repo, commit, command); a commit's result never changes. */
+const baselineCache = new Map<string, CheckResult>();
+
+/**
+ * Run `check` against a pristine export of `sha` (git archive, so no worktree
+ * bookkeeping and the step's working tree is untouched). `node_modules` is
+ * symlinked from `cwd` so the toolchain matches. Null when the export fails —
+ * the caller then can't tell, and treats the failure as the step's.
+ */
+export function runCheckAtBaseline(
+	check: PlannedCheck,
+	cwd: string,
+	sha: string,
+): CheckResult | null {
+	let key: string;
+	try {
+		key = `${realpathSync(cwd)}\u0000${sha}\u0000${check.command}`;
+	} catch {
+		return null;
+	}
+	const cached = baselineCache.get(key);
+	if (cached) return cached;
+	const dir = mkdtempSync(join(tmpdir(), "pi-quest-baseline-"));
+	try {
+		const tar = execFileSync("git", ["archive", "--format=tar", sha], {
+			cwd,
+			maxBuffer: 512 * 1024 * 1024,
+		});
+		execFileSync("tar", ["-x", "-C", dir], { input: tar, maxBuffer: 512 * 1024 * 1024 });
+		if (existsSync(join(cwd, "node_modules"))) {
+			symlinkSync(join(realpathSync(cwd), "node_modules"), join(dir, "node_modules"));
+		}
+		const result = runCheck(check, dir);
+		baselineCache.set(key, result);
+		return result;
+	} catch {
+		return null;
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+/**
+ * Run the gate's checks in `cwd`. With a `baselineSha` (and
+ * `VERIFICATION.baselineAware`), failures that also fail at the baseline are
+ * tagged pre-existing instead of failing the step.
+ */
+export function runChecks(
+	planned: PlannedCheck[],
+	cwd: string,
+	baselineSha: string | null = null,
+): CheckResult[] {
+	return gateChecks(
+		planned,
+		(check) => runCheck(check, cwd),
+		(check) =>
+			baselineSha && VERIFICATION.baselineAware
+				? runCheckAtBaseline(check, cwd, baselineSha)
+				: null,
+	);
 }
 
 /** Map a failing check's kind to the eval failure taxonomy code. */
@@ -269,12 +349,15 @@ export function failureCodeForCheck(kind: CheckKind) {
 	}
 }
 
-/** Compact one-line summary of check outcomes, e.g. "typecheck:pass test:fail". */
+/**
+ * Compact one-line summary of check outcomes, e.g. "typecheck:pass test:fail".
+ * A failure inherited from the baseline reads "typecheck:preexisting".
+ */
 export function summarizeChecks(results: readonly CheckResult[]): string {
-	return results.map((r) => `${r.kind}:${r.status}`).join(" ");
+	return results.map((r) => `${r.kind}:${r.preexisting ? "preexisting" : r.status}`).join(" ");
 }
 
-/** The first failing check, or null when all passed/were skipped. */
+/** The first failing check the step caused, or null when none did. */
 export function firstFailure(results: readonly CheckResult[]): CheckResult | null {
-	return results.find((r) => r.status === "fail") ?? null;
+	return results.find((r) => r.status === "fail" && !r.preexisting) ?? null;
 }

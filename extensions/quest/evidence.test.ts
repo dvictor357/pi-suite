@@ -78,6 +78,31 @@ describe("renderEvidenceBlock", () => {
 		assert.match(block, /do NOT re-litigate/);
 	});
 
+	test("shows pre-existing failures separately, with their output, as not gated", () => {
+		const block = renderEvidenceBlock(
+			evidence({
+				changedFiles: ["src/a.ts"],
+				checks: [
+					{
+						kind: "typecheck",
+						command: "npm run typecheck",
+						status: "fail",
+						exitCode: 2,
+						summary: "subagent.ts(180,4): error TS2345",
+						preexisting: true,
+					},
+					{ kind: "test", command: "npm test", status: "pass", exitCode: 0, summary: "" },
+				],
+			}),
+		);
+		assert.match(block, /test: pass/);
+		assert.doesNotMatch(block, /typecheck: fail/, "not listed as a gated pass");
+		assert.match(block, /Pre-existing failures/);
+		assert.match(block, /typecheck \(`npm run typecheck`\)/);
+		assert.match(block, /TS2345/);
+		assert.match(block, /do not ask it to fix unrelated code/);
+	});
+
 	test("flags when nothing changed", () => {
 		const block = renderEvidenceBlock(evidence({ changedFiles: [] }));
 		assert.match(block, /none detected/);

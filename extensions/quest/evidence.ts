@@ -132,10 +132,22 @@ export function renderEvidenceBlock(evidence: StepEvidence): string {
 		lines.push(``, "**Diff stat:**", "```", evidence.diffStat.trim(), "```");
 	}
 
-	const ran = evidence.checks.filter((c) => c.status !== "skipped");
+	const ran = evidence.checks.filter((c) => c.status !== "skipped" && !c.preexisting);
 	if (ran.length > 0) {
 		lines.push(``, `**Deterministic checks (already gated — all passing):**`);
 		for (const c of ran) lines.push(`- ${c.kind}: ${c.status} (\`${c.command}\`)`);
+	}
+	const inherited = evidence.checks.filter((c) => c.preexisting);
+	if (inherited.length > 0) {
+		lines.push(
+			``,
+			`**Pre-existing failures (also fail at the baseline commit — not gated):**`,
+			...inherited.map((c) => `- ${c.kind} (\`${c.command}\`)`),
+			`Judge only whether this step made them worse (new errors in the files it changed). Do not fail the step for errors it inherited, and do not ask it to fix unrelated code.`,
+		);
+		for (const c of inherited) {
+			if (c.summary.trim()) lines.push("```", c.summary.trim(), "```");
+		}
 	}
 
 	lines.push(

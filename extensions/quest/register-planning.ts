@@ -841,7 +841,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					const diff = collectDiffEvidence(verificationCwd, task.baselineSha ?? null);
 					const checkResults =
 						VERIFICATION.enabled && diff.changedFiles.length > 0
-							? runChecks(planChecks(verificationCwd), verificationCwd)
+							? runChecks(planChecks(verificationCwd), verificationCwd, task.baselineSha ?? null)
 							: [];
 					const evidence: StepEvidence = {
 						changedFiles: diff.changedFiles,
