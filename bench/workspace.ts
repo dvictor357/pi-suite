@@ -133,8 +133,59 @@ export interface ProcessOutcome {
 }
 
 /**
- * Run a command in its own process group so a timeout kills the whole tree
- * (an agent's sub-agents and test runners included).
+ * Every descendant of `root` (children, grandchildren, ...), from one `ps`
+ * snapshot. Pure over the `pid ppid` table so it can be tested.
+ */
+export function descendantPids(table: string, root: number): number[] {
+	const children = new Map<number, number[]>();
+	for (const line of table.split("\n")) {
+		const [pid, ppid] = line.trim().split(/\s+/).map(Number);
+		if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue;
+		const list = children.get(ppid);
+		if (list) list.push(pid);
+		else children.set(ppid, [pid]);
+	}
+	const out: number[] = [];
+	const queue = [root];
+	while (queue.length) {
+		for (const child of children.get(queue.shift()!) ?? []) {
+			out.push(child);
+			queue.push(child);
+		}
+	}
+	return out;
+}
+
+/**
+ * SIGKILL `root` and its whole tree. Killing the process group is not enough:
+ * pi-minions spawns sub-agents `detached` (their own groups), and they would
+ * otherwise keep running — and spending — after the timeout.
+ */
+function killTree(root: number): void {
+	let pids: number[] = [];
+	try {
+		pids = descendantPids(execFileSync("ps", ["-A", "-o", "pid=,ppid="]).toString(), root);
+	} catch {
+		/* ps unavailable: fall back to the group kill below */
+	}
+	for (const pid of [root, ...pids]) {
+		for (const target of [-pid, pid]) {
+			try {
+				process.kill(target, "SIGKILL");
+			} catch {
+				/* not a group leader, or already gone */
+			}
+		}
+	}
+}
+
+/** How long to wait for stdio to drain after the process itself has exited. */
+const DRAIN_GRACE_MS = 5_000;
+
+/**
+ * Run a command in its own process group; a timeout kills its whole tree. The
+ * result resolves once the process exits and its pipes drain, or `DRAIN_GRACE_MS`
+ * after exit if a straggler still holds the pipes open.
  */
 export function runProcess(
 	command: string,
@@ -153,16 +204,17 @@ export function runProcess(
 		proc.stdout.on("data", (b: Buffer) => stdout.push(b));
 		proc.stderr.on("data", (b: Buffer) => stderr.push(b));
 		let timedOut = false;
+		let settled = false;
+		let drainTimer: NodeJS.Timeout | undefined;
 		const timer = setTimeout(() => {
 			timedOut = true;
-			try {
-				process.kill(-proc.pid!, "SIGKILL");
-			} catch {
-				/* already gone */
-			}
+			killTree(proc.pid!);
 		}, opts.timeoutMs);
 		const finish = (exitCode: number | null) => {
+			if (settled) return;
+			settled = true;
 			clearTimeout(timer);
+			clearTimeout(drainTimer);
 			resolve({
 				exitCode: timedOut ? null : exitCode,
 				timedOut,
@@ -173,6 +225,9 @@ export function runProcess(
 		proc.on("error", (err) => {
 			stderr.push(Buffer.from(String(err)));
 			finish(null);
+		});
+		proc.on("exit", (code) => {
+			drainTimer = setTimeout(() => finish(code), DRAIN_GRACE_MS);
 		});
 		proc.on("close", (code) => finish(code));
 	});

@@ -15,7 +15,7 @@ import {
 import { aggregate, armKey, median, pairedCompare, wilson } from "./stats";
 import { TASKS } from "./tasks";
 import type { BenchResult } from "./types";
-import { parseTapCounts, stripNodeModulesBin } from "./workspace";
+import { descendantPids, parseTapCounts, runProcess, stripNodeModulesBin } from "./workspace";
 
 const assistant = (usage: object, content: object[] = []) =>
 	JSON.stringify({ type: "message_end", message: { role: "assistant", usage, content } });
@@ -279,4 +279,35 @@ test("armKey labels suite arms with the pi-suite revision they loaded", () => {
 		armKey({ arm: "quest", model: "m", thinking: "low", suiteRev: "abc1234" }),
 		"quest@abc1234 · m:low",
 	);
+});
+
+test("descendantPids walks the whole tree, not just direct children", () => {
+	const table = ["  1   0", " 10   1", " 11  10", " 12  11", " 13  10", " 20   1", "garbage"].join(
+		"\n",
+	);
+	assert.deepEqual(descendantPids(table, 10).sort(), [11, 12, 13]);
+	assert.deepEqual(descendantPids(table, 99), []);
+});
+
+test("runProcess timeout kills a detached grandchild and returns promptly", async () => {
+	// The child spawns a detached grandchild (own process group) that would
+	// outlive a plain group kill, then both sleep far past the timeout.
+	const script = `
+		const { spawn } = require("node:child_process");
+		const g = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { detached: true, stdio: "inherit" });
+		console.log("grandchild " + g.pid);
+		setTimeout(() => {}, 60000);
+	`;
+	const started = Date.now();
+	const out = await runProcess(process.execPath, ["-e", script], {
+		cwd: tmpdir(),
+		env: process.env,
+		timeoutMs: 500,
+	});
+	assert.equal(out.timedOut, true);
+	assert.ok(Date.now() - started < 10_000, "resolved without waiting for the grandchild");
+	const pid = Number(out.stdout.match(/grandchild (\d+)/)?.[1]);
+	assert.ok(pid > 0);
+	await new Promise((r) => setTimeout(r, 200));
+	assert.throws(() => process.kill(pid, 0), "grandchild was killed");
 });
