@@ -2,40 +2,21 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type Static } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
-import { substitutePrevious } from "./contract.js";
 import { normalizeLimit, RunBudget } from "./budget.js";
 import { historyRoot, loadRun, newRunId, planRerun, runStatus, saveRun } from "./history.js";
-import { formatWorktreeOutcome } from "./worktree.js";
-import {
-	DEFAULT_AGENT_TIMEOUT_MS,
-	MAX_CONCURRENCY,
-	MAX_PARALLEL_TASKS,
-	MAX_PIPELINE_ITEMS,
-	MAX_RETRIES,
-} from "./constants.js";
-import {
-	type SingleResult,
-	type SubagentDetails,
-	type SubagentProgress,
-	getAnswerText,
-	getResultOutput,
-	isFailedResult,
-	truncateParallelOutput,
-} from "./render.js";
-import {
-	failedResult,
-	type IsolationContext,
-	prepareIsolation,
-	runIsolated,
-	validateConcurrentWriteClaims,
-} from "./isolation.js";
-import {
-	type OnUpdateCallback,
-	mapWithConcurrencyLimit,
-	readSubagentSettings,
-	runAgentWithRetry,
-} from "./runner.js";
+import { DEFAULT_AGENT_TIMEOUT_MS, MAX_RETRIES } from "./constants.js";
+import { type SingleResult, type SubagentDetails, isFailedResult } from "./render.js";
+import { type IsolationContext, prepareIsolation } from "./isolation.js";
+import { type OnUpdateCallback, readSubagentSettings } from "./runner.js";
 import { SubagentParams } from "./schema.js";
+import {
+	type CallMode,
+	type CallScope,
+	runChainMode,
+	runParallelMode,
+	runPipelineMode,
+	runSingleMode,
+} from "./modes.js";
 
 export type SubagentCallParams = Static<typeof SubagentParams>;
 /** Tool results also carry the `isError` flag the tool has always returned. */
@@ -200,13 +181,9 @@ export async function runSubagentCall(
 		maxCost: normalizeLimit(params.maxCost ?? settings.maxCost),
 		maxTokens: normalizeLimit(params.maxTokens ?? settings.maxTokens),
 	});
-	const budgetNote = () =>
-		budget.exceeded
-			? `\n\n${budget.exceededReason}. Remaining work was stopped or skipped; results above are partial.`
-			: "";
 
 	const makeDetails =
-		(mode: "single" | "parallel" | "chain" | "pipeline") =>
+		(mode: CallMode) =>
 		(results: SingleResult[]): SubagentDetails => ({
 			mode,
 			agentScope,
@@ -286,450 +263,24 @@ export async function runSubagentCall(
 		}
 	}
 
-	if (params.chain && params.chain.length > 0) {
-		const results: SingleResult[] = [];
-		let previousOutput = "";
-		let previousStructured: unknown;
-
-		for (let i = 0; i < params.chain.length; i++) {
-			const step = params.chain[i];
-			const substituted = substitutePrevious(step.task, previousOutput, previousStructured);
-
-			// Create update callback that includes all previous results
-			const chainUpdate: OnUpdateCallback | undefined = onUpdate
-				? (partial) => {
-						// Combine completed results with current streaming result
-						const currentResult = partial.details?.results[0];
-						if (currentResult) {
-							const allResults = [...results, currentResult];
-							onUpdate({
-								content: partial.content,
-								details: {
-									...makeDetails("chain")(allResults),
-									progress: partial.details?.progress,
-								},
-							});
-						}
-					}
-				: undefined;
-
-			// A bad {previous.path} fails the step without spawning anything.
-			const result = !substituted.ok
-				? {
-						...failedResult(step.agent, step.task, substituted.error),
-						step: i + 1,
-					}
-				: await runAgentWithRetry(
-						ctx.cwd,
-						agents,
-						step.agent,
-						substituted.text,
-						step.cwd,
-						{
-							model: step.model,
-							thinking: step.thinking,
-							output: step.output,
-						},
-						i + 1,
-						signal,
-						chainUpdate,
-						makeDetails("chain"),
-						retries,
-						timeoutMs,
-						undefined,
-						budget,
-					);
-			results.push(result);
-
-			const isError = isFailedResult(result);
-			if (isError && onError === "stop") {
-				const errorMsg = getResultOutput(result);
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Chain stopped at step ${i + 1} (${step.agent}): ${errorMsg}${budgetNote()}`,
-						},
-					],
-					details: makeDetails("chain")(results),
-					isError: true,
-				};
-			}
-			// onError === "continue" (or success): pass this step's output forward.
-			previousOutput = isError ? getResultOutput(result) : getAnswerText(result);
-			previousStructured = isError ? undefined : result.structured;
-		}
-		return {
-			content: [
-				{
-					type: "text",
-					text: `${getResultOutput(results[results.length - 1])}${budgetNote()}`,
-				},
-			],
-			details: makeDetails("chain")(results),
-		};
-	}
-
-	if (params.tasks && params.tasks.length > 0) {
-		// Worktrees give every writer its own checkout, so claims are moot.
-		const claimError = isolation
-			? null
-			: validateConcurrentWriteClaims(
-					ctx.cwd,
-					params.tasks.map((task, index) => ({
-						...task,
-						label: `parallel task #${index + 1} (${task.agent})`,
-						sequentialGroup: index,
-					})),
-				);
-		if (claimError)
-			return {
-				content: [{ type: "text", text: `Write ownership rejected: ${claimError}` }],
-				details: makeDetails("parallel")([]),
-				isError: true,
-			};
-
-		if (params.tasks.length > MAX_PARALLEL_TASKS)
-			return {
-				content: [
-					{
-						type: "text",
-						text: `Too many parallel tasks (${params.tasks.length}). Max is ${MAX_PARALLEL_TASKS}.`,
-					},
-				],
-				details: makeDetails("parallel")([]),
-			};
-
-		// Track all results for streaming updates
-		const allResults: SingleResult[] = new Array(params.tasks.length);
-
-		// Initialize placeholder results
-		for (let i = 0; i < params.tasks.length; i++) {
-			allResults[i] = {
-				agent: params.tasks[i].agent,
-				agentSource: "unknown",
-				task: params.tasks[i].task,
-				exitCode: -1, // -1 = still running
-				messages: [],
-				stderr: "",
-				usage: {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					cost: 0,
-					contextTokens: 0,
-					turns: 0,
-				},
-			};
-		}
-
-		let lastProgress: SubagentProgress | undefined;
-
-		const emitParallelUpdate = () => {
-			if (onUpdate) {
-				const running = allResults.filter((r) => r.exitCode === -1).length;
-				const done = allResults.filter((r) => r.exitCode !== -1).length;
-				onUpdate({
-					content: [
-						{
-							type: "text",
-							text: `Parallel: ${done}/${allResults.length} done, ${running} running...`,
-						},
-					],
-					details: {
-						...makeDetails("parallel")([...allResults]),
-						progress: lastProgress,
-					},
-				});
-			}
-		};
-
-		const results = await mapWithConcurrencyLimit(
-			params.tasks,
-			MAX_CONCURRENCY,
-			async (t, index) => {
-				const result = await runIsolated(
-					isolation,
-					index,
-					agents,
-					t.agent,
-					t.task,
-					ctx.cwd,
-					t.cwd,
-					(cwd) =>
-						runAgentWithRetry(
-							ctx.cwd,
-							agents,
-							t.agent,
-							t.task,
-							cwd,
-							{
-								model: t.model,
-								thinking: t.thinking,
-								output: t.output,
-							},
-							undefined,
-							signal,
-							// Per-task update callback
-							(partial) => {
-								if (partial.details?.results[0]) {
-									allResults[index] = partial.details.results[0];
-									lastProgress = partial.details?.progress;
-									emitParallelUpdate();
-								}
-							},
-							makeDetails("parallel"),
-							retries,
-							timeoutMs,
-							undefined,
-							budget,
-						),
-				);
-				allResults[index] = result;
-				emitParallelUpdate();
-				return result;
-			},
-		);
-
-		const successCount = results.filter((r) => !isFailedResult(r)).length;
-		const summaries = results.map((r) => {
-			const output = truncateParallelOutput(getResultOutput(r));
-			const status = isFailedResult(r)
-				? `failed${r.stopReason && r.stopReason !== "end" ? ` (${r.stopReason})` : ""}`
-				: "completed";
-			const worktree = r.worktree ? `\n\n${formatWorktreeOutcome(r.worktree)}` : "";
-			return `### [${r.agent}] ${status}\n\n${output}${worktree}`;
-		});
-		return {
-			content: [
-				{
-					type: "text",
-					text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join("\n\n---\n\n")}${isolationNote}${budgetNote()}`,
-				},
-			],
-			details: makeDetails("parallel")(results),
-		};
-	}
-
-	if (hasPipeline && params.items && params.stages) {
-		const items = params.items;
-		const stages = params.stages;
-		const claimError = validateConcurrentWriteClaims(
-			ctx.cwd,
-			items.flatMap((item, itemIndex) =>
-				stages.map((stage, stageIndex) => ({
-					...stage,
-					readClaim: stage.readClaim?.map((claim) => claim.replace(/\{item\}/g, item)),
-					writeClaim: stage.writeClaim?.map((claim) => claim.replace(/\{item\}/g, item)),
-					label: `pipeline item #${itemIndex + 1}, stage #${stageIndex + 1} (${stage.agent})`,
-					sequentialGroup: itemIndex,
-				})),
-			),
-		);
-		if (claimError)
-			return {
-				content: [{ type: "text", text: `Write ownership rejected: ${claimError}` }],
-				details: makeDetails("pipeline")([]),
-				isError: true,
-			};
-
-		if (items.length > MAX_PIPELINE_ITEMS)
-			return {
-				content: [
-					{
-						type: "text",
-						text: `Too many pipeline items (${items.length}). Max is ${MAX_PIPELINE_ITEMS}.`,
-					},
-				],
-				details: makeDetails("pipeline")([]),
-			};
-
-		// One slot per item, holding that item's latest stage result (for
-		// streaming) and ultimately its final-stage result.
-		const allResults: SingleResult[] = new Array(items.length);
-		for (let i = 0; i < items.length; i++) {
-			allResults[i] = {
-				agent: stages[0].agent,
-				agentSource: "unknown",
-				task: items[i],
-				exitCode: -1, // still running
-				messages: [],
-				stderr: "",
-				usage: {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					cost: 0,
-					contextTokens: 0,
-					turns: 0,
-				},
-			};
-		}
-
-		let lastPipelineProgress: SubagentProgress | undefined;
-
-		const emitPipelineUpdate = () => {
-			if (!onUpdate) return;
-			const done = allResults.filter((r) => r.exitCode !== -1).length;
-			const running = allResults.length - done;
-			onUpdate({
-				content: [
-					{
-						type: "text",
-						text: `Pipeline: ${done}/${items.length} done, ${running} running...`,
-					},
-				],
-				details: {
-					...makeDetails("pipeline")([...allResults]),
-					progress: lastPipelineProgress,
-				},
-			});
-		};
-
-		// Each item runs its OWN sequential chain through the stages; items run
-		// concurrently with no barrier between stages — item B can be in stage 1
-		// while item A is already in stage 3.
-		const finals = await mapWithConcurrencyLimit(items, MAX_CONCURRENCY, async (item, idx) => {
-			let previous = "";
-			let previousStructured: unknown;
-			let last: SingleResult | null = null;
-			for (let s = 0; s < stages.length; s++) {
-				const stage = stages[s];
-				const substituted = substitutePrevious(
-					stage.task.replace(/\{item\}/g, item),
-					previous,
-					previousStructured,
-				);
-				const r = !substituted.ok
-					? {
-							...failedResult(stage.agent, stage.task, substituted.error),
-							step: s + 1,
-						}
-					: await runAgentWithRetry(
-							ctx.cwd,
-							agents,
-							stage.agent,
-							substituted.text,
-							stage.cwd,
-							{
-								model: stage.model,
-								thinking: stage.thinking,
-								output: stage.output,
-							},
-							s + 1,
-							signal,
-							(partial) => {
-								if (partial.details?.results[0]) {
-									allResults[idx] = partial.details.results[0];
-									lastPipelineProgress = partial.details?.progress;
-									emitPipelineUpdate();
-								}
-							},
-							makeDetails("pipeline"),
-							retries,
-							timeoutMs,
-							undefined,
-							budget,
-						);
-				last = r;
-				allResults[idx] = r;
-				emitPipelineUpdate();
-				if (isFailedResult(r)) {
-					if (onError === "continue") {
-						previous = getResultOutput(r);
-						previousStructured = undefined;
-						continue;
-					}
-					break; // stop this item's chain
-				}
-				previous = getAnswerText(r);
-				previousStructured = r.structured;
-			}
-			return last as SingleResult;
-		});
-
-		const successCount = finals.filter((r) => r && !isFailedResult(r)).length;
-		const summaries = finals.map((r, i) => {
-			const output = truncateParallelOutput(getResultOutput(r));
-			const status = isFailedResult(r)
-				? `failed${r.stopReason && r.stopReason !== "end" ? ` (${r.stopReason})` : ""}`
-				: "completed";
-			const label = items[i].length > 50 ? `${items[i].slice(0, 50)}…` : items[i];
-			return `### [${label}] ${status}\n\n${output}`;
-		});
-		return {
-			content: [
-				{
-					type: "text",
-					text: `Pipeline: ${successCount}/${finals.length} items succeeded (${stages.length} stages each)\n\n${summaries.join("\n\n---\n\n")}${budgetNote()}`,
-				},
-			],
-			details: makeDetails("pipeline")(finals),
-		};
-	}
-
-	if (params.agent && params.task) {
-		const agentName = params.agent;
-		const task = params.task;
-		const result = await runIsolated(
-			isolation,
-			0,
-			agents,
-			agentName,
-			task,
-			ctx.cwd,
-			params.cwd,
-			(cwd) =>
-				runAgentWithRetry(
-					ctx.cwd,
-					agents,
-					agentName,
-					task,
-					cwd,
-					{
-						model: params.model,
-						thinking: params.thinking,
-						output: params.output,
-					},
-					undefined,
-					signal,
-					onUpdate,
-					makeDetails("single"),
-					retries,
-					timeoutMs,
-					undefined,
-					budget,
-				),
-		);
-		const worktreeText = result.worktree
-			? `\n\n${formatWorktreeOutcome(result.worktree)}${isolationNote}`
-			: "";
-		const isError = isFailedResult(result);
-		if (isError) {
-			const errorMsg = getResultOutput(result);
-			return {
-				content: [
-					{
-						type: "text",
-						text: `Agent ${result.stopReason || "failed"}: ${errorMsg}${worktreeText}${budgetNote()}`,
-					},
-				],
-				details: makeDetails("single")([result]),
-				isError: true,
-			};
-		}
-		return {
-			content: [
-				{
-					type: "text",
-					text: `${getAnswerText(result) || "(no output)"}${worktreeText}`,
-				},
-			],
-			details: makeDetails("single")([result]),
-		};
-	}
+	const scope: CallScope = {
+		ctx,
+		agents,
+		signal,
+		onUpdate,
+		retries,
+		timeoutMs,
+		onError,
+		budget,
+		isolation,
+		isolationNote,
+		makeDetails,
+	};
+	if (params.chain && params.chain.length > 0) return runChainMode(scope, params.chain);
+	if (params.tasks && params.tasks.length > 0) return runParallelMode(scope, params.tasks);
+	if (hasPipeline && params.items && params.stages)
+		return runPipelineMode(scope, params.items, params.stages);
+	if (params.agent && params.task) return runSingleMode(scope, params.agent, params.task, params);
 
 	const available = agents.map((a) => `${a.name} (${a.source})`).join(", ") || "none";
 	return {
