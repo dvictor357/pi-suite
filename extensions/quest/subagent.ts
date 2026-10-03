@@ -183,9 +183,13 @@ export async function runSubAgent(
 		const config = ctx.modelRegistry.getRegisteredProviderConfig(req.model.provider);
 		if (provider) modelRuntime.registerNativeProvider(provider);
 		if (config) modelRuntime.registerProvider(req.model.provider, config);
+		// Best-effort: session requests stream through ctx.modelRegistry (below), which
+		// resolves its own auth. The key only serves SDK paths that call modelRuntime
+		// directly (e.g. compaction), so a lookup failure must not abort the spawn.
 		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(req.model);
-		if (!auth.ok) throw new Error(auth.error);
-		if (auth.apiKey) await modelRuntime.setRuntimeApiKey(req.model.provider, auth.apiKey);
+		if (auth.ok && auth.apiKey) {
+			await modelRuntime.setRuntimeApiKey(req.model.provider, auth.apiKey);
+		}
 		const resourceLoader = new DefaultResourceLoader({
 			cwd: sessionCwd,
 			agentDir: getAgentDir(),

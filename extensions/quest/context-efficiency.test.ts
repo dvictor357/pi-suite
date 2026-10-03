@@ -129,4 +129,14 @@ test("final step prompt selects relevant lessons, deduplicates, and retains no-m
 	});
 	assert.match(fallback, /ES modules/);
 	assert.match(compactAwarenessBlock(cwd), /ES modules/);
+	// One incidental shared word ("parallel") must not displace recent awareness.
+	const incidental = compactAwarenessBlock(cwd, undefined, {
+		task: "Rename parallel config flag",
+		existingContext: "",
+	});
+	assert.match(incidental, /ES modules/);
+	// A single-keyword task can still match on its only keyword.
+	const single = compactAwarenessBlock(cwd, undefined, { task: "worktrees", existingContext: "" });
+	assert.match(single, /Worktree isolation/);
+	assert.doesNotMatch(single, /\[design-decision\]/);
 });

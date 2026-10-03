@@ -13,6 +13,7 @@ import {
 } from "../../core";
 import type { Quest, QuestStep, SyncedTodoItem, SyncedTodoList } from "./types";
 import {
+	AWARENESS_MIN_KEYWORD_HITS,
 	CONSTRAINED_MAX_AWARENESS_NODES,
 	DEFAULT_MAX_AWARENESS_NODES,
 	extractKeywords,
@@ -197,13 +198,15 @@ export function compactAwarenessBlock(
 			const keywords = context ? extractKeywords(context.task) : [];
 			// Probe before deduplication: an already-present match must not trigger
 			// the unrelated fallback. No keyword match keeps historical awareness.
+			const minKeywordHits = Math.min(AWARENESS_MIN_KEYWORD_HITS, keywords.length);
 			const hasMatches =
 				keywords.length > 0 &&
-				selectGraphNodesForPrompt(graph, { keywords, maxNodes: 1 }).length > 0;
+				selectGraphNodesForPrompt(graph, { keywords, minKeywordHits, maxNodes: 1 }).length > 0;
 			const selected = selectGraphNodesForPrompt(graph, {
 				maxNodes,
 				excludeEvalResults: true,
 				keywords: hasMatches ? keywords : undefined,
+				minKeywordHits,
 				existingContext: context?.existingContext,
 			});
 			if (selected.length) {

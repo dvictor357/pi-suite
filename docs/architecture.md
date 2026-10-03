@@ -117,7 +117,7 @@ Two additive observability features built on the shared contract:
   non-eval nodes (`selectGraphNodesForPrompt`) and renders them with line-safe
   `clampToBudget` (`renderGraphContextBlock`). Injected into:
   - Project awareness (`compactAwarenessBlock` in `todo-sync.ts`) — step prompts prefer
-    task-keyword matches and omit graph lines already present in the supplied context.
+    task-keyword matches (`AWARENESS_MIN_KEYWORD_HITS`, default 2 hits) and omit graph lines already present in the supplied context.
     No matches (or no task) retains recent preferred-kind selection; constrained models
     get fewer nodes. Deduplication recognizes existing planning/awareness text without
     changing persisted step shapes.

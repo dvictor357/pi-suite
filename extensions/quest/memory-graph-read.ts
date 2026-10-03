@@ -22,6 +22,12 @@ const PREFERRED_PROMPT_KINDS: readonly NodeKind[] = [
 export const DEFAULT_MAX_AWARENESS_NODES = 5;
 /** Tighter node cap for small / low-context models. */
 export const CONSTRAINED_MAX_AWARENESS_NODES = 2;
+/**
+ * Keyword hits a node needs before step awareness switches from recent nodes to
+ * task matches (capped at the task's keyword count). One hit lets a generic word
+ * like "tests" displace recent design decisions with an unrelated node.
+ */
+export const AWARENESS_MIN_KEYWORD_HITS = 2;
 /** Max graph nodes attached to a single planned step context. */
 export const DEFAULT_MAX_PLANNING_NODES_PER_STEP = 2;
 
