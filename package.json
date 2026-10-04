@@ -21,8 +21,9 @@
     "test": "npm run test:node && npm run test:subagent",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test:node": "node --import tsx --import ./test/isolate-home.ts --test core/*.test.ts extensions/quest/*.test.ts extensions/todo/*.test.ts extensions/memory/*.test.ts extensions/agent/*.test.ts",
-    "test:subagent": "vitest run"
+    "test:node": "node --import tsx --import ./test/isolate-home.ts --test core/*.test.ts extensions/quest/*.test.ts extensions/todo/*.test.ts extensions/memory/*.test.ts extensions/agent/*.test.ts bench/*.test.ts",
+    "test:subagent": "vitest run",
+    "bench": "node --import tsx bench/run.ts"
   },
   "engines": {
     "node": ">=22.19.0"

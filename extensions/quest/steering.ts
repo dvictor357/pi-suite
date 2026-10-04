@@ -3,6 +3,7 @@ import { MAX_BURST, MAX_RETRIES, ICON, LADDER } from "./constants";
 import { loadModelLadder, routeStepFromDisk } from "./storage";
 import { briefBudgetForModel, renderFailureBriefs, rungModel } from "./ladder";
 import { resolveSandboxProfile } from "./sandbox";
+import { runsInline } from "./tiering";
 import { buildStepContext, collectDependencyHandoffs } from "./context-broker";
 import { listBlockedWithWorktree, resolvePhase } from "./phase-loop";
 
@@ -231,6 +232,30 @@ export function buildSteeringMessage(
 				sandboxMode === "isolated" ? "isolated 🔒" : "restricted 🔒"
 			} — use the guarded Quest fallback; pi-minions does not enforce this policy yet.`
 		: "";
+
+	// Simple-tier steps run inline: the orchestrator already holds the context,
+	// so a sub-agent would only re-read it. No model routing or minion call.
+	if (runsInline(quest, sandboxActive)) {
+		const briefs = renderFailureBriefs(
+			task.failureBriefs,
+			briefBudgetForModel(undefined, LADDER),
+			LADDER.maxBriefs,
+		);
+		return [
+			`## Quest: ${quest.name} (${done}/${total} done)`,
+			``,
+			`**Current step:** ${task.content}`,
+			`**Context:** ${task.context}`,
+			deps ? `**Depends on:** ${deps}` : "",
+			`**Execution:** inline — implement this step yourself with your own tools. Do not delegate it (no subagent / quest_delegate).`,
+			briefs,
+			``,
+			`When complete, call **quest_update**(index=${index}, status="done", result="<what you changed>"). The project's checks verify it.`,
+			`If you hit a blocker you can't resolve, call quest_update with status "failed" and explain why.`,
+		]
+			.filter(Boolean)
+			.join("\n");
+	}
 
 	// Surface the runtime to use for this minion: the task's own model wins, else
 	// the current approved ladder rung, else the project's remembered role choice.

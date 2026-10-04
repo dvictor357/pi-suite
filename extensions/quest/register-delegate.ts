@@ -498,6 +498,7 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 						ok: false,
 						error: res.error,
 						failureCode: "TOOL_FAILURE" as const,
+						...(res.usage ? { usage: res.usage } : {}),
 					},
 				};
 			}
@@ -526,6 +527,9 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					thinkingLevel,
 					ok: true,
 					output: res.output,
+					// In-process run: its spend never reaches the session's message
+					// usage, so surface it for external accounting (e.g. bench/).
+					...(res.usage ? { usage: res.usage } : {}),
 				},
 			};
 		},

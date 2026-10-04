@@ -92,6 +92,18 @@ describe("loadAgentsFromDir", () => {
 		expect(agents[0].source).toBe("user");
 	});
 
+	it("skips a file with malformed YAML frontmatter instead of failing discovery", () => {
+		const dir = makeTempDir();
+		fs.writeFileSync(
+			path.join(dir, "broken.md"),
+			"---\nname: broken\ndescription: Verifier. Give it a claim: a diagnosis\n---\nBody",
+			"utf8",
+		);
+		writeAgent(dir, "valid.md", { name: "valid", description: "Valid agent" });
+
+		expect(loadAgentsFromDir(dir, "user").map((agent) => agent.name)).toEqual(["valid"]);
+	});
+
 	it("returns an empty list for missing directories", () => {
 		const dir = path.join(makeTempDir(), "does-not-exist");
 

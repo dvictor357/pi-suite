@@ -1,12 +1,15 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
+import { Check } from "typebox/value";
 import type { StepStatus } from "./types";
 import type { FailureCode } from "../../core";
 import { LADDER, MAX_DEPENDENCY_DEPTH, MAX_VERIFY_RETRIES, VERIFICATION } from "./constants";
 import { loadModelLadder } from "./storage";
 import { loadTeams } from "./teams";
 import { buildSandboxComplianceChecks, buildVerifierHandoff } from "./verifier";
+import { autoPassDecision, resolvePlanTier, tierOf } from "./tiering";
+import { resolvePlannedSteps } from "./plan-steps";
 import { briefBudgetForModel } from "./ladder";
 import {
 	failureCodeForCheck,
@@ -41,6 +44,80 @@ import {
 	type VerifyRunEvent,
 } from "./verify-outcome";
 
+/**
+ * One planned step. Declared once: the legacy `tasks` alias takes unknown items
+ * checked against this at runtime (see plan-steps.ts) instead of repeating the
+ * whole shape in the tool schema (~2.4k chars on every model request).
+ */
+const PlanStepSchema = Type.Object({
+	content: Type.String({ description: "Short name of the step" }),
+	agent: Type.String({
+		description: "Sub-agent type: worker, quick-worker, scout, planner, reviewer, verifier",
+	}),
+	context: Type.String({
+		description: "Focused context/instructions for the sub-agent — keep it lean",
+	}),
+	dependencies: Type.Optional(
+		Type.Array(Type.Number(), {
+			description: "Indices of steps that must complete first (0-based)",
+		}),
+	),
+	model: Type.Optional(
+		Type.String({
+			description:
+				"Model id to run this step's sub-agent with. Usually leave unset — quest assigns it via quest_assign_model (asking the user once per role).",
+		}),
+	),
+	readClaim: Type.Optional(
+		Type.Array(Type.String(), { description: "Cwd-relative paths this step reads" }),
+	),
+	writeClaim: Type.Optional(
+		Type.Array(Type.String(), { description: "Cwd-relative paths this step writes" }),
+	),
+	sandbox: Type.Optional(
+		Type.Object({
+			mode: Type.Optional(
+				StringEnum(["restricted", "isolated"] as const, {
+					description: "Escalate sandbox mode for this step (cannot de-escalate quest-level).",
+				}),
+			),
+			allowedPaths: Type.Optional(
+				Type.Array(Type.String(), {
+					description: "Additional allowed paths (intersect with quest-level).",
+				}),
+			),
+			deniedPaths: Type.Optional(
+				Type.Array(Type.String(), {
+					description: "Additional denied paths (union with quest-level).",
+				}),
+			),
+			allowCommands: Type.Optional(
+				Type.Array(Type.String(), {
+					description: "Additional allowed commands (intersect with quest-level).",
+				}),
+			),
+			denyCommands: Type.Optional(
+				Type.Array(Type.String(), {
+					description: "Additional denied commands (union with quest-level).",
+				}),
+			),
+			allowNetwork: Type.Optional(
+				Type.Boolean({
+					description: "Override network access (can only go true→false).",
+				}),
+			),
+			allowPackageInstall: Type.Optional(
+				Type.Boolean({
+					description: "Override package-install permission (can only go true→false).",
+				}),
+			),
+		}),
+	),
+});
+
+const isPlanStep = (value: unknown): value is Static<typeof PlanStepSchema> =>
+	Check(PlanStepSchema, value);
+
 export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 	const {
 		getQuest,
@@ -67,151 +144,12 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 		].join(" "),
 		parameters: Type.Object({
 			steps: Type.Optional(
-				Type.Array(
-					Type.Object({
-						content: Type.String({ description: "Short name of the step" }),
-						agent: Type.String({
-							description:
-								"Sub-agent type: worker, quick-worker, scout, planner, reviewer, verifier",
-						}),
-						context: Type.String({
-							description: "Focused context/instructions for the sub-agent — keep it lean",
-						}),
-						dependencies: Type.Optional(
-							Type.Array(Type.Number(), {
-								description: "Indices of steps that must complete first (0-based)",
-							}),
-						),
-						model: Type.Optional(
-							Type.String({
-								description:
-									"Model id to run this step's sub-agent with. Usually leave unset — quest assigns it via quest_assign_model (asking the user once per role).",
-							}),
-						),
-						readClaim: Type.Optional(
-							Type.Array(Type.String(), { description: "Cwd-relative paths this step reads" }),
-						),
-						writeClaim: Type.Optional(
-							Type.Array(Type.String(), { description: "Cwd-relative paths this step writes" }),
-						),
-						sandbox: Type.Optional(
-							Type.Object({
-								mode: Type.Optional(
-									StringEnum(["restricted", "isolated"] as const, {
-										description:
-											"Escalate sandbox mode for this step (cannot de-escalate quest-level).",
-									}),
-								),
-								allowedPaths: Type.Optional(
-									Type.Array(Type.String(), {
-										description: "Additional allowed paths (intersect with quest-level).",
-									}),
-								),
-								deniedPaths: Type.Optional(
-									Type.Array(Type.String(), {
-										description: "Additional denied paths (union with quest-level).",
-									}),
-								),
-								allowCommands: Type.Optional(
-									Type.Array(Type.String(), {
-										description: "Additional allowed commands (intersect with quest-level).",
-									}),
-								),
-								denyCommands: Type.Optional(
-									Type.Array(Type.String(), {
-										description: "Additional denied commands (union with quest-level).",
-									}),
-								),
-								allowNetwork: Type.Optional(
-									Type.Boolean({
-										description: "Override network access (can only go true→false).",
-									}),
-								),
-								allowPackageInstall: Type.Optional(
-									Type.Boolean({
-										description: "Override package-install permission (can only go true→false).",
-									}),
-								),
-							}),
-						),
-					}),
-					{ description: "Array of steps in execution order" },
-				),
+				Type.Array(PlanStepSchema, { description: "Array of steps in execution order" }),
 			),
 			tasks: Type.Optional(
-				Type.Array(
-					Type.Object({
-						content: Type.String({ description: "Short name of the step" }),
-						agent: Type.String({
-							description:
-								"Sub-agent type: worker, quick-worker, scout, planner, reviewer, verifier",
-						}),
-						context: Type.String({
-							description: "Focused context/instructions for the sub-agent — keep it lean",
-						}),
-						dependencies: Type.Optional(
-							Type.Array(Type.Number(), {
-								description: "Indices of steps that must complete first (0-based)",
-							}),
-						),
-						model: Type.Optional(
-							Type.String({
-								description:
-									"Model id to run this step's sub-agent with. Usually leave unset — quest assigns it via quest_assign_model (asking the user once per role).",
-							}),
-						),
-						readClaim: Type.Optional(
-							Type.Array(Type.String(), { description: "Cwd-relative paths this step reads" }),
-						),
-						writeClaim: Type.Optional(
-							Type.Array(Type.String(), { description: "Cwd-relative paths this step writes" }),
-						),
-						sandbox: Type.Optional(
-							Type.Object({
-								mode: Type.Optional(
-									StringEnum(["restricted", "isolated"] as const, {
-										description:
-											"Escalate sandbox mode for this step (cannot de-escalate quest-level).",
-									}),
-								),
-								allowedPaths: Type.Optional(
-									Type.Array(Type.String(), {
-										description: "Additional allowed paths (intersect with quest-level).",
-									}),
-								),
-								deniedPaths: Type.Optional(
-									Type.Array(Type.String(), {
-										description: "Additional denied paths (union with quest-level).",
-									}),
-								),
-								allowCommands: Type.Optional(
-									Type.Array(Type.String(), {
-										description: "Additional allowed commands (intersect with quest-level).",
-									}),
-								),
-								denyCommands: Type.Optional(
-									Type.Array(Type.String(), {
-										description: "Additional denied commands (union with quest-level).",
-									}),
-								),
-								allowNetwork: Type.Optional(
-									Type.Boolean({
-										description: "Override network access (can only go true→false).",
-									}),
-								),
-								allowPackageInstall: Type.Optional(
-									Type.Boolean({
-										description: "Override package-install permission (can only go true→false).",
-									}),
-								),
-							}),
-						),
-					}),
-					{
-						description:
-							"Legacy alias for steps. Prefer steps for new calls; tasks remains accepted for backward compatibility.",
-					},
-				),
+				Type.Array(Type.Unknown(), {
+					description: "Deprecated alias of steps (same item shape). Prefer steps.",
+				}),
 			),
 			autoStart: Type.Optional(
 				Type.Boolean({
@@ -229,7 +167,9 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				};
 			}
 
-			const plannedSteps = params.steps ?? params.tasks ?? [];
+			const resolvedSteps = resolvePlannedSteps(params, isPlanStep);
+			if ("error" in resolvedSteps) return textResult(resolvedSteps.error);
+			const plannedSteps = resolvedSteps.steps;
 			if (plannedSteps.length === 0) {
 				return {
 					content: [{ type: "text", text: "No steps provided." }],
@@ -278,6 +218,18 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 						content: [{ type: "text", text: parallelClaimError }],
 						details: {},
 					};
+				}
+			}
+
+			// A plan can only raise the declared tier (never squeeze work into a
+			// lighter pipeline than it needs). Legacy quests stay at the default.
+			let tierNote = "";
+			if (quest.tier) {
+				const resolved = resolvePlanTier(quest.tier, plannedSteps);
+				if (resolved.tier !== quest.tier) {
+					tierNote = `Tier raised ${quest.tier} → ${resolved.tier}: ${resolved.reason}.`;
+					quest.tier = resolved.tier;
+					quest.tierReason = resolved.reason;
 				}
 			}
 
@@ -426,7 +378,9 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					{
 						type: "text",
 						text: [
-							`Plan saved: **${quest.steps.length} steps**`,
+							`Plan saved: **${quest.steps.length} steps**` +
+								(quest.tier ? ` · tier **${quest.tier}**` : ""),
+							tierNote,
 							codebaseEnrichment.summary,
 							graphEnrichment.summary,
 							codebaseToolAvailable()
@@ -443,7 +397,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 							quest.steps.length > 5 ? `  … and ${quest.steps.length - 5} more` : "",
 							``,
 							quest.status === "active"
-								? `**Quest is now ACTIVE.** Auto-pilot will fire the first step on the next turn.`
+								? `**Quest is now ACTIVE.** End your turn now — auto-pilot fires the first step when your turn ends and sends you its instructions.`
 								: needsApproval
 									? `Awaiting approval. Review the plan above and call quest_approve to start.`
 									: `Quest in planning mode. Call quest_start or /quest start to begin.`,
@@ -610,6 +564,76 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				});
 			};
 
+			/**
+			 * Close a verifying step as a verified PASS — from the LLM verifier's
+			 * verdict, or from deterministic evidence when the tier allows it.
+			 */
+			const completeVerifiedPass = (passEvidence: string | undefined) => {
+				const plan = planVerifyPass({
+					step: snapshotStepForVerify(task),
+					stepIndex: params.index,
+					evidence: passEvidence,
+					parallelEnabled: Boolean(quest.parallel?.enabled),
+				});
+				if (!rt.transitionStep(ctx, quest, params.index, plan.nextPhase, plan.transitionReason)) {
+					return textResult("Cannot complete from the current phase.");
+				}
+				task.verifyResult = plan.patches.verifyResult;
+				task.verified = plan.patches.verified;
+				task.completedAt = plan.patches.completedAt;
+
+				emitRunEvents(plan.events);
+				recordEval(
+					ctx.cwd,
+					makeEval(
+						quest,
+						task,
+						params.index,
+						plan.evalIntent.status,
+						plan.evalIntent.verified,
+						plan.evalIntent.evidence,
+					),
+				);
+
+				quest.lastFiredStepIndex = -1;
+				quest.sameStepCount = 0;
+				if (plan.releaseClaims) {
+					claimReg.unregister(ctx.cwd, params.index);
+					rt.dispatchGuard.release(ctx.cwd, params.index);
+				}
+				persist(ctx, quest);
+
+				const done = quest.steps.filter((t) => t.status === "done").length;
+				const next = nextPendingStep(quest);
+				const git = quest.gitIntegration;
+				const gitPrompt = git?.autoCommit
+					? [
+							``,
+							`📝 **Git:** After committing, record with quest_commit(stepIndex=${params.index}, commitHash="...", commitMessage="[quest/${quest.name}] step #${params.index + 1}: ${task.content}", ...)`,
+						].join("\n")
+					: "";
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: formatVerifyPassMessage({
+								stepIndex: params.index,
+								content: task.content,
+								evidence: passEvidence,
+								progress: `${done}/${quest.steps.length}`,
+								nextLabel: next ? `${next.task.content} [${next.task.agent}]` : null,
+								gitPrompt,
+							}),
+						},
+					],
+					details: {
+						task,
+						...plan.details,
+						progress: `${done}/${quest.steps.length}`,
+					},
+				};
+			};
+
 			// ── Verification outcome ──────────────────────────────────────────
 			// Explicit verifyOutcome wins; otherwise prose-infer while verifying
 			// (see resolveEffectiveOutcome / parseVerifyOutcome).
@@ -638,71 +662,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					};
 				}
 
-				if (effectiveOutcome === "PASS") {
-					const plan = planVerifyPass({
-						step: snapshotStepForVerify(task),
-						stepIndex: params.index,
-						evidence: effectiveEvidence,
-						parallelEnabled: Boolean(quest.parallel?.enabled),
-					});
-					if (!rt.transitionStep(ctx, quest, params.index, plan.nextPhase, plan.transitionReason)) {
-						return textResult("Cannot complete from the current phase.");
-					}
-					task.verifyResult = plan.patches.verifyResult;
-					task.verified = plan.patches.verified;
-					task.completedAt = plan.patches.completedAt;
-
-					emitRunEvents(plan.events);
-					recordEval(
-						ctx.cwd,
-						makeEval(
-							quest,
-							task,
-							params.index,
-							plan.evalIntent.status,
-							plan.evalIntent.verified,
-							plan.evalIntent.evidence,
-						),
-					);
-
-					quest.lastFiredStepIndex = -1;
-					quest.sameStepCount = 0;
-					if (plan.releaseClaims) {
-						claimReg.unregister(ctx.cwd, params.index);
-						rt.dispatchGuard.release(ctx.cwd, params.index);
-					}
-					persist(ctx, quest);
-
-					const done = quest.steps.filter((t) => t.status === "done").length;
-					const next = nextPendingStep(quest);
-					const git = quest.gitIntegration;
-					const gitPrompt = git?.autoCommit
-						? [
-								``,
-								`📝 **Git:** After committing, record with quest_commit(stepIndex=${params.index}, commitHash="...", commitMessage="[quest/${quest.name}] step #${params.index + 1}: ${task.content}", ...)`,
-							].join("\n")
-						: "";
-					return {
-						content: [
-							{
-								type: "text",
-								text: formatVerifyPassMessage({
-									stepIndex: params.index,
-									content: task.content,
-									evidence: effectiveEvidence,
-									progress: `${done}/${quest.steps.length}`,
-									nextLabel: next ? `${next.task.content} [${next.task.agent}]` : null,
-									gitPrompt,
-								}),
-							},
-						],
-						details: {
-							task,
-							...plan.details,
-							progress: `${done}/${quest.steps.length}`,
-						},
-					};
-				}
+				if (effectiveOutcome === "PASS") return completeVerifiedPass(effectiveEvidence);
 
 				// FAIL — shared retry/escalate/auto-fail machine (LLM verdict source).
 				// No deterministic check failed: attribute to model quality so eval
@@ -841,7 +801,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					const diff = collectDiffEvidence(verificationCwd, task.baselineSha ?? null);
 					const checkResults =
 						VERIFICATION.enabled && diff.changedFiles.length > 0
-							? runChecks(planChecks(verificationCwd), verificationCwd)
+							? runChecks(planChecks(verificationCwd), verificationCwd, task.baselineSha ?? null)
 							: [];
 					const evidence: StepEvidence = {
 						changedFiles: diff.changedFiles,
@@ -903,6 +863,21 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					task.verifyInconclusives = 0;
 
 					persist(ctx, quest);
+
+					// Tiered auto-pass: small, check-covered diffs at light tiers are
+					// verified by their deterministic evidence alone — no LLM verifier.
+					const autoPass = autoPassDecision(tierOf(quest), evidence);
+					if (autoPass.pass) {
+						recordRun(ctx.cwd, {
+							kind: "checks",
+							taskIndex: params.index,
+							taskContent: task.content,
+							agent: task.agent,
+							timestamp: Date.now(),
+							checksSummary: autoPass.reason,
+						});
+						return completeVerifiedPass(autoPass.reason);
+					}
 
 					const impactContext = buildVerificationImpactContext(
 						ctx.cwd,
@@ -1214,7 +1189,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 							`${quest.steps.length} steps queued. Quest is now **ACTIVE**.`,
 							next ? `First step: ${next.task.content} [${next.task.agent}]` : "All steps ready.",
 							``,
-							"Auto-pilot will fire the first step on the next turn.",
+							"**End your turn now** (one short reply, no more tool calls). Auto-pilot fires the first step when your turn ends and sends you its instructions — don't inspect quest internals or drive steps manually.",
 						].join("\n"),
 					},
 				],

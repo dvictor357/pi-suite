@@ -2,3 +2,6 @@ node_modules/
 .DS_Store
 *.log
 *.tsbuildinfo
+
+# Bench run output (transcripts can be large).
+bench/results/

@@ -452,7 +452,7 @@ export default function (pi: ExtensionAPI) {
 		promptSnippet:
 			"Structured task list: mark one in_progress, delegate to sub-agents, track completion",
 		promptGuidelines: [
-			"Use todo_write to plan and track multi-step tasks. Mark exactly ONE item in_progress at a time.",
+			"Use todo_write to track work with several distinct parts; skip it for a single focused change (each update costs a turn). Mark exactly ONE item in_progress at a time.",
 			"For parallelizable items, set status 'delegated' with an agent type and focused context. Then use the subagent tool to farm them out. When a sub-agent finishes, update the item to 'completed'.",
 			"Keep delegated context lean — sub-agents get only what they need, not the full conversation.",
 		],

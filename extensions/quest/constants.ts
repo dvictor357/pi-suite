@@ -97,6 +97,12 @@ export interface VerificationConfig {
 	 * first failure without spending time on slower checks.
 	 */
 	checkOrder: readonly ("typecheck" | "lint" | "test" | "format")[];
+	/**
+	 * When a check fails, re-run it at the step's baseline commit; if it fails
+	 * there too, the failure is pre-existing and doesn't fail the step (the LLM
+	 * verifier still sees it). Costs one extra run per failing check, cached.
+	 */
+	baselineAware: boolean;
 }
 
 export const VERIFICATION: VerificationConfig = {
@@ -106,6 +112,63 @@ export const VERIFICATION: VerificationConfig = {
 	outputTailChars: 1200,
 	// Fast type/lint/format signals before the (usually slower) test run.
 	checkOrder: ["typecheck", "lint", "format", "test"],
+	baselineAware: true,
+};
+
+// ── Quest tiers ───────────────────────────────────────────────────────────────
+/** Per-tier pipeline shape (see tiering.ts). Undefined limits are unbounded. */
+export interface TierConfig {
+	/** Most steps a plan may have and stay at this tier. */
+	maxSteps?: number;
+	/** Most distinct write-claimed files a plan may touch and stay at this tier. */
+	maxWriteFiles?: number;
+	/** The orchestrator implements steps itself instead of delegating to a sub-agent. */
+	inline: boolean;
+	/** Largest diff (insertions + deletions) auto-verified without the LLM verifier; 0 = never. */
+	autoPassMaxDiffLines: number;
+	/** Auto-verify only when a test check (not just typecheck/lint) passed. */
+	autoPassRequiresTest: boolean;
+}
+
+export interface TieringConfig {
+	/** Tier for quests that don't declare one (including every legacy quest). */
+	defaultTier: "simple" | "medium" | "complex";
+	tiers: Record<"simple" | "medium" | "complex", TierConfig>;
+}
+
+/**
+ * Starting points, to be tuned on bench data (bench/): simple and medium run
+ * inline (delegation only pays off for isolation, parallelism, or long quests),
+ * simple trusts green checks; complex keeps the full delegated pipeline.
+ * The default stays "complex" so quests that don't declare a tier behave
+ * exactly as before.
+ */
+export const TIERING: TieringConfig = {
+	defaultTier: "complex",
+	tiers: {
+		simple: {
+			maxSteps: 1,
+			maxWriteFiles: 3,
+			inline: true,
+			autoPassMaxDiffLines: 200,
+			autoPassRequiresTest: false,
+		},
+		medium: {
+			maxSteps: 4,
+			maxWriteFiles: 10,
+			// Bench: delegated medium runs cost 3–6× plain — the worker re-reads
+			// what the orchestrator already read. Parallel/sandboxed quests still
+			// delegate (see runsInline).
+			inline: true,
+			autoPassMaxDiffLines: 120,
+			autoPassRequiresTest: true,
+		},
+		complex: {
+			inline: false,
+			autoPassMaxDiffLines: 0,
+			autoPassRequiresTest: true,
+		},
+	},
 };
 
 // ── Codebase retrieval ranking ───────────────────────────────────────────────
