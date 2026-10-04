@@ -22,6 +22,7 @@ import type {
 	GitIntegration,
 	ParallelConfig,
 	Quest,
+	QuestStep,
 	SandboxMode,
 	SandboxPolicy,
 	SandboxOverrides,
@@ -31,6 +32,7 @@ import type {
 import { coerceStepHandoff } from "./context-broker";
 import { coerceFailureBrief } from "./ladder";
 import { coerceStepUsage } from "./usage";
+import { coerceStepEvidence } from "./evidence";
 import { ROUTING } from "./constants";
 import { asThinkingLevel, routeStep, type RoutableStep, type RuntimeDecision } from "./routing";
 import {
@@ -186,7 +188,7 @@ function normalizeSandboxArtifacts(input: unknown) {
 					const r = asRecord(c);
 					return {
 						tool: strOr(r.tool, ""),
-						input: typeof r.input === "object" && r.input !== null ? r.input : {},
+						input: asRecord(r.input),
 						blocked: boolOr(r.blocked, false),
 						reason: optStr(r.reason),
 						timestamp: numOr(r.timestamp, 0),
@@ -279,6 +281,13 @@ export function emptyQuest(
 	};
 }
 
+/**
+ * Every {@link QuestStep} field, optional ones included. loadQuest rebuilds each
+ * step from an explicit list, so a field it forgets is silently lost on the next
+ * reload; typing the rebuild as this makes forgetting one a compile error.
+ */
+type EveryStepField = QuestStep & Record<keyof QuestStep, unknown>;
+
 export function loadQuest(cwd: string): Quest | null {
 	try {
 		const activePath = questActivePath(cwd);
@@ -286,50 +295,60 @@ export function loadQuest(cwd: string): Quest | null {
 		const raw = JSON.parse(readFileSync(activePath, "utf8"));
 		const rawSteps = Array.isArray(raw?.steps) ? raw.steps : raw?.tasks;
 		if (raw && raw.version === 1 && Array.isArray(rawSteps)) {
-			raw.steps = rawSteps.map((t: any) => ({
-				content: t.content || "",
-				status: t.status || "pending",
-				phase: oneOf(t.phase, VALID_STEP_PHASES) ? t.phase : undefined,
-				phaseChangedAt: typeof t.phaseChangedAt === "number" ? t.phaseChangedAt : undefined,
-				dispatchId: typeof t.dispatchId === "string" ? t.dispatchId : undefined,
-				agent: t.agent || "worker",
-				context: t.context || "",
-				dependencies: Array.isArray(t.dependencies) ? t.dependencies : [],
-				readClaim: Array.isArray(t.readClaim)
-					? t.readClaim.filter((p: unknown): p is string => typeof p === "string")
-					: undefined,
-				writeClaim: Array.isArray(t.writeClaim)
-					? t.writeClaim.filter((p: unknown): p is string => typeof p === "string")
-					: undefined,
-				result: t.result || null,
-				handoff: coerceStepHandoff(t.handoff),
-				attempts: t.attempts || 0,
-				completedAt: t.completedAt || null,
-				verified: typeof t.verified === "boolean" ? t.verified : false,
-				verifyResult: t.verifyResult || null,
-				verifyRetries: typeof t.verifyRetries === "number" ? t.verifyRetries : 0,
-				commitHash: t.commitHash || null,
-				branchName: t.branchName || null,
-				startedAt: typeof t.startedAt === "number" ? t.startedAt : null,
-				model: typeof t.model === "string" && t.model.trim() ? t.model : undefined,
-				rung: typeof t.rung === "number" ? t.rung : undefined,
-				escalations: typeof t.escalations === "number" ? t.escalations : 0,
-				failureBriefs: Array.isArray(t.failureBriefs)
-					? t.failureBriefs.map(coerceFailureBrief).filter((b: unknown) => b !== null)
-					: [],
-				lastModel: typeof t.lastModel === "string" && t.lastModel.trim() ? t.lastModel : undefined,
-				lastThinking:
-					typeof t.lastThinking === "string" && t.lastThinking.trim() ? t.lastThinking : undefined,
-				usage: coerceStepUsage(t.usage),
-				sandbox:
-					t.sandbox && typeof t.sandbox === "object"
-						? normalizeSandboxOverrides(t.sandbox)
+			raw.steps = rawSteps.map(
+				(t: any): EveryStepField => ({
+					content: t.content || "",
+					status: t.status || "pending",
+					phase: oneOf(t.phase, VALID_STEP_PHASES) ? t.phase : undefined,
+					phaseChangedAt: typeof t.phaseChangedAt === "number" ? t.phaseChangedAt : undefined,
+					dispatchId: typeof t.dispatchId === "string" ? t.dispatchId : undefined,
+					agent: t.agent || "worker",
+					context: t.context || "",
+					dependencies: Array.isArray(t.dependencies) ? t.dependencies : [],
+					readClaim: Array.isArray(t.readClaim)
+						? t.readClaim.filter((p: unknown): p is string => typeof p === "string")
 						: undefined,
-				sandboxArtifacts:
-					t.sandboxArtifacts && typeof t.sandboxArtifacts === "object"
-						? normalizeSandboxArtifacts(t.sandboxArtifacts)
+					writeClaim: Array.isArray(t.writeClaim)
+						? t.writeClaim.filter((p: unknown): p is string => typeof p === "string")
 						: undefined,
-			}));
+					result: t.result || null,
+					handoff: coerceStepHandoff(t.handoff),
+					attempts: t.attempts || 0,
+					completedAt: t.completedAt || null,
+					verified: typeof t.verified === "boolean" ? t.verified : false,
+					verifyResult: t.verifyResult || null,
+					verifyRetries: typeof t.verifyRetries === "number" ? t.verifyRetries : 0,
+					verifyInconclusives:
+						typeof t.verifyInconclusives === "number" ? t.verifyInconclusives : undefined,
+					baselineSha:
+						typeof t.baselineSha === "string" && t.baselineSha ? t.baselineSha : undefined,
+					evidence: coerceStepEvidence(t.evidence),
+					commitHash: t.commitHash || null,
+					branchName: t.branchName || null,
+					startedAt: typeof t.startedAt === "number" ? t.startedAt : null,
+					model: typeof t.model === "string" && t.model.trim() ? t.model : undefined,
+					rung: typeof t.rung === "number" ? t.rung : undefined,
+					escalations: typeof t.escalations === "number" ? t.escalations : 0,
+					failureBriefs: Array.isArray(t.failureBriefs)
+						? t.failureBriefs.map(coerceFailureBrief).filter((b: unknown) => b !== null)
+						: [],
+					lastModel:
+						typeof t.lastModel === "string" && t.lastModel.trim() ? t.lastModel : undefined,
+					lastThinking:
+						typeof t.lastThinking === "string" && t.lastThinking.trim()
+							? t.lastThinking
+							: undefined,
+					usage: coerceStepUsage(t.usage),
+					sandbox:
+						t.sandbox && typeof t.sandbox === "object"
+							? normalizeSandboxOverrides(t.sandbox)
+							: undefined,
+					sandboxArtifacts:
+						t.sandboxArtifacts && typeof t.sandboxArtifacts === "object"
+							? normalizeSandboxArtifacts(t.sandboxArtifacts)
+							: undefined,
+				}),
+			);
 			// Legacy mirror for downgrade compatibility. New code uses steps.
 			raw.tasks = raw.steps;
 			if (raw.planningMode !== "auto" && raw.planningMode !== "approve") {

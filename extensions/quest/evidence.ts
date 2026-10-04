@@ -16,6 +16,7 @@
  * throws — a missing/again-dirty repo degrades to empty evidence, never a crash.
  */
 import { execFileSync } from "node:child_process";
+import { asRecord, numOr, oneOf, strArray, strOr } from "../../core";
 import type { CheckResult } from "./checks";
 
 /** Objective record of what a step produced, consumed by the verifier + eval. */
@@ -30,6 +31,45 @@ export interface StepEvidence {
 	checks: CheckResult[];
 	/** Epoch-ms capture time. */
 	capturedAt: number;
+}
+
+/**
+ * Disk-read boundary: a persisted step's `evidence`, or undefined when absent
+ * or garbled. Malformed check entries are dropped rather than trusted.
+ */
+export function coerceStepEvidence(value: unknown): StepEvidence | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const rec = asRecord(value);
+	const checks = Array.isArray(rec.checks)
+		? rec.checks.flatMap((raw): CheckResult[] => {
+				const c = asRecord(raw);
+				if (
+					!oneOf(c.kind, ["typecheck", "lint", "format", "test"] as const) ||
+					!oneOf(c.status, ["pass", "fail", "skipped"] as const) ||
+					typeof c.command !== "string"
+				) {
+					return [];
+				}
+				return [
+					{
+						kind: c.kind,
+						command: c.command,
+						status: c.status,
+						exitCode: numOr(c.exitCode, -1),
+						summary: strOr(c.summary, ""),
+						...(c.preexisting === true ? { preexisting: true } : {}),
+					},
+				];
+			})
+		: [];
+	return {
+		changedFiles: strArray(rec.changedFiles),
+		// Verbatim: git --stat output is column-aligned with leading spaces.
+		diffStat: typeof rec.diffStat === "string" ? rec.diffStat : "",
+		baselineSha: typeof rec.baselineSha === "string" ? rec.baselineSha : null,
+		checks,
+		capturedAt: numOr(rec.capturedAt, 0),
+	};
 }
 
 /** Run a git subcommand, returning trimmed stdout or null on any failure. */
