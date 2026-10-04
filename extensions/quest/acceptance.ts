@@ -154,6 +154,8 @@ export interface AcceptanceContext {
 	 * unrelated reasons would send the quest off fixing unrelated code.
 	 */
 	gatedCommands?: readonly string[];
+	/** The project's package.json scripts, to see what a `<pm> run X` command really runs. */
+	scripts?: Readonly<Record<string, string>>;
 }
 
 const RUN_SCRIPT_PMS = new Set(["npm", "pnpm", "yarn", "bun"]);
@@ -161,11 +163,11 @@ const RUN_SCRIPT_PMS = new Set(["npm", "pnpm", "yarn", "bun"]);
 const NPM_TEST_ALIASES = new Set(["test", "t", "tst"]);
 
 /**
- * Canonical form of a command for comparing against gated checks: argv joined
- * by single spaces, with package-manager script shorthands expanded so
- * `npm test`, `npm run test` and `yarn test` compare equal to their `run` form.
+ * Canonical argv of a command for comparing against gated checks, with
+ * package-manager script shorthands expanded so `npm test`, `npm run test` and
+ * `yarn test` all read `<pm> run test …`. Null when it isn't a plain command.
  */
-function canonicalCommand(command: string): string | null {
+function canonicalArgv(command: string): string[] | null {
 	const parsed = parseCommand(command);
 	if ("error" in parsed) return null;
 	const argv = [parsed.file, ...parsed.args];
@@ -173,17 +175,93 @@ function canonicalCommand(command: string): string | null {
 		const bare = parsed.file !== "npm" || NPM_TEST_ALIASES.has(argv[1]);
 		if (bare) argv.splice(1, 1, "run", parsed.file === "npm" ? "test" : argv[1]);
 	}
-	return argv.join(" ");
+	return argv;
 }
 
-/** The gated check `command` repeats, or null. */
+/** `<pm> run <script> [--] [args…]` → the script and its extra args, else null. */
+function scriptRun(argv: readonly string[] | null): { script: string; extra: string[] } | null {
+	if (!argv || !RUN_SCRIPT_PMS.has(argv[0]) || argv[1] !== "run" || !argv[2]) return null;
+	const rest = argv.slice(3);
+	return { script: argv[2], extra: rest[0] === "--" ? rest.slice(1) : rest };
+}
+
+/** Commands of a script body: package scripts chain with `&&`, `||` and `;`. */
+function bodySegments(body: string): string[] {
+	return body
+		.split(/&&|\|\||;/)
+		.map((segment) => segment.trim())
+		.filter(Boolean);
+}
+
+/**
+ * Scripts the step gate runs: the gated `<pm> run X` checks plus every script
+ * their bodies run in turn (`"test": "npm run test:node && npm run test:subagent"`
+ * gates test:node and test:subagent too).
+ */
+function gatedScripts(
+	gated: readonly string[],
+	scripts: Readonly<Record<string, string>>,
+): Map<string, string> {
+	const reached = new Map<string, string>(); // script → the gated check that runs it
+	const queue: [string, string][] = [];
+	for (const check of gated) {
+		const run = scriptRun(canonicalArgv(check));
+		if (run) queue.push([run.script, check]);
+	}
+	while (queue.length > 0) {
+		const [script, check] = queue.shift()!;
+		if (reached.has(script)) continue;
+		reached.set(script, check);
+		for (const segment of bodySegments(scripts[script] ?? "")) {
+			const run = scriptRun(canonicalArgv(segment));
+			if (run) queue.push([run.script, check]);
+		}
+	}
+	return reached;
+}
+
+/** A positional that selects tests: a glob or a test/spec file. */
+const TEST_TARGET = /\*|\.(test|spec)\.[cm]?[jt]sx?$/;
+
+/**
+ * Whether running `body` with `extra` appended still runs everything the script
+ * runs. Extra args can only narrow a single command that doesn't already name
+ * its own test targets: `"test": "vitest run"` + `-- a.test.ts` narrows, but a
+ * chained script, or one with hard-coded globs (`--test core/*.test.ts`), just
+ * gets more files.
+ */
+function runsWholeScript(body: string, extra: readonly string[]): boolean {
+	if (extra.length === 0) return true;
+	const segments = bodySegments(body);
+	if (segments.length !== 1) return true;
+	const argv = canonicalArgv(segments[0]);
+	if (!argv) return true;
+	return argv.slice(1).some((arg) => !arg.startsWith("-") && TEST_TARGET.test(arg));
+}
+
+/**
+ * The gated check `command` repeats, or null. Catches exact repeats in any
+ * shorthand, and — given the project's package.json `scripts` — script runs that
+ * still execute a gated check's whole suite despite extra arguments.
+ */
 export function gatedDuplicate(
 	command: string,
 	gated: readonly string[] | undefined,
+	scripts: Readonly<Record<string, string>> = {},
 ): string | null {
-	const canonical = canonicalCommand(command);
-	if (!canonical || !gated?.length) return null;
-	return gated.find((g) => canonicalCommand(g) === canonical) ?? null;
+	const argv = canonicalArgv(command);
+	if (!argv || !gated?.length) return null;
+	const canonical = argv.join(" ");
+	const exact = gated.find((g) => canonicalArgv(g)?.join(" ") === canonical);
+	if (exact) return exact;
+	const run = scriptRun(argv);
+	if (!run) return null;
+	const check = gatedScripts(gated, scripts).get(run.script);
+	if (!check) return null;
+	const body = scripts[run.script];
+	// Unknown body: extra arguments might narrow it, so give them the benefit of the doubt.
+	if (body === undefined) return run.extra.length === 0 ? check : null;
+	return runsWholeScript(body, run.extra) ? check : null;
 }
 
 function cleanList(values: readonly string[] | undefined): string[] {
@@ -233,9 +311,9 @@ function validateCommands(
 	for (const command of commands) {
 		const parsed = parseCommand(command);
 		if ("error" in parsed) return parsed.error;
-		const gated = gatedDuplicate(command, context.gatedCommands);
+		const gated = gatedDuplicate(command, context.gatedCommands, context.scripts);
 		if (gated) {
-			return `Acceptance command "${command}" repeats \`${gated}\`, which quest already runs after every step. Use a targeted command that proves this goal, e.g. the test file for this change.`;
+			return `Acceptance command "${command}" repeats \`${gated}\` (the whole suite), which quest already runs after every step. Use a targeted command that proves this goal, e.g. the test runner on the test file for this change.`;
 		}
 		const blocked = sandboxBlockReason(command, context.sandbox);
 		if (blocked)

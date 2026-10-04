@@ -194,6 +194,50 @@ describe("commands the step gate already runs", () => {
 		assert.equal(gatedDuplicate("npm test", undefined), null, "no gate known");
 	});
 
+	test("script runs that still execute a gated suite are caught (pi-suite's own scripts)", () => {
+		// The shape that slipped through on bench: test:node hard-codes its globs, so
+		// extra file arguments add files instead of narrowing the run.
+		const scripts = {
+			test: "npm run test:node && npm run test:subagent",
+			"test:node":
+				"node --import tsx --import ./test/isolate-home.ts --test core/*.test.ts extensions/quest/*.test.ts",
+			"test:subagent": "vitest run",
+			typecheck: "tsc --noEmit",
+			e2e: "playwright test",
+		};
+		const gated = ["npm run typecheck", "npm run test"];
+		const files = "extensions/quest/checks.test.ts extensions/quest/evidence.test.ts";
+		for (const command of [
+			`npm run test:node -- ${files}`,
+			`npm run test:node`,
+			`npm test -- ${files}`, // chained: every part still runs
+			`npm run test:subagent`, // reached through test, no narrowing args
+		]) {
+			assert.equal(gatedDuplicate(command, gated, scripts), "npm run test", command);
+		}
+		for (const command of [
+			"npm run test:subagent -- src/a.test.ts", // vitest run + a file narrows
+			"node --import tsx --import ./test/isolate-home.ts --test extensions/quest/checks.test.ts",
+			"npm run e2e", // not part of the gate
+		]) {
+			assert.equal(gatedDuplicate(command, gated, scripts), null, command);
+		}
+	});
+
+	test("a narrowable test script still allows file arguments", () => {
+		const scripts = { test: "vitest run --config ./vitest.config.ts" };
+		assert.equal(gatedDuplicate("npm test -- src/reset.test.ts", ["npm run test"], scripts), null);
+		assert.equal(gatedDuplicate("npm test", ["npm run test"], scripts), "npm run test");
+	});
+
+	test("cyclic or missing scripts don't hang or throw", () => {
+		const scripts = { test: "npm run a", a: "npm run b", b: "npm run a" };
+		assert.equal(gatedDuplicate("npm run b", ["npm run test"], scripts), "npm run test");
+		assert.equal(gatedDuplicate("npm run ghost", ["npm run ghost"], {}), "npm run ghost");
+		// Unknown script body: the arguments might narrow it, so they're allowed.
+		assert.equal(gatedDuplicate("npm run ghost -- x", ["npm run ghost"], {}), null);
+	});
+
 	test("declaring or appending one fails with a pointer to targeted commands", () => {
 		const r = createAcceptance(
 			{ criteria: ["x"], commands: ["npm run typecheck", "npm test"] },
@@ -202,7 +246,10 @@ describe("commands the step gate already runs", () => {
 			cfg,
 		);
 		assert.ok("error" in r);
-		assert.match(r.error, /repeats `npm run typecheck`, which quest already runs after every step/);
+		assert.match(
+			r.error,
+			/repeats `npm run typecheck` \(the whole suite\), which quest already runs after every step/,
+		);
 		assert.match(r.error, /targeted command/);
 		const grow = addAcceptanceCommands(accepted(), ["npm test"], { gatedCommands }, cfg);
 		assert.ok("error" in grow && /repeats `npm run test`/.test(grow.error));

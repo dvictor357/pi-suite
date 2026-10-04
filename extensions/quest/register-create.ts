@@ -9,7 +9,7 @@ import { collectEnhanceContext, renderEnhancedBrief } from "./enhance";
 import type { QuestRuntime } from "./runtime";
 import { planningGuidance, QUEST_TIERS, tierOf } from "./tiering";
 import { createAcceptance } from "./acceptance";
-import { planChecks } from "./checks";
+import { acceptanceGateContext } from "./checks";
 
 export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 	const { getQuest, persist, validateAndSetTeam, ensureLedgers, codebaseToolAvailable } = rt;
@@ -221,7 +221,7 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 			if (params.complexity) quest.tier = params.complexity;
 			const accepted = createAcceptance(params.acceptance, tierOf(quest), {
 				sandbox: quest.sandbox,
-				gatedCommands: planChecks(ctx.cwd).map((c) => c.command),
+				...acceptanceGateContext(ctx.cwd),
 			});
 			if ("error" in accepted) return rt.textResult(accepted.error);
 			quest.acceptance = accepted.acceptance;

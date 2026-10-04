@@ -14,6 +14,7 @@ import { briefBudgetForModel } from "./ladder";
 import {
 	failureCodeForCheck,
 	firstFailure,
+	acceptanceGateContext,
 	planChecks,
 	runChecks,
 	summarizeChecks,
@@ -188,7 +189,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				};
 				const grown = addAcceptanceCommands(base, params.acceptanceCommands, {
 					sandbox: quest.sandbox,
-					gatedCommands: planChecks(ctx.cwd).map((c) => c.command),
+					...acceptanceGateContext(ctx.cwd),
 				});
 				if ("error" in grown) return textResult(grown.error);
 				if (grown.added.length) {

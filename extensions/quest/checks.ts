@@ -71,7 +71,7 @@ function pmBinary(profile: ProjectMemory | null, hasPackageJson: boolean): strin
  * The package.json `scripts` map for a project, or an empty object when absent
  * or unreadable. Pulled out so {@link resolveChecks} stays pure over its inputs.
  */
-function readPackageScripts(cwd: string): Record<string, string> {
+export function readPackageScripts(cwd: string): Record<string, string> {
 	const path = join(cwd, "package.json");
 	if (!existsSync(path)) return {};
 	try {
@@ -181,6 +181,17 @@ export function resolveChecks(
 		if (check) planned.push(check);
 	}
 	return planned;
+}
+
+/** What acceptance validation compares commands against: the step gate's checks and package scripts. */
+export function acceptanceGateContext(cwd: string): {
+	gatedCommands: string[];
+	scripts: Record<string, string>;
+} {
+	return {
+		gatedCommands: planChecks(cwd).map((c) => c.command),
+		scripts: readPackageScripts(cwd),
+	};
 }
 
 /** Load the project profile (best-effort) and resolve the applicable checks. */
