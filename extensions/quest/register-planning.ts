@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
+import { Check } from "typebox/value";
 import type { StepStatus } from "./types";
 import type { FailureCode } from "../../core";
 import { LADDER, MAX_DEPENDENCY_DEPTH, MAX_VERIFY_RETRIES, VERIFICATION } from "./constants";
@@ -8,6 +9,7 @@ import { loadModelLadder } from "./storage";
 import { loadTeams } from "./teams";
 import { buildSandboxComplianceChecks, buildVerifierHandoff } from "./verifier";
 import { autoPassDecision, resolvePlanTier, tierOf } from "./tiering";
+import { resolvePlannedSteps } from "./plan-steps";
 import { briefBudgetForModel } from "./ladder";
 import {
 	failureCodeForCheck,
@@ -42,6 +44,80 @@ import {
 	type VerifyRunEvent,
 } from "./verify-outcome";
 
+/**
+ * One planned step. Declared once: the legacy `tasks` alias takes unknown items
+ * checked against this at runtime (see plan-steps.ts) instead of repeating the
+ * whole shape in the tool schema (~2.4k chars on every model request).
+ */
+const PlanStepSchema = Type.Object({
+	content: Type.String({ description: "Short name of the step" }),
+	agent: Type.String({
+		description: "Sub-agent type: worker, quick-worker, scout, planner, reviewer, verifier",
+	}),
+	context: Type.String({
+		description: "Focused context/instructions for the sub-agent — keep it lean",
+	}),
+	dependencies: Type.Optional(
+		Type.Array(Type.Number(), {
+			description: "Indices of steps that must complete first (0-based)",
+		}),
+	),
+	model: Type.Optional(
+		Type.String({
+			description:
+				"Model id to run this step's sub-agent with. Usually leave unset — quest assigns it via quest_assign_model (asking the user once per role).",
+		}),
+	),
+	readClaim: Type.Optional(
+		Type.Array(Type.String(), { description: "Cwd-relative paths this step reads" }),
+	),
+	writeClaim: Type.Optional(
+		Type.Array(Type.String(), { description: "Cwd-relative paths this step writes" }),
+	),
+	sandbox: Type.Optional(
+		Type.Object({
+			mode: Type.Optional(
+				StringEnum(["restricted", "isolated"] as const, {
+					description: "Escalate sandbox mode for this step (cannot de-escalate quest-level).",
+				}),
+			),
+			allowedPaths: Type.Optional(
+				Type.Array(Type.String(), {
+					description: "Additional allowed paths (intersect with quest-level).",
+				}),
+			),
+			deniedPaths: Type.Optional(
+				Type.Array(Type.String(), {
+					description: "Additional denied paths (union with quest-level).",
+				}),
+			),
+			allowCommands: Type.Optional(
+				Type.Array(Type.String(), {
+					description: "Additional allowed commands (intersect with quest-level).",
+				}),
+			),
+			denyCommands: Type.Optional(
+				Type.Array(Type.String(), {
+					description: "Additional denied commands (union with quest-level).",
+				}),
+			),
+			allowNetwork: Type.Optional(
+				Type.Boolean({
+					description: "Override network access (can only go true→false).",
+				}),
+			),
+			allowPackageInstall: Type.Optional(
+				Type.Boolean({
+					description: "Override package-install permission (can only go true→false).",
+				}),
+			),
+		}),
+	),
+});
+
+const isPlanStep = (value: unknown): value is Static<typeof PlanStepSchema> =>
+	Check(PlanStepSchema, value);
+
 export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 	const {
 		getQuest,
@@ -68,151 +144,12 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 		].join(" "),
 		parameters: Type.Object({
 			steps: Type.Optional(
-				Type.Array(
-					Type.Object({
-						content: Type.String({ description: "Short name of the step" }),
-						agent: Type.String({
-							description:
-								"Sub-agent type: worker, quick-worker, scout, planner, reviewer, verifier",
-						}),
-						context: Type.String({
-							description: "Focused context/instructions for the sub-agent — keep it lean",
-						}),
-						dependencies: Type.Optional(
-							Type.Array(Type.Number(), {
-								description: "Indices of steps that must complete first (0-based)",
-							}),
-						),
-						model: Type.Optional(
-							Type.String({
-								description:
-									"Model id to run this step's sub-agent with. Usually leave unset — quest assigns it via quest_assign_model (asking the user once per role).",
-							}),
-						),
-						readClaim: Type.Optional(
-							Type.Array(Type.String(), { description: "Cwd-relative paths this step reads" }),
-						),
-						writeClaim: Type.Optional(
-							Type.Array(Type.String(), { description: "Cwd-relative paths this step writes" }),
-						),
-						sandbox: Type.Optional(
-							Type.Object({
-								mode: Type.Optional(
-									StringEnum(["restricted", "isolated"] as const, {
-										description:
-											"Escalate sandbox mode for this step (cannot de-escalate quest-level).",
-									}),
-								),
-								allowedPaths: Type.Optional(
-									Type.Array(Type.String(), {
-										description: "Additional allowed paths (intersect with quest-level).",
-									}),
-								),
-								deniedPaths: Type.Optional(
-									Type.Array(Type.String(), {
-										description: "Additional denied paths (union with quest-level).",
-									}),
-								),
-								allowCommands: Type.Optional(
-									Type.Array(Type.String(), {
-										description: "Additional allowed commands (intersect with quest-level).",
-									}),
-								),
-								denyCommands: Type.Optional(
-									Type.Array(Type.String(), {
-										description: "Additional denied commands (union with quest-level).",
-									}),
-								),
-								allowNetwork: Type.Optional(
-									Type.Boolean({
-										description: "Override network access (can only go true→false).",
-									}),
-								),
-								allowPackageInstall: Type.Optional(
-									Type.Boolean({
-										description: "Override package-install permission (can only go true→false).",
-									}),
-								),
-							}),
-						),
-					}),
-					{ description: "Array of steps in execution order" },
-				),
+				Type.Array(PlanStepSchema, { description: "Array of steps in execution order" }),
 			),
 			tasks: Type.Optional(
-				Type.Array(
-					Type.Object({
-						content: Type.String({ description: "Short name of the step" }),
-						agent: Type.String({
-							description:
-								"Sub-agent type: worker, quick-worker, scout, planner, reviewer, verifier",
-						}),
-						context: Type.String({
-							description: "Focused context/instructions for the sub-agent — keep it lean",
-						}),
-						dependencies: Type.Optional(
-							Type.Array(Type.Number(), {
-								description: "Indices of steps that must complete first (0-based)",
-							}),
-						),
-						model: Type.Optional(
-							Type.String({
-								description:
-									"Model id to run this step's sub-agent with. Usually leave unset — quest assigns it via quest_assign_model (asking the user once per role).",
-							}),
-						),
-						readClaim: Type.Optional(
-							Type.Array(Type.String(), { description: "Cwd-relative paths this step reads" }),
-						),
-						writeClaim: Type.Optional(
-							Type.Array(Type.String(), { description: "Cwd-relative paths this step writes" }),
-						),
-						sandbox: Type.Optional(
-							Type.Object({
-								mode: Type.Optional(
-									StringEnum(["restricted", "isolated"] as const, {
-										description:
-											"Escalate sandbox mode for this step (cannot de-escalate quest-level).",
-									}),
-								),
-								allowedPaths: Type.Optional(
-									Type.Array(Type.String(), {
-										description: "Additional allowed paths (intersect with quest-level).",
-									}),
-								),
-								deniedPaths: Type.Optional(
-									Type.Array(Type.String(), {
-										description: "Additional denied paths (union with quest-level).",
-									}),
-								),
-								allowCommands: Type.Optional(
-									Type.Array(Type.String(), {
-										description: "Additional allowed commands (intersect with quest-level).",
-									}),
-								),
-								denyCommands: Type.Optional(
-									Type.Array(Type.String(), {
-										description: "Additional denied commands (union with quest-level).",
-									}),
-								),
-								allowNetwork: Type.Optional(
-									Type.Boolean({
-										description: "Override network access (can only go true→false).",
-									}),
-								),
-								allowPackageInstall: Type.Optional(
-									Type.Boolean({
-										description: "Override package-install permission (can only go true→false).",
-									}),
-								),
-							}),
-						),
-					}),
-					{
-						description:
-							"Legacy alias for steps. Prefer steps for new calls; tasks remains accepted for backward compatibility.",
-					},
-				),
+				Type.Array(Type.Unknown(), {
+					description: "Deprecated alias of steps (same item shape). Prefer steps.",
+				}),
 			),
 			autoStart: Type.Optional(
 				Type.Boolean({
@@ -230,7 +167,9 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				};
 			}
 
-			const plannedSteps = params.steps ?? params.tasks ?? [];
+			const resolvedSteps = resolvePlannedSteps(params, isPlanStep);
+			if ("error" in resolvedSteps) return textResult(resolvedSteps.error);
+			const plannedSteps = resolvedSteps.steps;
 			if (plannedSteps.length === 0) {
 				return {
 					content: [{ type: "text", text: "No steps provided." }],

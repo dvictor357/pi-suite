@@ -9,8 +9,7 @@ export const TaskItem = Type.Object({
 	model: Type.Optional(Type.String({ description: "Model override for this invocation" })),
 	output: Type.Optional(
 		Type.Record(Type.String(), Type.Unknown(), {
-			description:
-				"JSON Schema the agent's final answer must satisfy (overrides the agent's frontmatter output). The answer is validated, repaired once if needed, and passed on as JSON; later steps can use {previous.field}.",
+			description: "JSON Schema for this answer (see top-level output).",
 		}),
 	),
 	thinking: Type.Optional(
@@ -32,8 +31,7 @@ export const PipelineStage = Type.Object({
 	model: Type.Optional(Type.String({ description: "Model override for this stage" })),
 	output: Type.Optional(
 		Type.Record(Type.String(), Type.Unknown(), {
-			description:
-				"JSON Schema the agent's final answer must satisfy (overrides the agent's frontmatter output). The answer is validated, repaired once if needed, and passed on as JSON; later steps can use {previous.field}.",
+			description: "JSON Schema for this answer (see top-level output).",
 		}),
 	),
 	thinking: Type.Optional(
@@ -62,8 +60,7 @@ export const ChainItem = Type.Object({
 	model: Type.Optional(Type.String({ description: "Model override for this step" })),
 	output: Type.Optional(
 		Type.Record(Type.String(), Type.Unknown(), {
-			description:
-				"JSON Schema the agent's final answer must satisfy (overrides the agent's frontmatter output). The answer is validated, repaired once if needed, and passed on as JSON; later steps can use {previous.field}.",
+			description: "JSON Schema for this answer (see top-level output).",
 		}),
 	),
 	thinking: Type.Optional(
@@ -91,7 +88,7 @@ export const SubagentParams = Type.Object({
 	output: Type.Optional(
 		Type.Record(Type.String(), Type.Unknown(), {
 			description:
-				"JSON Schema the agent's final answer must satisfy (overrides the agent's frontmatter output). The answer is validated, repaired once if needed, and passed on as JSON; later steps can use {previous.field}.",
+				"JSON Schema the final answer must satisfy (overrides agent frontmatter); validated, repaired once, passed on as JSON — later steps can use {previous.field}.",
 		}),
 	),
 	thinking: Type.Optional(
@@ -112,7 +109,7 @@ export const SubagentParams = Type.Object({
 	items: Type.Optional(
 		Type.Array(Type.String(), {
 			description:
-				"Pipeline mode: list of items. Each item flows through every `stages` step independently (no barrier between stages — item B can be in stage 1 while item A is in stage 3). Requires `stages`.",
+				"Pipeline mode: items, each flowing through all `stages` independently (no barrier between stages). Requires `stages`.",
 		}),
 	),
 	stages: Type.Optional(
@@ -129,20 +126,20 @@ export const SubagentParams = Type.Object({
 	timeoutMs: Type.Optional(
 		Type.Number({
 			description:
-				"Maximum runtime per subagent attempt in milliseconds. Default comes from settings.json subagent.timeoutMs or 180000. Use 0 to disable.",
+				"Max ms per attempt (default: settings subagent.timeoutMs or 180000; 0 disables).",
 			default: DEFAULT_AGENT_TIMEOUT_MS,
 		}),
 	),
 	maxCost: Type.Optional(
 		Type.Number({
 			description:
-				"USD spend cap for this whole call (all subagents, retries, and steps). When reached, running subagents are stopped and queued ones skipped; results are partial. Checked after each model turn, so in-flight turns can overshoot slightly. Default from settings.json subagent.maxCost; 0 disables.",
+				"USD cap for the whole call; when hit, running agents stop and queued ones are skipped (partial results). Default: settings subagent.maxCost; 0 disables.",
 		}),
 	),
 	maxTokens: Type.Optional(
 		Type.Number({
 			description:
-				"Input+output token cap for this whole call (cache reads/writes not counted). Same behavior as maxCost. Default from settings.json subagent.maxTokens; 0 disables.",
+				"Input+output token cap for the whole call, like maxCost. Default: settings subagent.maxTokens; 0 disables.",
 		}),
 	),
 	onError: Type.Optional(
@@ -155,14 +152,14 @@ export const SubagentParams = Type.Object({
 	isolation: Type.Optional(
 		StringEnum(["none", "worktree"] as const, {
 			description:
-				"Single/parallel only. 'worktree' runs each writer agent in its own git worktree from HEAD; changes are committed to a pi-minions/<run>/<n>-<agent> branch for review/merge, and writeClaim is not required. Read-only agents run in place. Uncommitted changes in the main checkout are NOT visible to isolated agents. Default 'none'.",
+				"Single/parallel only. 'worktree': each writer runs in its own worktree from HEAD and commits to a pi-minions/<run>/<n>-<agent> branch (no writeClaim needed; uncommitted main-checkout changes are not visible). Default 'none'.",
 			default: "none",
 		}),
 	),
 	rerun: Type.Optional(
 		Type.String({
 			description:
-				"Re-run a recorded run by id (or unique id prefix) instead of passing a mode. By default only failed work is redone: failed parallel tasks, failed pipeline items, or a chain resumed from its first failed step with the stored {previous}. Other params given alongside (retries, maxCost, isolation, …) override the stored ones.",
+				"Re-run a recorded run by id/prefix instead of passing a mode; redoes only failed work by default. Other params given override the stored ones.",
 		}),
 	),
 	rerunScope: Type.Optional(

@@ -25,13 +25,29 @@ import { registerStatusTools } from "./register-status";
 import { registerDelegateTools } from "./register-delegate";
 import { registerEvents, pushActivityUI } from "./register-events";
 import { registerQuestCommand } from "./register-command";
+import { startsInactive, syncQuestLoadout } from "./loadout";
 
-export default function (pi: ExtensionAPI) {
+export default function (rawPi: ExtensionAPI) {
+	// Quest-run tools register inactive; the loadout switches them on while a
+	// quest is live (see loadout.ts). Everything else registers unchanged.
+	const pi = new Proxy(rawPi, {
+		get(target, prop, receiver) {
+			if (prop === "registerTool") {
+				return (tool: Parameters<ExtensionAPI["registerTool"]>[0]) =>
+					target.registerTool(startsInactive(tool.name) ? { ...tool, defaultActive: false } : tool);
+			}
+			const value = Reflect.get(target, prop, receiver);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
 	const rt = createQuestRuntime(pi, {
 		// Refresh the activity panel on every quest mutation — not just tracked
 		// subagent tool events. Orchestrator-direct steps (quest_update, retries,
 		// approval) otherwise leave the widget frozen at the last subagent snapshot.
-		onPersist: (ctx) => pushActivityUI(ctx, rt),
+		onPersist: (ctx, quest) => {
+			pushActivityUI(ctx, rt);
+			syncQuestLoadout(pi, quest);
+		},
 	});
 	registerCreateTools(pi, rt);
 	registerPlanningTools(pi, rt);
@@ -39,4 +55,8 @@ export default function (pi: ExtensionAPI) {
 	registerDelegateTools(pi, rt);
 	registerEvents(pi, rt);
 	registerQuestCommand(pi, rt);
+	// Catch every lifecycle path persist doesn't see (archive, resume, new cwd).
+	pi.on("before_agent_start", async (_event, ctx) => {
+		syncQuestLoadout(pi, rt.getQuest(ctx.cwd));
+	});
 }
