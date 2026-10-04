@@ -17,7 +17,7 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 		label: "Quest Create",
 		description: [
 			"Create a new quest from a goal. This starts the planning phase.",
-			"Quest will then auto-pilot through steps using sub-agents until complete.",
+			"Quest then auto-pilots through the steps until complete — inline or via sub-agents, depending on complexity.",
 			"Call this when the user gives a project goal or multi-step task.",
 		].join(" "),
 		parameters: Type.Object({
@@ -30,7 +30,7 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 			complexity: Type.Optional(
 				StringEnum(QUEST_TIERS, {
 					description:
-						"Size the pipeline to the task — always set it. 'simple': one focused change in 1–3 files with a clear spec (you implement it yourself, checks verify). 'medium': a few related changes, no design unknowns (delegated steps, no research sub-agents). 'complex': cross-cutting work, design decisions or unknowns (full scout/planner/research/verifier pipeline). Default: complex.",
+						"Size the pipeline to the task — pick the LOWEST tier that fits. 'simple': you can already name the file(s) and the change (a fix or small feature, including its tests) — you implement it yourself and checks verify it. 'medium': several distinct changes worth separate steps, or you must explore to find where to change (you implement the steps yourself, in order). 'complex': design decisions, cross-cutting refactors, or unknowns needing research. Unsure between two? Pick the lower one — quest_plan raises the tier automatically if the plan outgrows it. Default: complex.",
 				}),
 			),
 			team: Type.Optional(

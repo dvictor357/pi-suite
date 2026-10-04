@@ -43,10 +43,11 @@ export const ARMS: readonly BenchArm[] = [
 		id: "quest",
 		description: "pi-suite with the work run as a pi-quest (plan, delegate, verify)",
 		suite: true,
+		// Neutral on how the quest runs: naming "delegate" here once biased the
+		// orchestrator toward heavier tiers. Runs before 2026-10-04 used that wording.
 		promptPrefix: [
-			"Run this task as a pi-quest: create it with quest_create, plan the steps with",
-			"quest_plan, approve the plan, and let auto-pilot delegate and verify each step",
-			"until the quest completes. Do not stop before the quest is done.",
+			"Run this task as a pi-quest: create it with quest_create, plan it with quest_plan,",
+			"and let the quest run until it completes. Do not stop before the quest is done.",
 			"",
 		].join("\n"),
 	},
