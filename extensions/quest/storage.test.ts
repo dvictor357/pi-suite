@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -146,6 +146,89 @@ test("loadQuest round-trips durable phases and bounded parallel config", () => {
 		maxConcurrent: 8,
 		stepTimeoutMs: 1_000,
 	});
+});
+
+test("loadQuest keeps step baselineSha, evidence and verifyInconclusives across a reload", () => {
+	const cwd = tempCwd();
+	const quest = emptyQuest("Reload", "keep attribution state");
+	quest.status = "active";
+	const evidence = {
+		changedFiles: ["src/a.ts"],
+		diffStat: " src/a.ts | 2 +-",
+		baselineSha: "abc123",
+		checks: [
+			{
+				kind: "typecheck" as const,
+				command: "npm run typecheck",
+				status: "fail" as const,
+				exitCode: 2,
+				summary: "TS2345",
+				preexisting: true,
+			},
+		],
+		capturedAt: 42,
+	};
+	quest.steps = [
+		{
+			content: "retry me",
+			status: "verifying",
+			agent: "worker",
+			context: "",
+			dependencies: [],
+			result: "did it",
+			attempts: 2,
+			startedAt: 100,
+			completedAt: null,
+			verified: false,
+			verifyResult: null,
+			verifyRetries: 1,
+			verifyInconclusives: 1,
+			commitHash: null,
+			branchName: null,
+			baselineSha: "abc123",
+			evidence,
+		},
+	];
+	saveQuest(quest, cwd);
+
+	const step = loadQuest(cwd)?.steps[0];
+	// Losing these after a restart re-stamps the baseline at a later HEAD (misattributing
+	// inherited failures), drops the verifier's evidence, and resets the re-prompt budget.
+	assert.equal(step?.baselineSha, "abc123");
+	assert.deepEqual(step?.evidence, evidence);
+	assert.equal(step?.verifyInconclusives, 1);
+});
+
+test("loadQuest drops malformed step attribution state instead of trusting it", () => {
+	const cwd = tempCwd();
+	const quest = emptyQuest("Garbled", "bad disk data");
+	quest.steps = [
+		{
+			content: "x",
+			status: "pending",
+			agent: "worker",
+			context: "",
+			dependencies: [],
+			result: null,
+			attempts: 0,
+			startedAt: null,
+			completedAt: null,
+			verified: false,
+			verifyResult: null,
+			verifyRetries: 0,
+			commitHash: null,
+			branchName: null,
+		},
+	];
+	saveQuest(quest, cwd);
+	const raw = JSON.parse(readFileSync(questActivePath(cwd), "utf8"));
+	Object.assign(raw.steps[0], { baselineSha: 7, evidence: "nope", verifyInconclusives: "1" });
+	writeFileSync(questActivePath(cwd), JSON.stringify(raw));
+
+	const step = loadQuest(cwd)?.steps[0];
+	assert.equal(step?.baselineSha, undefined);
+	assert.equal(step?.evidence, undefined);
+	assert.equal(step?.verifyInconclusives, undefined);
 });
 
 test("loadQuest archives and clears a stale finished active quest", () => {
