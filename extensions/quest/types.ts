@@ -1,6 +1,7 @@
 import type { FailureBrief } from "./ladder";
 import type { StepEvidence } from "./evidence";
 import type { StepUsage } from "./usage";
+import type { QuestAcceptance } from "./acceptance";
 
 export type QuestStatus = "planning" | "active" | "paused" | "done" | "idle";
 /** Backward-compatible summary consumed by todo/kanban and older pi-suite releases. */
@@ -220,6 +221,14 @@ export interface Quest {
 	tier?: "simple" | "medium" | "complex";
 	/** Why the tier was raised above what quest_create declared, when it was. */
 	tierReason?: string;
+	/**
+	 * Quest-level acceptance (see acceptance.ts): criteria + commands declared at
+	 * quest_create that must pass before the quest completes. Absent on legacy
+	 * quests and light-tier quests that declared none — those complete as before.
+	 */
+	acceptance?: QuestAcceptance;
+	/** HEAD when the quest first fired a step; the acceptance gate's red/green baseline. */
+	baselineSha?: string;
 	commits: {
 		stepIndex: number;
 		/** @deprecated Use stepIndex. */

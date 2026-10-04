@@ -8,6 +8,8 @@ import { codebaseStatusSummary, hasCodebaseCache, loadCodebaseIndex } from "./co
 import { collectEnhanceContext, renderEnhancedBrief } from "./enhance";
 import type { QuestRuntime } from "./runtime";
 import { planningGuidance, QUEST_TIERS, tierOf } from "./tiering";
+import { createAcceptance } from "./acceptance";
+import { planChecks } from "./checks";
 
 export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 	const { getQuest, persist, validateAndSetTeam, ensureLedgers, codebaseToolAvailable } = rt;
@@ -32,6 +34,24 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 					description:
 						"Size the pipeline to the task — pick the LOWEST tier that fits. 'simple': you can already name the file(s) and the change (a fix or small feature, including its tests) — you implement it yourself and checks verify it. 'medium': several distinct changes worth separate steps, or you must explore to find where to change (you implement the steps yourself, in order). 'complex': design decisions, cross-cutting refactors, or unknowns needing research. Unsure between two? Pick the lower one — quest_plan raises the tier automatically if the plan outgrows it. Default: complex.",
 				}),
+			),
+			acceptance: Type.Optional(
+				Type.Object(
+					{
+						criteria: Type.Array(Type.String(), {
+							description: "What must be observably true when the quest is done.",
+						}),
+						commands: Type.Optional(
+							Type.Array(Type.String(), {
+								description:
+									"Targeted commands (no shell: no pipes/&&) that pass only when the goal is met, e.g. 'npm test -- src/reset.test.ts'. Not the whole suite/typecheck/lint — quest runs those after every step.",
+							}),
+						),
+					},
+					{
+						description: "Definition of done, fixed before planning. Required for complex quests.",
+					},
+				),
 			),
 			team: Type.Optional(
 				Type.String({
@@ -199,6 +219,12 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 				parallelConfig,
 			);
 			if (params.complexity) quest.tier = params.complexity;
+			const accepted = createAcceptance(params.acceptance, tierOf(quest), {
+				sandbox: quest.sandbox,
+				gatedCommands: planChecks(ctx.cwd).map((c) => c.command),
+			});
+			if ("error" in accepted) return rt.textResult(accepted.error);
+			quest.acceptance = accepted.acceptance;
 			validateAndSetTeam(quest, params.team);
 			ensureLedgers(ctx.cwd, quest.name);
 			persist(ctx, quest);

@@ -26,6 +26,7 @@
  * - True verified failures go through the verifier/ladder path, not this tree.
  */
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "../../core";
+import { acceptancePending, type QuestAcceptance } from "./acceptance";
 import { decideVerifyFailAction } from "./ladder";
 import { checkTimeout, DEFAULT_STEP_TIMEOUT_MS } from "./phase-loop";
 import type { StepPhase, StepStatus } from "./types";
@@ -76,6 +77,11 @@ export interface AutoPilotQuestSnapshot {
 	/** When true, sequential fire is replaced by parallel-batch fall-through handling. */
 	parallelEnabled: boolean;
 	/**
+	 * The quest declared acceptance that hasn't passed yet: when every step is
+	 * done, run the acceptance gate instead of completing (see acceptance.ts).
+	 */
+	acceptancePending?: boolean;
+	/**
 	 * Wall-clock budget for a sequential step in dispatching/running/verifying.
 	 * Defaults to {@link DEFAULT_STEP_TIMEOUT_MS} when omitted.
 	 */
@@ -115,6 +121,8 @@ export type TimeoutAction =
  */
 export type SequentialDecision =
 	| { kind: "complete" }
+	/** Every step is done but acceptance hasn't passed: adapter runs the gate. */
+	| { kind: "acceptance_check" }
 	| {
 			kind: "verifying";
 			indices: number[];
@@ -288,6 +296,7 @@ export function nextPendingFromSnapshot(
 function decideWhenNoNext(
 	steps: readonly AutoPilotStepSnapshot[],
 	hasUI: boolean,
+	acceptancePending: boolean,
 ): SequentialDecision {
 	const verifyingIndices = steps
 		.map((t, i) => (t.status === "verifying" ? i : -1))
@@ -313,7 +322,8 @@ function decideWhenNoNext(
 	const failedIndices = steps.map((t, i) => (t.status === "failed" ? i : -1)).filter((i) => i >= 0);
 
 	if (allDone && failedIndices.length === 0) {
-		return { kind: "complete" };
+		// All steps done ≠ quest done when the quest declared acceptance.
+		return { kind: acceptancePending ? "acceptance_check" : "complete" };
 	}
 	if (failedIndices.length > 0) {
 		return {
@@ -457,7 +467,7 @@ export function decideAfterAgentEnd(input: AutoPilotInput): AutoPilotDecision {
 			timeouts,
 			unresolved,
 			tryParallel,
-			sequential: decideWhenNoNext(simulated, hasUI),
+			sequential: decideWhenNoNext(simulated, hasUI, !!quest.acceptancePending),
 		};
 	}
 
@@ -498,6 +508,7 @@ export function snapshotQuestForAutoPilot(quest: {
 		startedAt?: number | null;
 	}[];
 	parallel?: { enabled?: boolean; stepTimeoutMs?: number } | null;
+	acceptance?: QuestAcceptance;
 }): AutoPilotQuestSnapshot {
 	return {
 		name: quest.name,
@@ -505,6 +516,7 @@ export function snapshotQuestForAutoPilot(quest: {
 		sameStepCount: quest.sameStepCount,
 		stepsSincePause: quest.stepsSincePause,
 		parallelEnabled: !!quest.parallel?.enabled,
+		acceptancePending: acceptancePending(quest),
 		// Honor parallel.stepTimeoutMs when set; sequential path uses the same default.
 		stepTimeoutMs: quest.parallel?.stepTimeoutMs,
 		steps: quest.steps.map((s) => ({

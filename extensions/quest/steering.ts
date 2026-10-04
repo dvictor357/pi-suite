@@ -78,9 +78,12 @@ export function formatQuestStatus(quest: Quest): string {
 	const approveTag = quest.planningMode === "approve" && !quest.planApproved ? ` · ⚠ AWAITING` : "";
 	const verifyTag = quest.verifyOnComplete ? ` · verify: on` : "";
 	const gitTag = quest.gitIntegration?.autoCommit ? ` · git: ${quest.commits.length}c` : "";
+	const acceptanceTag = quest.acceptance
+		? ` · acceptance: ${quest.acceptance.status}${quest.acceptance.rounds ? ` (round ${quest.acceptance.rounds})` : ""}`
+		: "";
 
 	const lines: string[] = [
-		`**Quest: ${quest.name}**  [${quest.status.toUpperCase()}${modeTag}${sandboxTag}${approveTag}${verifyTag}${gitTag}]`,
+		`**Quest: ${quest.name}**  [${quest.status.toUpperCase()}${modeTag}${sandboxTag}${approveTag}${verifyTag}${gitTag}${acceptanceTag}]`,
 		`Goal: ${quest.goal}`,
 		``,
 		`\`${pbar}\`  ${done}/${total} done${verified > 0 ? ` (${verified} verified)` : ""}`,

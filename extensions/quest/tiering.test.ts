@@ -55,6 +55,17 @@ describe("tier basics", () => {
 		assert.match(complex, /subagent\(agent="scout"\)/);
 		assert.match(complex, /web_search/);
 	});
+
+	test("light tiers are nudged toward acceptance commands without requiring them", () => {
+		for (const tier of ["simple", "medium"] as const) {
+			assert.match(planningGuidance(tier).join("\n"), /acceptanceCommands/, tier);
+		}
+		assert.doesNotMatch(
+			planningGuidance("complex").join("\n"),
+			/acceptanceCommands/,
+			"complex already declares acceptance at quest_create",
+		);
+	});
 });
 
 describe("resolvePlanTier", () => {

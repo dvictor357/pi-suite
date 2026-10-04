@@ -2,14 +2,14 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
-import type { StepStatus } from "./types";
 import type { FailureCode } from "../../core";
 import { LADDER, MAX_DEPENDENCY_DEPTH, MAX_VERIFY_RETRIES, VERIFICATION } from "./constants";
-import { loadModelLadder } from "./storage";
+import { loadModelLadder, queuedStep } from "./storage";
 import { loadTeams } from "./teams";
 import { buildSandboxComplianceChecks, buildVerifierHandoff } from "./verifier";
 import { autoPassDecision, resolvePlanTier, tierOf } from "./tiering";
 import { resolvePlannedSteps } from "./plan-steps";
+import { addAcceptanceCommands } from "./acceptance";
 import { briefBudgetForModel } from "./ladder";
 import {
 	failureCodeForCheck,
@@ -157,6 +157,12 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					default: true,
 				}),
 			),
+			acceptanceCommands: Type.Optional(
+				Type.Array(Type.String(), {
+					description:
+						"More acceptance commands learned while planning (append-only; same rules as quest_create).",
+				}),
+			),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			const quest = getQuest(ctx.cwd);
@@ -169,6 +175,27 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 
 			const resolvedSteps = resolvePlannedSteps(params, isPlanStep);
 			if ("error" in resolvedSteps) return textResult(resolvedSteps.error);
+
+			// Acceptance can only grow during planning. Validate before any mutation.
+			let acceptanceNote = "";
+			if (params.acceptanceCommands?.length) {
+				const base = quest.acceptance ?? {
+					criteria: [quest.goal],
+					commands: [],
+					status: "pending" as const,
+					rounds: 0,
+					evidence: [],
+				};
+				const grown = addAcceptanceCommands(base, params.acceptanceCommands, {
+					sandbox: quest.sandbox,
+					gatedCommands: planChecks(ctx.cwd).map((c) => c.command),
+				});
+				if ("error" in grown) return textResult(grown.error);
+				if (grown.added.length) {
+					quest.acceptance = grown.acceptance;
+					acceptanceNote = `Acceptance commands added: ${grown.added.join(", ")}.`;
+				}
+			}
 			const plannedSteps = resolvedSteps.steps;
 			if (plannedSteps.length === 0) {
 				return {
@@ -233,35 +260,21 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				}
 			}
 
-			quest.steps = plannedSteps.map((t) => ({
-				content: t.content,
-				status: "pending" as StepStatus,
-				phase: "queued" as const,
-				phaseChangedAt: Date.now(),
-				agent: t.agent,
-				model: t.model?.trim() || undefined,
-				context: t.context,
-				dependencies: Array.isArray(t.dependencies) ? t.dependencies : [],
-				readClaim: t.readClaim?.length ? [...new Set(t.readClaim)] : undefined,
-				writeClaim: t.writeClaim?.length ? [...new Set(t.writeClaim)] : undefined,
-				result: null,
-				attempts: 0,
-				startedAt: null,
-				completedAt: null,
-				verified: false,
-				verifyResult: null,
-				verifyRetries: 0,
-				commitHash: null,
-				branchName: null,
-				rung: undefined,
-				escalations: 0,
-				failureBriefs: [],
-				lastModel: undefined,
-				sandbox:
-					t.sandbox && typeof t.sandbox === "object" && Object.keys(t.sandbox).length > 0
-						? (t.sandbox as import("./types").SandboxOverrides)
-						: undefined,
-			}));
+			quest.steps = plannedSteps.map((t) =>
+				queuedStep({
+					content: t.content,
+					agent: t.agent,
+					model: t.model?.trim() || undefined,
+					context: t.context,
+					dependencies: Array.isArray(t.dependencies) ? t.dependencies : [],
+					readClaim: t.readClaim?.length ? [...new Set(t.readClaim)] : undefined,
+					writeClaim: t.writeClaim?.length ? [...new Set(t.writeClaim)] : undefined,
+					sandbox:
+						t.sandbox && typeof t.sandbox === "object" && Object.keys(t.sandbox).length > 0
+							? (t.sandbox as import("./types").SandboxOverrides)
+							: undefined,
+				}),
+			);
 
 			for (let i = 0; i < quest.steps.length; i++) {
 				for (const dep of quest.steps[i].dependencies) {
@@ -381,6 +394,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 							`Plan saved: **${quest.steps.length} steps**` +
 								(quest.tier ? ` · tier **${quest.tier}**` : ""),
 							tierNote,
+							acceptanceNote,
 							codebaseEnrichment.summary,
 							graphEnrichment.summary,
 							codebaseToolAvailable()

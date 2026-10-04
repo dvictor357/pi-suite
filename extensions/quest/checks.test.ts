@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import type { ProjectMemory } from "../../core";
 import {
@@ -13,6 +13,7 @@ import {
 	firstFailure,
 	gateChecks,
 	runChecks,
+	runAcceptanceCommand,
 	type CheckResult,
 	type PlannedCheck,
 } from "./checks";
@@ -266,5 +267,112 @@ describe("baseline-aware gate", () => {
 
 		const strict = runChecks([flagCheck("inherited")], repo, null);
 		assert.equal(firstFailure(strict)?.command, "check inherited", "no baseline: strict");
+	});
+});
+
+describe("runAcceptanceCommand", () => {
+	test("records pass/fail, missing tools, shell syntax, and red-at-baseline", async () => {
+		const repo = mkdtempSync(join(tmpdir(), "quest-acceptance-"));
+		const git = (...args: string[]) =>
+			execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+				cwd: repo,
+				stdio: "pipe",
+			})
+				.toString()
+				.trim();
+		writeFileSync(join(repo, "feature"), "missing");
+		writeFileSync(join(repo, "stable"), "ok");
+		git("init", "-q");
+		git("add", "-A");
+		git("commit", "-q", "-m", "base");
+		const sha = git("rev-parse", "HEAD");
+		writeFileSync(join(repo, "feature"), "ok"); // the quest delivers this
+		const node = JSON.stringify(process.execPath);
+		const check = (file: string) =>
+			`${node} -e 'process.exit(require("fs").readFileSync("${file}", "utf8") === "ok" ? 0 : 1)'`;
+
+		const delivered = await runAcceptanceCommand(check("feature"), repo, sha);
+		assert.equal(delivered.status, "pass");
+		assert.equal(delivered.redAtBaseline, true, "was red before the quest");
+
+		const already = await runAcceptanceCommand(check("stable"), repo, sha);
+		assert.equal(already.status, "pass");
+		assert.equal(already.redAtBaseline, false, "green at baseline proves nothing");
+
+		assert.equal(
+			(await runAcceptanceCommand(check("stable"), repo, null)).redAtBaseline,
+			undefined,
+		);
+
+		writeFileSync(join(repo, "feature"), "broken");
+		const failing = await runAcceptanceCommand(check("feature"), repo, sha);
+		assert.equal(failing.status, "fail");
+		assert.equal(failing.exitCode, 1);
+		assert.equal(failing.redAtBaseline, undefined);
+
+		const missing = await runAcceptanceCommand("definitely-not-a-real-tool-xyz", repo, sha);
+		assert.equal(missing.status, "fail", "a missing tool can't prove the goal");
+
+		const shell = await runAcceptanceCommand("echo a && echo b", repo, sha);
+		assert.equal(shell.status, "fail");
+		assert.match(shell.summary, /without a shell/);
+	});
+});
+
+describe("runAcceptanceCommand concurrency", () => {
+	function repoWith(files: Record<string, string>, after: Record<string, string>) {
+		const repo = mkdtempSync(join(tmpdir(), "quest-acceptance-async-"));
+		const git = (...args: string[]) =>
+			execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+				cwd: repo,
+				stdio: "pipe",
+			})
+				.toString()
+				.trim();
+		for (const [name, body] of Object.entries(files)) writeFileSync(join(repo, name), body);
+		git("init", "-q");
+		git("add", "-A");
+		git("commit", "-q", "-m", "base");
+		const sha = git("rev-parse", "HEAD");
+		for (const [name, body] of Object.entries(after)) writeFileSync(join(repo, name), body);
+		return { repo, sha };
+	}
+	const node = JSON.stringify(process.execPath);
+
+	test("the baseline run overlaps the real run (and runs after it when turned off)", async () => {
+		// Each run drops a marker in a shared dir, then waits up to 2s to see the
+		// other run's marker: it passes only if both runs were alive together.
+		const markers = mkdtempSync(join(tmpdir(), "quest-acceptance-markers-"));
+		const script = [
+			`const fs = require("fs"), path = require("path");`,
+			`const dir = ${JSON.stringify(markers)};`,
+			`fs.writeFileSync(path.join(dir, String(process.pid)), "");`,
+			`const end = Date.now() + 2000;`,
+			`(function poll() {`,
+			`  if (fs.readdirSync(dir).length >= 2) process.exit(0);`,
+			`  if (Date.now() > end) process.exit(1);`,
+			`  setTimeout(poll, 20);`,
+			`})();`,
+		].join(" ");
+		const { repo, sha } = repoWith({ a: "" }, {});
+		const command = `${node} -e '${script}'`;
+
+		const together = await runAcceptanceCommand(command, repo, sha, true);
+		assert.equal(together.status, "pass", "saw the baseline run alive at the same time");
+
+		rmSync(markers, { recursive: true, force: true });
+		mkdirSync(markers);
+		const apart = await runAcceptanceCommand(command, repo, sha, false);
+		assert.equal(apart.status, "fail", "alone: the baseline hadn't started yet");
+	});
+
+	test("a failing real run aborts the speculative baseline instead of waiting for it", async () => {
+		// Current tree fails at once; the baseline commit would sleep 10s.
+		const script = `const m = require("fs").readFileSync("mode", "utf8"); if (m === "fail") process.exit(1); setTimeout(() => process.exit(0), 10000);`;
+		const { repo, sha } = repoWith({ mode: "slow" }, { mode: "fail" });
+		const started = Date.now();
+		const res = await runAcceptanceCommand(`${node} -e '${script}'`, repo, sha, true);
+		assert.equal(res.status, "fail");
+		assert.ok(Date.now() - started < 5000, `took ${Date.now() - started}ms`);
 	});
 });

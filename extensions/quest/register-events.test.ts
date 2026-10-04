@@ -6,7 +6,7 @@
  */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,7 +14,12 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { createQuestRuntime } from "./runtime";
 import { emptyQuest, loadQuest, rememberAgentModel, saveQuest } from "./storage";
 import { buildFailureBrief } from "./ladder";
-import { handleAgentEnd, recoverAgentEndCrash, registerEvents } from "./register-events";
+import {
+	applyAcceptanceCheck,
+	handleAgentEnd,
+	recoverAgentEndCrash,
+	registerEvents,
+} from "./register-events";
 import type { QuestStep } from "./types";
 
 function makeStep(partial: Partial<QuestStep> = {}): QuestStep {
@@ -373,6 +378,108 @@ describe("subagent runtime routing enforcement", () => {
 					/Quest routing: step #1 model something-else → approved-model/.test(n.msg),
 				),
 			);
+		} finally {
+			h.cleanup();
+		}
+	});
+});
+
+describe("quest acceptance gate", () => {
+	const flagCheck = (cwd: string) =>
+		`${JSON.stringify(process.execPath)} -e 'process.exit(require("fs").existsSync(${JSON.stringify(join(cwd, "flag"))}) ? 0 : 1)'`;
+
+	function seedAccepted(h: ReturnType<typeof harness>, rounds = 0) {
+		const quest = emptyQuest("Acceptance Demo", "flag exists");
+		quest.status = "active";
+		quest.planApproved = true;
+		quest.tier = "medium";
+		quest.steps = [makeStep({ status: "done", phase: "done", completedAt: 1 })];
+		quest.acceptance = {
+			criteria: ["the flag file exists"],
+			commands: [flagCheck(h.cwd)],
+			status: "pending",
+			rounds,
+			evidence: [],
+		};
+		saveQuest(quest, h.cwd);
+		h.rt.setQuest(quest);
+		return quest;
+	}
+
+	test("all steps done is not done: a failing command adds and fires one corrective step", async () => {
+		const h = harness();
+		try {
+			const quest = seedAccepted(h);
+			await handleAgentEnd(h.pi, h.rt, { messages: [] }, h.ctx);
+
+			assert.equal(quest.status, "active", "not completed");
+			assert.equal(quest.steps.length, 2);
+			assert.match(quest.steps[1].content, /^Fix acceptance: /);
+			assert.match(quest.steps[1].context, /the flag file exists/);
+			assert.notEqual(quest.steps[1].status, "pending", "corrective step was fired");
+			assert.equal(quest.acceptance?.status, "failed");
+			assert.equal(quest.acceptance?.rounds, 1);
+			assert.equal(quest.acceptance?.evidence[0].status, "fail");
+			assert.equal(loadQuest(h.cwd)?.acceptance?.rounds, 1, "persisted");
+
+			// The corrective step lands; the gate re-runs and the quest completes.
+			writeFileSync(join(h.cwd, "flag"), "");
+			Object.assign(quest.steps[1], { status: "done", phase: "done", completedAt: 2 });
+			await handleAgentEnd(h.pi, h.rt, { messages: [] }, h.ctx);
+
+			assert.equal(quest.status, "done");
+			assert.equal(quest.acceptance?.status, "passing");
+			const recap = h.steers.at(-1) ?? "";
+			assert.match(recap, /### Acceptance/);
+			assert.match(recap, /- the flag file exists/);
+			assert.match(recap, /✅ passing after 1 corrective round/);
+		} finally {
+			h.cleanup();
+		}
+	});
+
+	test("out of corrective rounds pauses instead of looping", async () => {
+		const h = harness();
+		try {
+			const quest = seedAccepted(h, 2);
+			await handleAgentEnd(h.pi, h.rt, { messages: [] }, h.ctx);
+			assert.equal(quest.status, "paused");
+			assert.match(quest.pauseReason ?? "", /Acceptance still failing after 2 corrective round/);
+			assert.equal(quest.steps.length, 1, "no further corrective step");
+		} finally {
+			h.cleanup();
+		}
+	});
+
+	test("a turn ending mid-gate doesn't start a second gate; pausing mid-gate wins", async () => {
+		const h = harness();
+		try {
+			const quest = seedAccepted(h);
+			// Slow command so the gate is still running when the next turn ends.
+			const slow = `${JSON.stringify(process.execPath)} -e 'setTimeout(() => process.exit(1), 300)'`;
+			quest.acceptance!.commands = [slow];
+			const first = applyAcceptanceCheck(h.rt, h.ctx, quest);
+			assert.equal(await applyAcceptanceCheck(h.rt, h.ctx, quest), false, "second gate is a no-op");
+
+			quest.status = "paused"; // user hits Esc while the command runs
+			assert.equal(await first, false);
+			assert.equal(quest.status, "paused", "not completed or resumed");
+			assert.equal(quest.steps.length, 1, "no corrective step fired behind the user's back");
+			assert.equal(quest.acceptance?.evidence[0].status, "fail", "evidence still recorded");
+			assert.equal(quest.acceptance?.rounds, 0);
+		} finally {
+			h.cleanup();
+		}
+	});
+
+	test("a passing gate completes the quest on the first try", async () => {
+		const h = harness();
+		try {
+			writeFileSync(join(h.cwd, "flag"), "");
+			const quest = seedAccepted(h);
+			await handleAgentEnd(h.pi, h.rt, { messages: [] }, h.ctx);
+			assert.equal(quest.status, "done");
+			assert.equal(quest.steps.length, 1);
 		} finally {
 			h.cleanup();
 		}

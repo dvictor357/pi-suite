@@ -90,6 +90,7 @@ extensions/
     verifier.ts       Structured verification loop (prompt building, retry)
     tiering.ts        Pure quest tiers (simple/medium/complex): plan-tier upgrade, guidance, inline, auto-pass
     checks.ts         Deterministic check gate; baseline-aware (pre-existing failures don't fail a step)
+    acceptance.ts     Pure quest-level acceptance gate: criteria/commands, corrective-round decisions, recap
 
   todo/
     index.ts          Registers todo tools, commands, events, storage, cache, archives
@@ -226,6 +227,7 @@ When editing quest:
 - Ladder-eligible execution roles default to `worker` and `quick-worker`; judge/exploration roles (`scout`, `verifier`, `reviewer`, `planner`) must never be laddered.
 - Quest tiers (`tiering.ts`, knobs in `constants.ts` `TIERING`): `quest_create(complexity=…)` declares simple/medium/complex. `quest_plan` may only raise the tier. Simple and medium steps run inline in the orchestrator (never when sandboxed or parallel), and light tiers auto-pass small check-covered diffs without the LLM verifier. Quest-run tools are declared only while a quest is live (`loadout.ts`); register new run-only quest tools in `QUEST_RUN_TOOLS`. Legacy quests run at `TIERING.defaultTier` (complex, unchanged behaviour).
 - The check gate is baseline-aware. A check that also fails at the step's `baselineSha` is tagged `preexisting`: it never fails the step, and the verifier sees it as inherited.
+- All steps done ≠ quest done. `quest_create(acceptance={criteria, commands})` fixes the definition of done before planning (required for tiers in `ACCEPTANCE.requiredForTiers`, default complex); `quest_plan(acceptanceCommands)` may only append. When every step is done, auto-pilot returns `acceptance_check`: the harness runs the commands without a shell (red at baseline is evidence, not an exemption), appends one corrective step per failing round, and pauses after `ACCEPTANCE.maxCorrectiveRounds`. Commands that repeat a step-gate check (`planChecks`, e.g. `npm test`, `npm run typecheck`) are rejected at declaration: they add nothing and would lose the gate's baseline exemption, sending the quest off fixing unrelated inherited failures. Quests without `acceptance` complete as before.
 
 **Terminology note (task → step rename):** Quest uses `steps` as the canonical term (e.g.
 `QuestStep`, `quest.steps`, `stepIndex`). The old `task`-named tools, parameters, and
