@@ -213,6 +213,13 @@ export interface Quest {
 	 * the default. Absent/undefined means parallel is off.
 	 */
 	parallel?: ParallelConfig;
+	/**
+	 * Pipeline size (see tiering.ts): declared at quest_create, only ever raised
+	 * by quest_plan. Absent on legacy quests, which run at TIERING.defaultTier.
+	 */
+	tier?: "simple" | "medium" | "complex";
+	/** Why the tier was raised above what quest_create declared, when it was. */
+	tierReason?: string;
 	commits: {
 		stepIndex: number;
 		/** @deprecated Use stepIndex. */

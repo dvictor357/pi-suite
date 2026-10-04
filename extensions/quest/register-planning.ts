@@ -7,6 +7,7 @@ import { LADDER, MAX_DEPENDENCY_DEPTH, MAX_VERIFY_RETRIES, VERIFICATION } from "
 import { loadModelLadder } from "./storage";
 import { loadTeams } from "./teams";
 import { buildSandboxComplianceChecks, buildVerifierHandoff } from "./verifier";
+import { autoPassDecision, resolvePlanTier, tierOf } from "./tiering";
 import { briefBudgetForModel } from "./ladder";
 import {
 	failureCodeForCheck,
@@ -281,6 +282,18 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				}
 			}
 
+			// A plan can only raise the declared tier (never squeeze work into a
+			// lighter pipeline than it needs). Legacy quests stay at the default.
+			let tierNote = "";
+			if (quest.tier) {
+				const resolved = resolvePlanTier(quest.tier, plannedSteps);
+				if (resolved.tier !== quest.tier) {
+					tierNote = `Tier raised ${quest.tier} → ${resolved.tier}: ${resolved.reason}.`;
+					quest.tier = resolved.tier;
+					quest.tierReason = resolved.reason;
+				}
+			}
+
 			quest.steps = plannedSteps.map((t) => ({
 				content: t.content,
 				status: "pending" as StepStatus,
@@ -426,7 +439,9 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					{
 						type: "text",
 						text: [
-							`Plan saved: **${quest.steps.length} steps**`,
+							`Plan saved: **${quest.steps.length} steps**` +
+								(quest.tier ? ` · tier **${quest.tier}**` : ""),
+							tierNote,
 							codebaseEnrichment.summary,
 							graphEnrichment.summary,
 							codebaseToolAvailable()
@@ -443,7 +458,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 							quest.steps.length > 5 ? `  … and ${quest.steps.length - 5} more` : "",
 							``,
 							quest.status === "active"
-								? `**Quest is now ACTIVE.** Auto-pilot will fire the first step on the next turn.`
+								? `**Quest is now ACTIVE.** End your turn now — auto-pilot fires the first step when your turn ends and sends you its instructions.`
 								: needsApproval
 									? `Awaiting approval. Review the plan above and call quest_approve to start.`
 									: `Quest in planning mode. Call quest_start or /quest start to begin.`,
@@ -610,6 +625,76 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 				});
 			};
 
+			/**
+			 * Close a verifying step as a verified PASS — from the LLM verifier's
+			 * verdict, or from deterministic evidence when the tier allows it.
+			 */
+			const completeVerifiedPass = (passEvidence: string | undefined) => {
+				const plan = planVerifyPass({
+					step: snapshotStepForVerify(task),
+					stepIndex: params.index,
+					evidence: passEvidence,
+					parallelEnabled: Boolean(quest.parallel?.enabled),
+				});
+				if (!rt.transitionStep(ctx, quest, params.index, plan.nextPhase, plan.transitionReason)) {
+					return textResult("Cannot complete from the current phase.");
+				}
+				task.verifyResult = plan.patches.verifyResult;
+				task.verified = plan.patches.verified;
+				task.completedAt = plan.patches.completedAt;
+
+				emitRunEvents(plan.events);
+				recordEval(
+					ctx.cwd,
+					makeEval(
+						quest,
+						task,
+						params.index,
+						plan.evalIntent.status,
+						plan.evalIntent.verified,
+						plan.evalIntent.evidence,
+					),
+				);
+
+				quest.lastFiredStepIndex = -1;
+				quest.sameStepCount = 0;
+				if (plan.releaseClaims) {
+					claimReg.unregister(ctx.cwd, params.index);
+					rt.dispatchGuard.release(ctx.cwd, params.index);
+				}
+				persist(ctx, quest);
+
+				const done = quest.steps.filter((t) => t.status === "done").length;
+				const next = nextPendingStep(quest);
+				const git = quest.gitIntegration;
+				const gitPrompt = git?.autoCommit
+					? [
+							``,
+							`📝 **Git:** After committing, record with quest_commit(stepIndex=${params.index}, commitHash="...", commitMessage="[quest/${quest.name}] step #${params.index + 1}: ${task.content}", ...)`,
+						].join("\n")
+					: "";
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: formatVerifyPassMessage({
+								stepIndex: params.index,
+								content: task.content,
+								evidence: passEvidence,
+								progress: `${done}/${quest.steps.length}`,
+								nextLabel: next ? `${next.task.content} [${next.task.agent}]` : null,
+								gitPrompt,
+							}),
+						},
+					],
+					details: {
+						task,
+						...plan.details,
+						progress: `${done}/${quest.steps.length}`,
+					},
+				};
+			};
+
 			// ── Verification outcome ──────────────────────────────────────────
 			// Explicit verifyOutcome wins; otherwise prose-infer while verifying
 			// (see resolveEffectiveOutcome / parseVerifyOutcome).
@@ -638,71 +723,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					};
 				}
 
-				if (effectiveOutcome === "PASS") {
-					const plan = planVerifyPass({
-						step: snapshotStepForVerify(task),
-						stepIndex: params.index,
-						evidence: effectiveEvidence,
-						parallelEnabled: Boolean(quest.parallel?.enabled),
-					});
-					if (!rt.transitionStep(ctx, quest, params.index, plan.nextPhase, plan.transitionReason)) {
-						return textResult("Cannot complete from the current phase.");
-					}
-					task.verifyResult = plan.patches.verifyResult;
-					task.verified = plan.patches.verified;
-					task.completedAt = plan.patches.completedAt;
-
-					emitRunEvents(plan.events);
-					recordEval(
-						ctx.cwd,
-						makeEval(
-							quest,
-							task,
-							params.index,
-							plan.evalIntent.status,
-							plan.evalIntent.verified,
-							plan.evalIntent.evidence,
-						),
-					);
-
-					quest.lastFiredStepIndex = -1;
-					quest.sameStepCount = 0;
-					if (plan.releaseClaims) {
-						claimReg.unregister(ctx.cwd, params.index);
-						rt.dispatchGuard.release(ctx.cwd, params.index);
-					}
-					persist(ctx, quest);
-
-					const done = quest.steps.filter((t) => t.status === "done").length;
-					const next = nextPendingStep(quest);
-					const git = quest.gitIntegration;
-					const gitPrompt = git?.autoCommit
-						? [
-								``,
-								`📝 **Git:** After committing, record with quest_commit(stepIndex=${params.index}, commitHash="...", commitMessage="[quest/${quest.name}] step #${params.index + 1}: ${task.content}", ...)`,
-							].join("\n")
-						: "";
-					return {
-						content: [
-							{
-								type: "text",
-								text: formatVerifyPassMessage({
-									stepIndex: params.index,
-									content: task.content,
-									evidence: effectiveEvidence,
-									progress: `${done}/${quest.steps.length}`,
-									nextLabel: next ? `${next.task.content} [${next.task.agent}]` : null,
-									gitPrompt,
-								}),
-							},
-						],
-						details: {
-							task,
-							...plan.details,
-							progress: `${done}/${quest.steps.length}`,
-						},
-					};
-				}
+				if (effectiveOutcome === "PASS") return completeVerifiedPass(effectiveEvidence);
 
 				// FAIL — shared retry/escalate/auto-fail machine (LLM verdict source).
 				// No deterministic check failed: attribute to model quality so eval
@@ -903,6 +924,21 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 					task.verifyInconclusives = 0;
 
 					persist(ctx, quest);
+
+					// Tiered auto-pass: small, check-covered diffs at light tiers are
+					// verified by their deterministic evidence alone — no LLM verifier.
+					const autoPass = autoPassDecision(tierOf(quest), evidence);
+					if (autoPass.pass) {
+						recordRun(ctx.cwd, {
+							kind: "checks",
+							taskIndex: params.index,
+							taskContent: task.content,
+							agent: task.agent,
+							timestamp: Date.now(),
+							checksSummary: autoPass.reason,
+						});
+						return completeVerifiedPass(autoPass.reason);
+					}
 
 					const impactContext = buildVerificationImpactContext(
 						ctx.cwd,
@@ -1214,7 +1250,7 @@ export function registerPlanningTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 							`${quest.steps.length} steps queued. Quest is now **ACTIVE**.`,
 							next ? `First step: ${next.task.content} [${next.task.agent}]` : "All steps ready.",
 							``,
-							"Auto-pilot will fire the first step on the next turn.",
+							"**End your turn now** (one short reply, no more tool calls). Auto-pilot fires the first step when your turn ends and sends you its instructions — don't inspect quest internals or drive steps manually.",
 						].join("\n"),
 					},
 				],

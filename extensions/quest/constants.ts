@@ -115,6 +115,58 @@ export const VERIFICATION: VerificationConfig = {
 	baselineAware: true,
 };
 
+// ── Quest tiers ───────────────────────────────────────────────────────────────
+/** Per-tier pipeline shape (see tiering.ts). Undefined limits are unbounded. */
+export interface TierConfig {
+	/** Most steps a plan may have and stay at this tier. */
+	maxSteps?: number;
+	/** Most distinct write-claimed files a plan may touch and stay at this tier. */
+	maxWriteFiles?: number;
+	/** The orchestrator implements steps itself instead of delegating to a sub-agent. */
+	inline: boolean;
+	/** Largest diff (insertions + deletions) auto-verified without the LLM verifier; 0 = never. */
+	autoPassMaxDiffLines: number;
+	/** Auto-verify only when a test check (not just typecheck/lint) passed. */
+	autoPassRequiresTest: boolean;
+}
+
+export interface TieringConfig {
+	/** Tier for quests that don't declare one (including every legacy quest). */
+	defaultTier: "simple" | "medium" | "complex";
+	tiers: Record<"simple" | "medium" | "complex", TierConfig>;
+}
+
+/**
+ * Starting points, to be tuned on bench data (bench/): simple keeps a small
+ * single-step fix inline and trusts green checks; complex keeps everything.
+ * The default stays "complex" so quests that don't declare a tier behave
+ * exactly as before.
+ */
+export const TIERING: TieringConfig = {
+	defaultTier: "complex",
+	tiers: {
+		simple: {
+			maxSteps: 1,
+			maxWriteFiles: 3,
+			inline: true,
+			autoPassMaxDiffLines: 200,
+			autoPassRequiresTest: false,
+		},
+		medium: {
+			maxSteps: 4,
+			maxWriteFiles: 10,
+			inline: false,
+			autoPassMaxDiffLines: 120,
+			autoPassRequiresTest: true,
+		},
+		complex: {
+			inline: false,
+			autoPassMaxDiffLines: 0,
+			autoPassRequiresTest: true,
+		},
+	},
+};
+
 // ── Codebase retrieval ranking ───────────────────────────────────────────────
 /**
  * Tunable knobs for the BM25-based codebase retrieval ranker (see

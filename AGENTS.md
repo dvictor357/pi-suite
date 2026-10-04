@@ -32,6 +32,7 @@ What they do:
 - `npm test` runs both the isolated Node and Vitest suites. `npm run test:node` runs the core and four original extensions through Node; `npm run test:subagent` runs all incoming tests (including nested codebase tests) through Vitest. Both redirect HOME and PI_CODING_AGENT_DIR before imports; always run tests through it, never with a bare `node --test`, or they write into the real `~/.pi/agent`.
 - `npm run format:check` checks Prettier formatting.
 - `npm run format` writes Prettier formatting.
+- `npm run bench -- validate|run|report` measures quest/pi-suite against a plain agent on real tasks. `run` spends API money; the default model is set in `bench/config.ts`, and blocked providers (deepseek) are refused.
 
 ## Mental model
 
@@ -87,6 +88,8 @@ extensions/
     types.ts          Quest/team types
     context-broker.ts Composable sub-agent prompt context builder
     verifier.ts       Structured verification loop (prompt building, retry)
+    tiering.ts        Pure quest tiers (simple/medium/complex): plan-tier upgrade, guidance, inline, auto-pass
+    checks.ts         Deterministic check gate; baseline-aware (pre-existing failures don't fail a step)
 
   todo/
     index.ts          Registers todo tools, commands, events, storage, cache, archives
@@ -126,6 +129,8 @@ extensions/
 
 test/
   isolate-home.ts     Test preload: points HOME at a temp dir so tests never touch ~/.pi/agent
+
+bench/                Offline eval harness: replays real commits, grades with hidden tests (see bench/README.md)
 
 docs/                 Architecture notes
 MIGRATION.md          Migration checklist and drift history
@@ -219,6 +224,8 @@ When editing quest:
 - Per-step model/thinking comes from `routeStepFromDisk` (storage.ts → routing.ts). Steering, `buildBatchSteering`, `quest_delegate`, and the `subagent` `tool_call` hook (which rewrites deviating args in place) must all use it. Knobs live in `constants.ts` `ROUTING`; judge/exploration roles are never adjusted.
 - Sub-agent usage (tokens/cost/turns) is read from `subagent` tool results in `tool_execution_end`, accumulated on `step.usage`, and consumed once by `makeEval`. Don't add a second writer of eval usage.
 - Ladder-eligible execution roles default to `worker` and `quick-worker`; judge/exploration roles (`scout`, `verifier`, `reviewer`, `planner`) must never be laddered.
+- Quest tiers (`tiering.ts`, knobs in `constants.ts` `TIERING`): `quest_create(complexity=…)` declares simple/medium/complex. `quest_plan` may only raise the tier. Simple steps run inline (never under a sandbox), and light tiers auto-pass small check-covered diffs without the LLM verifier. Legacy quests run at `TIERING.defaultTier` (complex, unchanged behaviour).
+- The check gate is baseline-aware. A check that also fails at the step's `baselineSha` is tagged `preexisting`: it never fails the step, and the verifier sees it as inherited.
 
 **Terminology note (task → step rename):** Quest uses `steps` as the canonical term (e.g.
 `QuestStep`, `quest.steps`, `stepIndex`). The old `task`-named tools, parameters, and

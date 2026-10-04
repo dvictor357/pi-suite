@@ -394,3 +394,53 @@ test("buildSteeringMessage parent omits brief/awareness/format; minion task keep
 	// Format directive (full or compact) appears in the child task.
 	assert.match(minionTask, /Before (marking a code step done|done):/);
 });
+
+test("buildSteeringMessage runs simple-tier steps inline, but never sandboxed ones", () => {
+	const cwd = mkdtempSync(join(tmpdir(), "pi-suite-inline-steering-"));
+	try {
+		const quest = emptyQuest("Inline fix", "one small change");
+		quest.tier = "simple";
+		const step: QuestStep = {
+			content: "Fix the parser edge case",
+			status: "running",
+			agent: "worker",
+			context: "Only touch src/parser.ts",
+			dependencies: [],
+			result: null,
+			attempts: 1,
+			startedAt: Date.now(),
+			completedAt: null,
+			verified: false,
+			verifyResult: null,
+			verifyRetries: 0,
+			commitHash: null,
+			branchName: null,
+		};
+		quest.steps = [step];
+
+		const inline = buildSteeringMessage(quest, step, 0, cwd);
+		assert.match(inline, /\*\*Execution:\*\* inline/);
+		assert.match(inline, /quest_update\*\*\(index=0, status="done"/);
+		assert.doesNotMatch(inline, /subagent\(agent=/);
+		assert.doesNotMatch(inline, /quest_assign_model/);
+
+		quest.sandbox = {
+			mode: "restricted",
+			allowedPaths: ["src/**"],
+			deniedPaths: [],
+			allowCommands: [],
+			denyCommands: [],
+			allowNetwork: false,
+			allowPackageInstall: false,
+			worktree: null,
+		};
+		assert.doesNotMatch(buildSteeringMessage(quest, step, 0, cwd), /inline/);
+
+		quest.sandbox = undefined;
+		quest.tier = "medium";
+		assert.doesNotMatch(buildSteeringMessage(quest, step, 0, cwd), /inline/);
+	} finally {
+		rmSync(projectMemoryPath(cwd), { force: true });
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});

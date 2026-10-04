@@ -827,7 +827,7 @@ export function formatTerminalUpdateMessage(opts: {
 		opts.nextLabel ? `Next: ${opts.nextLabel}` : "All steps done or blocked!",
 		``,
 		opts.questActive
-			? "Auto-pilot will fire the next step."
+			? "End your turn now — auto-pilot fires the next step when your turn ends."
 			: "Quest is paused. /quest resume to continue.",
 		opts.gitPrompt ?? "",
 	]

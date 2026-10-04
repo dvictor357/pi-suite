@@ -7,6 +7,7 @@ import { compactAwarenessBlock } from "./todo-sync";
 import { codebaseStatusSummary, hasCodebaseCache, loadCodebaseIndex } from "./codebase";
 import { collectEnhanceContext, renderEnhancedBrief } from "./enhance";
 import type { QuestRuntime } from "./runtime";
+import { planningGuidance, QUEST_TIERS, tierOf } from "./tiering";
 
 export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 	const { getQuest, persist, validateAndSetTeam, ensureLedgers, codebaseToolAvailable } = rt;
@@ -26,6 +27,12 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 			goal: Type.String({
 				description: "Full goal description — what needs to be accomplished",
 			}),
+			complexity: Type.Optional(
+				StringEnum(QUEST_TIERS, {
+					description:
+						"Size the pipeline to the task — always set it. 'simple': one focused change in 1–3 files with a clear spec (you implement it yourself, checks verify). 'medium': a few related changes, no design unknowns (delegated steps, no research sub-agents). 'complex': cross-cutting work, design decisions or unknowns (full scout/planner/research/verifier pipeline). Default: complex.",
+				}),
+			),
 			team: Type.Optional(
 				Type.String({
 					description: "Team configuration name (e.g. 'engineering', 'research')",
@@ -191,6 +198,7 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 				sandboxPolicy,
 				parallelConfig,
 			);
+			if (params.complexity) quest.tier = params.complexity;
 			validateAndSetTeam(quest, params.team);
 			ensureLedgers(ctx.cwd, quest.name);
 			persist(ctx, quest);
@@ -217,15 +225,11 @@ export function registerCreateTools(pi: ExtensionAPI, rt: QuestRuntime): void {
 						text: [
 							`Quest created: **${params.name}**${overwriteWarning}`,
 							``,
-							`Next: Plan the quest. Call **quest_enhance** first to enrich the goal with`,
-							`project context (memory, conventions, prior research, past quests, git state),`,
-							`then use subagent(agent="scout") to explore the codebase,`,
-							`then subagent(agent="planner") to create a step breakdown. Save the plan`,
-							`with **quest_plan** — pass the steps array and set autoStart: true.`,
-							``,
-							`Research: Note the current date. Use web_search to find the latest relevant information about this goal (best practices, APIs, security considerations, etc.). Save key findings with quest_memory_save.`,
+							`Next: Plan the quest.`,
+							...planningGuidance(tierOf(quest)),
 							awareness,
-							codebaseGuidance,
+							// Codebase-tool planning advice is for tiers that plan broadly.
+							tierOf(quest) === "simple" ? "" : codebaseGuidance,
 							modeNote,
 							parallelSandboxNote,
 						]
