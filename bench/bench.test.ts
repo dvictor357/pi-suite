@@ -311,3 +311,18 @@ test("runProcess timeout kills a detached grandchild and returns promptly", asyn
 	await new Promise((r) => setTimeout(r, 200));
 	assert.throws(() => process.kill(pid, 0), "grandchild was killed");
 });
+
+test("usageFromJsonl reports a provider error only when it ended the run", () => {
+	const err = (msg: string) =>
+		JSON.stringify({
+			type: "message_end",
+			message: { role: "assistant", stopReason: "error", errorMessage: msg, content: [] },
+		});
+	const ok = assistant({ input: 1, cost: { total: 0 } });
+	assert.equal(
+		usageFromJsonl([ok, err("Codex error: The usage limit has been reached")].join("\n"))
+			.finalError,
+		"Codex error: The usage limit has been reached",
+	);
+	assert.equal(usageFromJsonl([err("transient"), ok].join("\n")).finalError, undefined);
+});

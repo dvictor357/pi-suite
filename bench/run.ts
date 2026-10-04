@@ -180,12 +180,15 @@ async function runOne(job: Job, opts: RunOptions, outDir: string): Promise<Bench
 		writeFileSync(join(outDir, "transcripts", `${runId}.grade.txt`), grade.output);
 		const { output: _output, ...gradeResult } = grade;
 		const usage = usageFromJsonl(agent.stdout);
-		// An agent that never produced a turn didn't attempt the task (bad flag,
-		// extension load failure, auth): a harness problem, not a failed attempt.
+		// Not an attempt at the task: an agent that never produced a turn (bad
+		// flag, extension load failure, auth) or whose run ended on a provider
+		// error (usage limit, outage). Scoring these as fails would blame the arm.
 		const harnessError =
 			usage.turns === 0 && !agent.timedOut
 				? `agent produced no turns (exit ${agent.exitCode}): ${agent.stderr.trim().split("\n")[0] ?? ""}`
-				: undefined;
+				: usage.finalError && !agent.timedOut
+					? `provider error: ${usage.finalError}`
+					: undefined;
 		return {
 			...base,
 			agentExitCode: agent.exitCode,
@@ -261,6 +264,9 @@ async function run(opts: RunOptions): Promise<void> {
 		}
 		const r = await runOne(job, opts, outDir);
 		results.push(r);
+		if (r.harnessError && BENCH.stopOnProviderError.test(r.harnessError)) {
+			stopped = `provider quota/limit reached — ${r.harnessError}`;
+		}
 		appendFileSync(resultsPath, JSON.stringify(r) + "\n");
 		done++;
 		const verdict = r.harnessError

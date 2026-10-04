@@ -22,6 +22,8 @@ export const BENCH = {
 	gradeTimeoutMs: 3 * 60_000,
 	/** Runs executed at once. Each run is a full agent process plus sub-agents. */
 	concurrency: 2,
+	/** A harness error matching this stops the batch: retrying only burns the remaining jobs. */
+	stopOnProviderError: /usage limit|rate limit|quota|insufficient (balance|credit)/i,
 	/** Confidence level for Wilson intervals in reports. */
 	z: 1.96,
 } as const;

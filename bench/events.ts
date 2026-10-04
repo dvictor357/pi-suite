@@ -49,6 +49,13 @@ export function foldEvent(usage: RunUsage, event: unknown): void {
 		if (msg.role !== "assistant") return;
 		usage.turns++;
 		addTokens(usage, msg.usage);
+		// Only the latest turn matters: a provider error the agent recovered from
+		// (retry, next turn) is not how the run ended.
+		if (msg.stopReason === "error") {
+			usage.finalError = typeof msg.errorMessage === "string" ? msg.errorMessage : "provider error";
+		} else {
+			delete usage.finalError;
+		}
 		const content = Array.isArray(msg.content) ? msg.content : [];
 		for (const part of content) {
 			const p = rec(part);

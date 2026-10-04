@@ -47,6 +47,8 @@ export interface RunUsage {
 	subagentCost: number;
 	/** Tool calls by name, main agent only. */
 	toolCalls: Record<string, number>;
+	/** Error message of the main agent's last turn when it stopped on a provider error. */
+	finalError?: string;
 }
 
 /** Hidden-test grading outcome. */
