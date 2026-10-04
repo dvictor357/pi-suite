@@ -1,6 +1,7 @@
 ---
 name: reviewer
-description: Code review specialist for quality and security analysis
+description: >-
+  Code review specialist for quality and security analysis
 tools: read, ffgrep, fffind, ls, bash
 tier: reasoning
 ---

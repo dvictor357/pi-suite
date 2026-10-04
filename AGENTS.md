@@ -119,7 +119,7 @@ extensions/
     render.ts         Result types, formatting, progress payloads
     schema.ts         typebox params for subagent/codebase tools
     constants.ts      Concurrency, retry cap, timeout, output caps
-    agents.ts         Agent discovery/config (bundled agents/*.md + user/project)
+    agents.ts         Agent discovery/config (bundled agents/*.md + user/project); descriptions use `description: >-`
     budget.ts         Per-call cost/token caps
     contract.ts       Structured output contracts (JSON Schema)
     history.ts        Run history + rerun planning

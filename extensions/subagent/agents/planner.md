@@ -1,6 +1,7 @@
 ---
 name: planner
-description: Creates implementation plans from context and requirements
+description: >-
+  Creates implementation plans from context and requirements
 tools: read, ffgrep, fffind, ls
 tier: reasoning
 ---

@@ -1,6 +1,7 @@
 ---
 name: worker
-description: General-purpose subagent with full capabilities, isolated context
+description: >-
+  General-purpose subagent with full capabilities, isolated context
 tier: reasoning
 ---
 

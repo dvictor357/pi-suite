@@ -1,6 +1,7 @@
 ---
 name: scout
-description: Fast codebase recon that returns compressed context for handoff to other agents
+description: >-
+  Fast codebase recon that returns compressed context for handoff to other agents
 tools: read, ffgrep, fffind, ls, bash
 tier: fast
 ---

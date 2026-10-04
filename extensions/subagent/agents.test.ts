@@ -137,6 +137,19 @@ describe("discoverAgents", () => {
 		expect(result.agents.map((agent) => agent.name)).toContain("worker");
 	});
 
+	it("every bundled agent parses and uses a block-scalar description", () => {
+		const { bundledAgentsDir } = discoverAgents(makeTempDir(), "project");
+		const files = fs.readdirSync(bundledAgentsDir!).filter((f) => f.endsWith(".md"));
+		const loaded = loadAgentsFromDir(bundledAgentsDir!, "bundled");
+		// A file that fails to parse is skipped silently, so compare counts.
+		expect(loaded.length).toBe(files.length);
+		for (const file of files) {
+			const head = fs.readFileSync(path.join(bundledAgentsDir!, file), "utf8").split("\n---", 1)[0];
+			// House style: `description: >-` so prose can hold ": ", "#" and quotes.
+			expect(head, file).toMatch(/^description: >-$/m);
+		}
+	});
+
 	it("lets project agents override bundled agents by name", () => {
 		const cwd = makeTempDir();
 		const projectAgentsDir = path.join(cwd, ".pi", "agents");

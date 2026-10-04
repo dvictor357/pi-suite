@@ -1,6 +1,8 @@
 ---
 name: qa
-description: QA Engineer who writes tests, verifies requirements, and hunts bugs with adversarial rigor
+description: >-
+  QA Engineer who writes tests, verifies requirements, and hunts bugs with adversarial
+  rigor
 tools: read, ffgrep, fffind, ls, bash
 tier: reasoning
 ---
