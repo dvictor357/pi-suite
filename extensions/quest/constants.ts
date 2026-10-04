@@ -137,8 +137,9 @@ export interface TieringConfig {
 }
 
 /**
- * Starting points, to be tuned on bench data (bench/): simple keeps a small
- * single-step fix inline and trusts green checks; complex keeps everything.
+ * Starting points, to be tuned on bench data (bench/): simple and medium run
+ * inline (delegation only pays off for isolation, parallelism, or long quests),
+ * simple trusts green checks; complex keeps the full delegated pipeline.
  * The default stays "complex" so quests that don't declare a tier behave
  * exactly as before.
  */
@@ -155,7 +156,10 @@ export const TIERING: TieringConfig = {
 		medium: {
 			maxSteps: 4,
 			maxWriteFiles: 10,
-			inline: false,
+			// Bench: delegated medium runs cost 3–6× plain — the worker re-reads
+			// what the orchestrator already read. Parallel/sandboxed quests still
+			// delegate (see runsInline).
+			inline: true,
 			autoPassMaxDiffLines: 120,
 			autoPassRequiresTest: true,
 		},

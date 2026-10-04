@@ -9,8 +9,9 @@
  *
  * - simple:  no research sub-agents; one step the orchestrator implements
  *            itself (inline); deterministic checks verify it.
- * - medium:  no scout/planner sub-agents or web research; a few delegated
- *            steps; small, test-covered diffs skip the LLM verifier.
+ * - medium:  no scout/planner sub-agents or web research; a few steps the
+ *            orchestrator implements in order (inline unless parallel or
+ *            sandboxed); small, test-covered diffs skip the LLM verifier.
  * - complex: today's full pipeline, LLM verifier always.
  *
  * The orchestrator declares a tier at quest_create; the plan can only move it
@@ -84,6 +85,7 @@ export function planningGuidance(tier: QuestTier): string[] {
 				`**Tier: medium** — skip scout/planner sub-agents and web research.`,
 				`Explore directly (codebase query or a few reads), then call **quest_plan** with at most`,
 				`${max.maxSteps ?? "a few"} focused steps, each with a writeClaim, and autoStart: true.`,
+				`You will implement the steps yourself in order${max.inline ? "" : " via sub-agents"}; checks verify each one.`,
 			];
 		case "complex":
 			return [
@@ -99,10 +101,15 @@ export function planningGuidance(tier: QuestTier): string[] {
 }
 
 /** True when this quest's steps run inline in the orchestrator, not via a sub-agent. */
-export function runsInline(quest: { tier?: QuestTier }, sandboxActive: boolean): boolean {
-	// Sandboxed steps keep the guarded quest_delegate path: inline work would
-	// bypass the per-step sandbox policy.
-	return !sandboxActive && TIERING.tiers[tierOf(quest)].inline;
+export function runsInline(
+	quest: { tier?: QuestTier; parallel?: { enabled: boolean } },
+	sandboxActive: boolean,
+): boolean {
+	// Sandboxed steps keep the guarded quest_delegate path (inline work would
+	// bypass the per-step sandbox policy); parallel quests need workers to run
+	// steps concurrently.
+	if (sandboxActive || quest.parallel?.enabled) return false;
+	return TIERING.tiers[tierOf(quest)].inline;
 }
 
 /** Total changed lines (insertions + deletions) from a `git diff --stat` summary. */

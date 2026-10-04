@@ -395,7 +395,7 @@ test("buildSteeringMessage parent omits brief/awareness/format; minion task keep
 	assert.match(minionTask, /Before (marking a code step done|done):/);
 });
 
-test("buildSteeringMessage runs simple-tier steps inline, but never sandboxed ones", () => {
+test("buildSteeringMessage runs light-tier steps inline, but never sandboxed or complex ones", () => {
 	const cwd = mkdtempSync(join(tmpdir(), "pi-suite-inline-steering-"));
 	try {
 		const quest = emptyQuest("Inline fix", "one small change");
@@ -437,7 +437,7 @@ test("buildSteeringMessage runs simple-tier steps inline, but never sandboxed on
 		assert.doesNotMatch(buildSteeringMessage(quest, step, 0, cwd), /inline/);
 
 		quest.sandbox = undefined;
-		quest.tier = "medium";
+		quest.tier = "complex";
 		assert.doesNotMatch(buildSteeringMessage(quest, step, 0, cwd), /inline/);
 	} finally {
 		rmSync(projectMemoryPath(cwd), { force: true });

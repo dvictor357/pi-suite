@@ -36,11 +36,14 @@ describe("tier basics", () => {
 		assert.equal(isQuestTier("huge"), false);
 	});
 
-	test("only the simple tier runs inline, and never under a sandbox", () => {
+	test("simple and medium run inline; never sandboxed, parallel, or complex", () => {
 		assert.equal(runsInline({ tier: "simple" }, false), true);
-		assert.equal(runsInline({ tier: "simple" }, true), false);
-		assert.equal(runsInline({ tier: "medium" }, false), false);
+		assert.equal(runsInline({ tier: "medium" }, false), true);
+		assert.equal(runsInline({ tier: "simple" }, true), false, "sandboxed");
+		assert.equal(runsInline({ tier: "medium", parallel: { enabled: true } }, false), false);
+		assert.equal(runsInline({ tier: "medium", parallel: { enabled: false } }, false), true);
 		assert.equal(runsInline({ tier: "complex" }, false), false);
+		assert.equal(runsInline({}, false), false, "legacy quests keep delegating");
 	});
 
 	test("guidance skips research sub-agents below complex", () => {
