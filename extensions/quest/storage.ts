@@ -33,6 +33,7 @@ import { coerceStepHandoff } from "./context-broker";
 import { coerceFailureBrief } from "./ladder";
 import { coerceStepUsage } from "./usage";
 import { coerceStepEvidence } from "./evidence";
+import { coerceAcceptance } from "./acceptance";
 import { ROUTING } from "./constants";
 import { asThinkingLevel, routeStep, type RoutableStep, type RuntimeDecision } from "./routing";
 import {
@@ -237,6 +238,30 @@ export function syncConventionsToMemory(quest: Quest, cwd: string): void {
 	}
 }
 
+/** A fresh queued step. `fields` override the defaults (planned steps, corrective steps). */
+export function queuedStep(
+	fields: Pick<QuestStep, "content" | "agent" | "context"> & Partial<QuestStep>,
+): QuestStep {
+	return {
+		status: "pending",
+		phase: "queued",
+		phaseChangedAt: Date.now(),
+		dependencies: [],
+		result: null,
+		attempts: 0,
+		startedAt: null,
+		completedAt: null,
+		verified: false,
+		verifyResult: null,
+		verifyRetries: 0,
+		commitHash: null,
+		branchName: null,
+		escalations: 0,
+		failureBriefs: [],
+		...fields,
+	};
+}
+
 export function emptyQuest(
 	name: string,
 	goal: string,
@@ -385,6 +410,8 @@ export function loadQuest(cwd: string): Quest | null {
 			if (!raw.researchFindings || !Array.isArray(raw.researchFindings)) {
 				raw.researchFindings = [];
 			}
+			raw.acceptance = coerceAcceptance(raw.acceptance);
+			if (typeof raw.baselineSha !== "string") raw.baselineSha = undefined;
 			const gi =
 				raw.gitIntegration && typeof raw.gitIntegration === "object" ? raw.gitIntegration : {};
 			raw.gitIntegration = {

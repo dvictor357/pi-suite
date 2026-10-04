@@ -230,4 +230,96 @@ read-merge-write (use the core \`updateJSON\` helper), keep existing entries, an
 entries by archive path so archiving the same quest twice leaves one entry. Apply the same
 read-merge-write treatment to quest→todo syncing.`,
 	},
+	{
+		id: "baseline-aware-gate",
+		commit: "c3a16a3",
+		difficulty: "hard",
+		testFiles: ["extensions/quest/checks.test.ts", "extensions/quest/evidence.test.ts"],
+		prompt: `The quest check gate fails steps for redness they inherited.
+
+After a step, pi-quest runs the project's checks (extensions/quest/checks.ts) as a hard gate and
+fails the step on any failing check, even one that already failed before the step started. A
+correct fix then gets failed on an unrelated pre-existing typecheck error, and the orchestrator
+burns its budget "fixing" unrelated code.
+
+Make the gate baseline-aware:
+
+1. \`CheckResult\` gains an optional \`preexisting?: boolean\`, set on a "fail" that also fails at
+   the step's baseline commit.
+2. Export a pure loop \`gateChecks(planned, run, runAtBaseline): CheckResult[]\` from checks.ts.
+   \`run(check)\` returns the check's result; \`runAtBaseline(check)\` returns its result at the
+   baseline, or null when there is no baseline answer. Run checks in order. A failure that also
+   fails at baseline is tagged \`preexisting: true\` and the loop continues; any other failure is
+   recorded and stops the loop. A null baseline answer keeps today's strict behaviour.
+3. \`runChecks(planned, cwd, baselineSha = null)\` uses \`gateChecks\`. With a baseline sha, a
+   failing check is re-run against a pristine export of that commit (not the working tree);
+   cache baseline results per repo+sha+command. Add a \`VERIFICATION.baselineAware\` switch
+   (default true) in extensions/quest/constants.ts. Pass the step's \`baselineSha\` from the
+   \`quest_update\` gate.
+4. \`firstFailure\` ignores pre-existing failures, and \`summarizeChecks\` prints them as
+   "<kind>:preexisting" (e.g. "typecheck:preexisting test:pass").
+5. \`renderEvidenceBlock\` (extensions/quest/evidence.ts) must not list pre-existing failures
+   among the passing gated checks. Show them in their own section headed
+   "Pre-existing failures", one line per check formatted like "- typecheck (\`npm run typecheck\`)",
+   followed by each check's output summary, and tell the verifier to judge only whether the step
+   made them worse and to "not ask it to fix unrelated code".`,
+	},
+	{
+		id: "usage-telemetry",
+		commit: "319b37a",
+		difficulty: "hard",
+		testFiles: [
+			"extensions/quest/register-events.test.ts",
+			"extensions/quest/tool-call-guard.test.ts",
+		],
+		prompt: `Quest eval entries never record what a sub-agent run cost.
+
+\`makeEval\` (quest runtime) hardcodes \`tokensIn\`/\`tokensOut\` to 0. The \`subagent\` tool's result
+already carries per-run usage in \`details.results[i].usage\` (\`{ input, output, cacheRead,
+cacheWrite, cost, contextTokens, turns }\`) plus an optional \`details.results[i].thinking\`.
+Attribute it to quest steps and record it on eval entries:
+
+1. In extensions/quest/tool-call-guard.ts export
+   \`resolveSubagentStepTargets(quest, input): (number | null)[]\`. It returns one entry per
+   sub-agent task, index-aligned with \`input.tasks\` (or a one-element array for the single-agent
+   form \`{ agent, task }\`). Use the same step-matching rules as \`resolveSubagentClaimTargets\`;
+   a malformed entry (no agent) or an unmatched one (e.g. a read-only "scout" call) is \`null\`,
+   and alignment must survive such entries.
+2. In the events registered by \`registerEvents\`: on \`tool_execution_start\` for a \`subagent\`
+   call, resolve its step targets by \`toolCallId\`; on \`tool_execution_end\`, add each result's
+   usage to the matching step as \`step.usage\` (accumulate across runs, keep the reported
+   thinking level) and persist the quest.
+3. \`makeEval\` consumes \`step.usage\` exactly once: the entry gets \`tokensIn\` = input,
+   \`tokensOut\` = output, and new optional \`EvalEntry\` fields (core/eval-logging.ts)
+   \`cacheRead\`, \`cacheWrite\`, \`cost\`, \`contextTokens\`, \`turns\`, \`thinking\`. Then
+   \`step.usage\` is cleared, so a second \`makeEval\` for the same step reports \`tokensIn: 0\` and
+   no \`turns\`. The new fields are additive: no contract version bump.`,
+	},
+	{
+		id: "thinking-routing",
+		commit: "3de2b88",
+		difficulty: "hard",
+		testFiles: ["extensions/quest/register-events.test.ts"],
+		prompt: `Quest retries after a quality failure rerun with exactly the same thinking level, and
+the orchestrator can launch a step's sub-agent with any model or thinking it likes.
+
+Route sub-agent runtime per step and enforce it:
+
+1. \`FailureBrief\` (extensions/quest/ladder.ts) records an optional \`failureCode\`
+   (core \`FailureCode\`), and \`buildFailureBrief\` accepts \`failureCode\` and stores it.
+2. A step's routed runtime starts from the role's approved model/thinking in project memory
+   (\`rememberAgentModel\` / \`agentModels\`). Each verified quality failure on the step since its
+   last escalation (\`MODEL_QUALITY\`, \`CONTEXT_MISSING\`, \`BAD_PLAN\`, \`TEST_FAILURE\`, or a FAIL with
+   no code) bumps thinking one level up \`THINKING_LEVELS\` (core), capped by a configurable
+   maximum. Mechanical failures don't bump. Judge/exploration roles (scout, verifier, reviewer,
+   planner) are never adjusted. Keep the knobs in a \`ROUTING\` block in
+   extensions/quest/constants.ts, and use this one routing decision everywhere a step's sub-agent
+   is launched (steering, batch steering, quest_delegate).
+3. In the \`tool_call\` handler registered by \`registerEvents\`: when the orchestrator calls the
+   \`subagent\` tool for the active quest step with a model or thinking that differs from the
+   routed one, rewrite \`input.model\` / \`input.thinking\` in place (do not block the call) and
+   notify with a message containing "Quest routing: step #<n> model <old> → <new>". Example:
+   worker approved as model "approved-model" at "low", one \`MODEL_QUALITY\` failure, call made with
+   model "something-else" and thinking "minimal" → rewritten to "approved-model" / "medium".`,
+	},
 ];

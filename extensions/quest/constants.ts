@@ -115,6 +115,37 @@ export const VERIFICATION: VerificationConfig = {
 	baselineAware: true,
 };
 
+// ── Quest acceptance gate ─────────────────────────────────────────────────────
+/**
+ * Quest-level acceptance (see acceptance.ts): commands declared at quest_create
+ * that must pass before the quest may complete. All steps done ≠ quest done.
+ */
+export interface AcceptanceConfig {
+	/** Master switch. When false, quests complete when every step is done (pre-gate). */
+	enabled: boolean;
+	/** Corrective steps appended for failing commands before the quest pauses. */
+	maxCorrectiveRounds: number;
+	/** Most acceptance commands a quest may declare. */
+	maxCommands: number;
+	/** Tiers that must declare acceptance criteria at quest_create. */
+	requiredForTiers: readonly ("simple" | "medium" | "complex")[];
+	/**
+	 * Run each command's baseline check (red/green evidence) at the same time as
+	 * the real run instead of after it. Halves gate wall time; turn off if the
+	 * project's tests can't run twice at once (fixed ports, shared temp paths).
+	 */
+	concurrentBaseline: boolean;
+}
+
+export const ACCEPTANCE: AcceptanceConfig = {
+	enabled: true,
+	maxCorrectiveRounds: 2,
+	maxCommands: 5,
+	// Light tiers stay ceremony-free; complex quests are where steps drift from the goal.
+	requiredForTiers: ["complex"],
+	concurrentBaseline: true,
+};
+
 // ── Quest tiers ───────────────────────────────────────────────────────────────
 /** Per-tier pipeline shape (see tiering.ts). Undefined limits are unbounded. */
 export interface TierConfig {

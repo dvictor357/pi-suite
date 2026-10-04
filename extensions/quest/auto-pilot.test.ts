@@ -133,6 +133,54 @@ describe("decideAfterAgentEnd — complete / blocked / failed", () => {
 		assert.equal(d.tryParallel, false);
 	});
 
+	test("all done with pending acceptance runs the gate instead of completing", () => {
+		const d = decideAfterAgentEnd({
+			wasAborted: false,
+			hasUI: false,
+			quest: quest([step({ status: "done", phase: "done" })], { acceptancePending: true }),
+		});
+		assert.equal(d.kind, "proceed");
+		if (d.kind !== "proceed") return;
+		assert.equal(d.sequential.kind, "acceptance_check");
+	});
+
+	test("pending acceptance doesn't fire before the steps are done", () => {
+		const d = decideAfterAgentEnd({
+			wasAborted: false,
+			hasUI: false,
+			quest: quest(
+				[step({ status: "done", phase: "done" }), step({ status: "pending", phase: "queued" })],
+				{ acceptancePending: true },
+			),
+		});
+		if (d.kind !== "proceed") return assert.fail("expected proceed");
+		assert.equal(d.sequential.kind, "ready");
+	});
+
+	test("snapshot marks acceptance pending only until it passes", () => {
+		const base = {
+			name: "Q",
+			lastFiredStepIndex: -1,
+			sameStepCount: 0,
+			stepsSincePause: 0,
+			steps: [],
+		};
+		const acceptance = {
+			criteria: ["x"],
+			commands: ["npm test"],
+			status: "pending" as const,
+			rounds: 0,
+			evidence: [],
+		};
+		assert.equal(snapshotQuestForAutoPilot(base).acceptancePending, false, "legacy quest");
+		assert.equal(snapshotQuestForAutoPilot({ ...base, acceptance }).acceptancePending, true);
+		assert.equal(
+			snapshotQuestForAutoPilot({ ...base, acceptance: { ...acceptance, status: "passing" } })
+				.acceptancePending,
+			false,
+		);
+	});
+
 	test("failed_steps without UI prompt when hasUI false", () => {
 		const d = decideAfterAgentEnd({
 			wasAborted: false,

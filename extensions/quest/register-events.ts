@@ -6,6 +6,7 @@ import {
 	clearActiveQuest,
 	loadModelLadder,
 	loadQuest,
+	queuedStep,
 	routeStepFromDisk,
 	saveQuest,
 	syncConventionsToMemory,
@@ -25,6 +26,13 @@ import { applyAttributedUsage, attributeSubagentUsage } from "./usage";
 import { enforceSubagentRuntime } from "./routing";
 import { normalizeClaims, validateClaims } from "./write-claim";
 import { buildQuestRecap } from "./recap";
+import {
+	buildCorrectiveStep,
+	decideAcceptance,
+	sandboxBlockReason,
+	type AcceptanceEvidence,
+} from "./acceptance";
+import { runAcceptanceCommand } from "./checks";
 import {
 	buildActivityWidgetFn,
 	buildActivityFooter,
@@ -523,25 +531,12 @@ async function applySequential(
 
 	switch (decision.kind) {
 		case "complete": {
-			quest.status = "done";
-			quest.completedAt = Date.now();
-			syncConventionsToMemory(quest, ctx.cwd);
-			if (archiveQuest(quest, ctx.cwd)) {
-				clearActiveQuest(ctx.cwd);
-				rt.setQuest(null);
-				renderStatus(ctx, null);
-				writeQuestSessionMeta(ctx.cwd, null);
-				clearQuestFromTodo(ctx.cwd);
-				clearActivityUI(ctx, rt);
-			} else {
-				persist(ctx, quest);
-			}
-			rt.setAutoPilotLocked(true);
-			try {
-				pi.sendUserMessage(buildQuestRecap(quest), { deliverAs: "steer" });
-			} finally {
-				rt.setAutoPilotLocked(false);
-			}
+			completeQuest(pi, rt, ctx, quest);
+			return;
+		}
+
+		case "acceptance_check": {
+			if (await applyAcceptanceCheck(rt, ctx, quest)) completeQuest(pi, rt, ctx, quest);
 			return;
 		}
 
@@ -593,6 +588,109 @@ async function applySequential(
 			return;
 		}
 	}
+}
+
+function completeQuest(
+	pi: ExtensionAPI,
+	rt: QuestRuntime,
+	ctx: ExtensionContext,
+	quest: Quest,
+): void {
+	quest.status = "done";
+	quest.completedAt = Date.now();
+	syncConventionsToMemory(quest, ctx.cwd);
+	if (archiveQuest(quest, ctx.cwd)) {
+		clearActiveQuest(ctx.cwd);
+		rt.setQuest(null);
+		renderStatus(ctx, null);
+		writeQuestSessionMeta(ctx.cwd, null);
+		clearQuestFromTodo(ctx.cwd);
+		clearActivityUI(ctx, rt);
+	} else {
+		rt.persist(ctx, quest);
+	}
+	rt.setAutoPilotLocked(true);
+	try {
+		pi.sendUserMessage(buildQuestRecap(quest), { deliverAs: "steer" });
+	} finally {
+		rt.setAutoPilotLocked(false);
+	}
+}
+
+/** Projects whose acceptance gate is running; a turn ending meanwhile must not start another. */
+const acceptanceInFlight = new Set<string>();
+
+/**
+ * Every step is done; run the quest's acceptance commands (harness-run, not
+ * model-reported). True → the quest may complete. Otherwise one corrective step
+ * was appended and fired, the quest paused after the round cap, a gate was
+ * already running, or the quest changed while the commands ran.
+ *
+ * Commands run one at a time (test suites often share ports/files), each
+ * without blocking the event loop.
+ */
+export async function applyAcceptanceCheck(
+	rt: QuestRuntime,
+	ctx: ExtensionContext,
+	quest: Quest,
+): Promise<boolean> {
+	const acceptance = quest.acceptance;
+	if (!acceptance) return true;
+	if (acceptanceInFlight.has(ctx.cwd)) return false;
+	acceptanceInFlight.add(ctx.cwd);
+	const evidence: AcceptanceEvidence[] = [];
+	try {
+		for (const command of acceptance.commands) {
+			// Re-check at run time: the sandbox policy may have tightened since declaration.
+			const blocked = sandboxBlockReason(command, quest.sandbox);
+			evidence.push(
+				blocked
+					? { command, status: "fail", exitCode: -1, summary: blocked, at: Date.now() }
+					: await runAcceptanceCommand(command, ctx.cwd, quest.baselineSha ?? null),
+			);
+		}
+	} finally {
+		acceptanceInFlight.delete(ctx.cwd);
+	}
+	// The user may have paused, aborted, or replaced the quest while commands ran:
+	// keep the evidence, but don't complete it or fire work behind their back.
+	acceptance.evidence = evidence;
+	if (rt.getQuest(ctx.cwd) !== quest || quest.status !== "active") {
+		rt.persist(ctx, quest);
+		return false;
+	}
+	const decision = decideAcceptance(evidence, acceptance.rounds);
+
+	if (decision.kind === "pass") {
+		acceptance.status = "passing";
+		rt.persist(ctx, quest);
+		return true;
+	}
+
+	acceptance.status = "failed";
+	quest.lastFiredStepIndex = -1;
+	quest.sameStepCount = 0;
+	if (decision.kind === "pause") {
+		quest.status = "paused";
+		quest.pauseReason = decision.reason;
+		rt.persist(ctx, quest);
+		if (ctx.hasUI) ctx.ui.notify(`Quest paused: ${decision.reason}`, "warning");
+		return false;
+	}
+
+	acceptance.rounds = decision.round;
+	const spec = buildCorrectiveStep(decision.failures, decision.round, acceptance.criteria);
+	quest.steps.push(queuedStep(spec));
+	const index = quest.steps.length - 1;
+	rt.persist(ctx, quest);
+	if (ctx.hasUI) {
+		ctx.ui.notify(
+			`Quest acceptance failed (${decision.failures.length} command(s)) — corrective step #${index + 1}.`,
+			"warning",
+		);
+	}
+	rt.fireStep(ctx, quest, quest.steps[index], index);
+	return false;
 }
 
 async function applyVerifying(

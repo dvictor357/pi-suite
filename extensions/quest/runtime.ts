@@ -666,6 +666,8 @@ export function createQuestRuntime(
 			const base = captureBaseline(ctx.cwd);
 			if (base.sha) step.baselineSha = base.sha;
 		}
+		// The quest's own baseline (first fire) is the acceptance gate's red/green reference.
+		if (quest.baselineSha === undefined && step.baselineSha) quest.baselineSha = step.baselineSha;
 		// Ladder init + lastModel stamp before steering so rung/lastModel are
 		// persisted and steering/evals/escalation all see them. Explicit step.model
 		// and judge roles bypass the ladder (prepareStepDispatchModel).
@@ -823,6 +825,10 @@ export function createQuestRuntime(
 			step.startedAt = Date.now();
 			const base = captureBaseline(created);
 			if (base.sha) step.baselineSha = base.sha;
+			if (quest.baselineSha === undefined) {
+				const questBase = captureBaseline(ctx.cwd);
+				if (questBase.sha) quest.baselineSha = questBase.sha;
+			}
 			// Ladder init + lastModel stamp before batch steer so each step's model
 			// is persisted and buildBatchSteering can resolve via rung / lastModel.
 			const prepared = prepareStepDispatchModel(step, {

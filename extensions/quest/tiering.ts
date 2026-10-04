@@ -69,6 +69,12 @@ export function resolvePlanTier(
 	return { tier: "complex", reason: `plan outgrew "${declared}"` };
 }
 
+/**
+ * Light tiers don't require acceptance, but a goal that names tests or a
+ * checkable behaviour should still get harness-run proof (see acceptance.ts).
+ */
+const ACCEPTANCE_NUDGE = `If the goal names tests or a checkable behaviour, also pass **acceptanceCommands** to quest_plan — targeted commands (no pipes/&&) that pass only when the goal is met, e.g. \`npm test -- path/to/file.test.ts\`. Not the whole suite, typecheck or lint: quest already runs those after every step.`;
+
 /** Lines quest_create shows the orchestrator for how to plan at this tier. */
 export function planningGuidance(tier: QuestTier): string[] {
 	const max = TIERING.tiers[tier];
@@ -79,6 +85,7 @@ export function planningGuidance(tier: QuestTier): string[] {
 				`Read only the files you need, then call **quest_plan** with exactly ${max.maxSteps ?? 1} step`,
 				`(agent "worker", writeClaim = the file(s) you will change) and autoStart: true.`,
 				`You will implement that step yourself — no sub-agent — and the project's checks verify it.`,
+				ACCEPTANCE_NUDGE,
 			];
 		case "medium":
 			return [
@@ -86,6 +93,7 @@ export function planningGuidance(tier: QuestTier): string[] {
 				`Explore directly (codebase query or a few reads), then call **quest_plan** with at most`,
 				`${max.maxSteps ?? "a few"} focused steps, each with a writeClaim, and autoStart: true.`,
 				`You will implement the steps yourself in order${max.inline ? "" : " via sub-agents"}; checks verify each one.`,
+				ACCEPTANCE_NUDGE,
 			];
 		case "complex":
 			return [

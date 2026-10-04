@@ -16,12 +16,14 @@
  * commands). Resolution (`resolveChecks`) is pure and unit-tested; execution
  * (`runChecks`) is the thin process-spawning wrapper kept out of the test path.
  */
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readJSON, projectMemoryPath, type ProjectMemory } from "../../core";
-import { VERIFICATION } from "./constants";
+import { parseCommand, type AcceptanceEvidence } from "./acceptance";
+import { ACCEPTANCE, VERIFICATION } from "./constants";
 
 /** The deterministic checks the gate knows how to run. */
 export type CheckKind = "typecheck" | "lint" | "format" | "test";
@@ -69,7 +71,7 @@ function pmBinary(profile: ProjectMemory | null, hasPackageJson: boolean): strin
  * The package.json `scripts` map for a project, or an empty object when absent
  * or unreadable. Pulled out so {@link resolveChecks} stays pure over its inputs.
  */
-function readPackageScripts(cwd: string): Record<string, string> {
+export function readPackageScripts(cwd: string): Record<string, string> {
 	const path = join(cwd, "package.json");
 	if (!existsSync(path)) return {};
 	try {
@@ -181,6 +183,17 @@ export function resolveChecks(
 	return planned;
 }
 
+/** What acceptance validation compares commands against: the step gate's checks and package scripts. */
+export function acceptanceGateContext(cwd: string): {
+	gatedCommands: string[];
+	scripts: Record<string, string>;
+} {
+	return {
+		gatedCommands: planChecks(cwd).map((c) => c.command),
+		scripts: readPackageScripts(cwd),
+	};
+}
+
 /** Load the project profile (best-effort) and resolve the applicable checks. */
 export function planChecks(cwd: string): PlannedCheck[] {
 	let profile: ProjectMemory | null = null;
@@ -220,31 +233,77 @@ export function runCheck(check: PlannedCheck, cwd: string): CheckResult {
 			summary: tail(out ?? "", VERIFICATION.outputTailChars),
 		};
 	} catch (err) {
-		const e = err as {
-			status?: number | null;
-			code?: string;
-			stdout?: Buffer | string;
-			stderr?: Buffer | string;
-		};
-		// Tool not installed → can't judge; skip rather than block.
-		if (e.code === "ENOENT") {
-			return {
-				kind: check.kind,
-				command: check.command,
-				status: "skipped",
-				exitCode: -1,
-				summary: `${check.file}: not found`,
-			};
-		}
-		const combined = `${e.stdout?.toString() ?? ""}\n${e.stderr?.toString() ?? ""}`.trim();
+		const e = err as { status?: number | null; code?: string };
+		return failedCheck(check, err, typeof e.status === "number" ? e.status : null);
+	}
+}
+
+/**
+ * Map a failed spawn to a result. A missing executable (ENOENT) is "skipped";
+ * anything else — non-zero exit, timeout, kill — is a "fail" with the output tail.
+ */
+function failedCheck(check: PlannedCheck, err: unknown, exitCode: number | null): CheckResult {
+	const e = err as { code?: unknown; stdout?: Buffer | string; stderr?: Buffer | string };
+	// Tool not installed → can't judge; skip rather than block.
+	if (e.code === "ENOENT") {
 		return {
 			kind: check.kind,
 			command: check.command,
-			status: "fail",
-			exitCode: typeof e.status === "number" ? e.status : -1,
-			summary: tail(combined || (e.code ?? "check failed"), VERIFICATION.outputTailChars),
+			status: "skipped",
+			exitCode: -1,
+			summary: `${check.file}: not found`,
 		};
 	}
+	const combined = `${e.stdout?.toString() ?? ""}\n${e.stderr?.toString() ?? ""}`.trim();
+	const code = typeof e.code === "string" ? e.code : undefined;
+	return {
+		kind: check.kind,
+		command: check.command,
+		status: "fail",
+		exitCode: exitCode ?? -1,
+		summary: tail(combined || (code ?? "check failed"), VERIFICATION.outputTailChars),
+	};
+}
+
+/**
+ * Async {@link runCheck}: same result mapping, but doesn't block the event loop,
+ * so independent runs can overlap. Never rejects. `signal` aborts the process
+ * (the result is then a "fail" the caller should discard).
+ */
+function runCheckAsync(
+	check: PlannedCheck,
+	cwd: string,
+	signal?: AbortSignal,
+): Promise<CheckResult> {
+	return new Promise((resolve) => {
+		execFile(
+			check.file,
+			check.args,
+			{
+				cwd,
+				timeout: VERIFICATION.timeoutMs,
+				encoding: "utf8",
+				maxBuffer: 64 * 1024 * 1024,
+				signal,
+			},
+			(err, stdout, stderr) => {
+				if (!err) {
+					resolve({
+						kind: check.kind,
+						command: check.command,
+						status: "pass",
+						exitCode: 0,
+						summary: tail(stdout ?? "", VERIFICATION.outputTailChars),
+					});
+					return;
+				}
+				// execFile reports the exit status as a numeric `code`.
+				const exit =
+					typeof (err as { code?: unknown }).code === "number" ? (err.code as number) : null;
+				resolve(failedCheck(check, Object.assign(err, { stdout, stderr }), exit));
+			},
+		);
+	});
 }
 
 /**
@@ -315,6 +374,79 @@ export function runCheckAtBaseline(
 	}
 }
 
+/** In-flight/finished async baseline runs, keyed like {@link baselineCache}. */
+const baselineAsyncCache = new Map<string, Promise<CheckResult | null>>();
+
+/** Extract `sha` into `dir` by streaming `git archive` into `tar` (non-blocking). */
+function exportCommit(cwd: string, sha: string, dir: string): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const git = spawn("git", ["archive", "--format=tar", sha], {
+			cwd,
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		const tar = spawn("tar", ["-x", "-C", dir], { stdio: ["pipe", "ignore", "ignore"] });
+		git.stdout.pipe(tar.stdin);
+		let pending = 2;
+		let failed = false;
+		const done = (name: string) => (code: number | null) => {
+			if (failed) return;
+			if (code !== 0) {
+				failed = true;
+				reject(new Error(`${name} exited ${code}`));
+				return;
+			}
+			if (--pending === 0) resolve();
+		};
+		git.on("error", reject).on("close", done("git archive"));
+		tar.on("error", reject).on("close", done("tar"));
+	});
+}
+
+/**
+ * Async {@link runCheckAtBaseline}: export `sha` and run `check` there without
+ * blocking, deduplicating concurrent requests. Null when the export fails or
+ * the run was aborted — aborted runs are never cached.
+ */
+function runCheckAtBaselineAsync(
+	check: PlannedCheck,
+	cwd: string,
+	sha: string,
+	signal?: AbortSignal,
+): Promise<CheckResult | null> {
+	let key: string;
+	try {
+		key = `${realpathSync(cwd)}\u0000${sha}\u0000${check.command}`;
+	} catch {
+		return Promise.resolve(null);
+	}
+	const known = baselineCache.get(key);
+	if (known) return Promise.resolve(known);
+	const inFlight = baselineAsyncCache.get(key);
+	if (inFlight) return inFlight;
+
+	const run = (async (): Promise<CheckResult | null> => {
+		const dir = await mkdtemp(join(tmpdir(), "pi-quest-baseline-"));
+		try {
+			await exportCommit(cwd, sha, dir);
+			if (existsSync(join(cwd, "node_modules"))) {
+				await symlink(join(realpathSync(cwd), "node_modules"), join(dir, "node_modules"));
+			}
+			if (signal?.aborted) return null;
+			const result = await runCheckAsync(check, dir, signal);
+			if (signal?.aborted) return null;
+			baselineCache.set(key, result);
+			return result;
+		} catch {
+			return null;
+		} finally {
+			baselineAsyncCache.delete(key);
+			await rm(dir, { recursive: true, force: true }).catch(() => {});
+		}
+	})();
+	baselineAsyncCache.set(key, run);
+	return run;
+}
+
 /**
  * Run the gate's checks in `cwd`. With a `baselineSha` (and
  * `VERIFICATION.baselineAware`), failures that also fail at the baseline are
@@ -333,6 +465,56 @@ export function runChecks(
 				? runCheckAtBaseline(check, cwd, baselineSha)
 				: null,
 	);
+}
+
+/**
+ * Run one quest acceptance command in `cwd` without a shell. Unlike a gate
+ * check, a missing executable is a failure (it can't prove the goal), and a
+ * pass also records whether the command was red at `baselineSha` (cached) — a
+ * command already green at baseline proves nothing about the quest's change.
+ *
+ * Non-blocking. With `concurrentBaseline` the baseline run starts alongside the
+ * real one (wall time ≈ one run instead of two) and is aborted if the real run
+ * fails, since its answer is then unused.
+ */
+export async function runAcceptanceCommand(
+	command: string,
+	cwd: string,
+	baselineSha: string | null,
+	concurrentBaseline: boolean = ACCEPTANCE.concurrentBaseline,
+): Promise<AcceptanceEvidence> {
+	const parsed = parseCommand(command);
+	if ("error" in parsed) {
+		return { command, status: "fail", exitCode: -1, summary: parsed.error, at: Date.now() };
+	}
+	const check: PlannedCheck = { kind: "test", command, file: parsed.file, args: parsed.args };
+	const abort = new AbortController();
+	const startBaseline = () =>
+		baselineSha
+			? runCheckAtBaselineAsync(check, cwd, baselineSha, abort.signal)
+			: Promise.resolve(null);
+	const early = concurrentBaseline ? startBaseline() : null;
+	const res = await runCheckAsync(check, cwd);
+	if (res.status !== "pass") {
+		abort.abort();
+		await early;
+		return {
+			command,
+			status: "fail",
+			exitCode: res.exitCode,
+			summary: res.summary,
+			at: Date.now(),
+		};
+	}
+	const base = await (early ?? startBaseline());
+	return {
+		command,
+		status: "pass",
+		exitCode: 0,
+		summary: res.summary,
+		redAtBaseline: base ? base.status !== "pass" : undefined,
+		at: Date.now(),
+	};
 }
 
 /** Map a failing check's kind to the eval failure taxonomy code. */

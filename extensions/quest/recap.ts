@@ -1,3 +1,4 @@
+import { renderAcceptanceRecap } from "./acceptance";
 import type { Quest, QuestStep } from "./types";
 
 function iconFor(status: QuestStep["status"]): string {
@@ -59,6 +60,8 @@ export function buildQuestRecap(quest: Quest): string {
 			`- ${iconFor(step.status)} #${i + 1} **${step.content}**${result ? ` — ${short(result)}` : ""}${artifactSuffix}`,
 		);
 	}
+
+	lines.push(...renderAcceptanceRecap(quest.acceptance));
 
 	if (quest.commits.length) {
 		lines.push(``, `### Git`);
