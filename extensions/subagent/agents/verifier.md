@@ -1,6 +1,8 @@
 ---
 name: verifier
-description: Adversarial verification gate — runs builds/tests and tries to break a change, returns a hard PASS/FAIL verdict with evidence
+description: >-
+  Adversarial verification gate — runs builds/tests and tries to break a change, returns
+  a hard PASS/FAIL verdict with evidence
 tools: read, ffgrep, fffind, ls, bash
 tier: reasoning
 ---

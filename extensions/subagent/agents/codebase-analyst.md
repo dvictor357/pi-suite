@@ -1,6 +1,7 @@
 ---
 name: codebase-analyst
-description: Analyze codebase structure, dependencies, and architecture using the codebase index
+description: >-
+  Analyze codebase structure, dependencies, and architecture using the codebase index
 tools: read, ffgrep, fffind, bash
 tier: reasoning
 ---

@@ -1,6 +1,8 @@
 ---
 name: quick-worker
-description: Fast worker for mechanical, low-ambiguity edits (renames, string changes, boilerplate, applying an explicit plan verbatim)
+description: >-
+  Fast worker for mechanical, low-ambiguity edits (renames, string changes, boilerplate,
+  applying an explicit plan verbatim)
 tier: fast
 thinking: minimal
 ---

@@ -1,6 +1,8 @@
 ---
 name: lead
-description: Technical Lead who plans architecture, delegates work, reviews all output, and ensures quality
+description: >-
+  Technical Lead who plans architecture, delegates work, reviews all output, and ensures
+  quality
 tools: read, ffgrep, fffind, ls, bash, edit, write
 tier: reasoning
 ---
