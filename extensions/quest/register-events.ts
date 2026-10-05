@@ -652,10 +652,11 @@ export async function applyAcceptanceCheck(
 	} finally {
 		acceptanceInFlight.delete(ctx.cwd);
 	}
-	// The user may have paused, aborted, or replaced the quest while commands ran:
-	// keep the evidence, but don't complete it or fire work behind their back.
+	// A stale gate must not restore an aborted quest or overwrite its replacement.
+	if (rt.getQuest(ctx.cwd) !== quest) return false;
+	// A paused quest still owns its evidence, but must not complete or fire work.
 	acceptance.evidence = evidence;
-	if (rt.getQuest(ctx.cwd) !== quest || quest.status !== "active") {
+	if (quest.status !== "active") {
 		rt.persist(ctx, quest);
 		return false;
 	}

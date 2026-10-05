@@ -12,7 +12,7 @@ import { join } from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createQuestRuntime } from "./runtime";
-import { emptyQuest, loadQuest, rememberAgentModel, saveQuest } from "./storage";
+import { clearActiveQuest, emptyQuest, loadQuest, rememberAgentModel, saveQuest } from "./storage";
 import { buildFailureBrief } from "./ladder";
 import {
 	applyAcceptanceCheck,
@@ -469,6 +469,30 @@ describe("quest acceptance gate", () => {
 			assert.equal(quest.acceptance?.rounds, 0);
 		} finally {
 			h.cleanup();
+		}
+	});
+
+	test("a gate finishing after abort or replacement cannot restore its stale quest", async () => {
+		for (const replace of [false, true]) {
+			const h = harness();
+			try {
+				const quest = seedAccepted(h);
+				quest.acceptance!.commands = [
+					`${JSON.stringify(process.execPath)} -e 'setTimeout(() => process.exit(0), 50)'`,
+				];
+				const pending = applyAcceptanceCheck(h.rt, h.ctx, quest);
+				clearActiveQuest(h.cwd);
+				const current = replace ? emptyQuest("Replacement", "new goal") : null;
+				if (current) saveQuest(current, h.cwd);
+				h.rt.setQuest(current);
+
+				assert.equal(await pending, false);
+				assert.equal(h.rt.getQuest(h.cwd), current, "current quest stays in the cache");
+				assert.equal(loadQuest(h.cwd)?.name ?? null, current?.name ?? null, "disk stays current");
+				assert.equal(h.steers.length, 0, "no stale work dispatched");
+			} finally {
+				h.cleanup();
+			}
 		}
 	});
 
