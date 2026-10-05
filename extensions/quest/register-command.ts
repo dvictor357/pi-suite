@@ -382,11 +382,21 @@ export function registerQuestCommand(pi: ExtensionAPI, rt: QuestRuntime): void {
 					}
 					const name = quest.name;
 					const done = quest.steps.filter((t) => t.status === "done").length;
+					const { status, completedAt } = quest;
 					if (quest.status !== "done") {
 						quest.status = "done";
 						quest.completedAt = Date.now();
 					}
-					if (archiveQuest(quest, ctx.cwd)) clearActiveQuest(ctx.cwd);
+					if (!archiveQuest(quest, ctx.cwd)) {
+						quest.status = status;
+						quest.completedAt = completedAt;
+						ctx.ui.notify(
+							`Quest "${name}" was not cancelled: its archive could not be written.`,
+							"error",
+						);
+						return;
+					}
+					clearActiveQuest(ctx.cwd);
 					rt.setQuest(null);
 					claimReg.clear(ctx.cwd);
 					renderStatus(ctx, null);

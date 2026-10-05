@@ -486,7 +486,8 @@ export function loadQuest(cwd: string): Quest | null {
 	return null;
 }
 
-export function saveQuest(quest: Quest, cwd: string): void {
+/** Write the active quest. Returns false when the write failed; the disk copy is then stale. */
+export function saveQuest(quest: Quest, cwd: string): boolean {
 	quest.updatedAt = Date.now();
 	quest.tasks = quest.steps;
 	quest.tasksSincePause = quest.stepsSincePause;
@@ -496,20 +497,29 @@ export function saveQuest(quest: Quest, cwd: string): void {
 		...commit,
 		taskIndex: commit.stepIndex,
 	}));
-	writeJSON(questActivePath(cwd), quest);
+	try {
+		writeJSON(questActivePath(cwd), quest, { throwOnError: true });
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 export function clearActiveQuest(cwd: string): void {
 	rmSync(questActivePath(cwd), { force: true });
 }
 
+/**
+ * Publish a finished quest to the archive. Returns null when the archive file was not
+ * written, so callers must keep the active quest instead of clearing it.
+ */
 export function archiveQuest(quest: Quest, cwd: string): string | null {
 	try {
 		const archiveDir = questArchiveDir(cwd);
 		const slug = quest.name.replace(/[^a-z0-9-]+/gi, "-").toLowerCase();
 		const ts = quest.completedAt ?? Date.now();
 		const path = join(archiveDir, `${ts}-${slug}.json`);
-		writeJSON(path, quest);
+		writeJSON(path, quest, { throwOnError: true });
 		updateArchiveIndex(cwd, {
 			path,
 			name: quest.name,

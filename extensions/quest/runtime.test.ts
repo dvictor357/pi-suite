@@ -1,14 +1,15 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { MemoryGraph, MemoryNode } from "../../core";
+import { todoListPath, type MemoryGraph, type MemoryNode } from "../../core";
 import { createQuestRuntime, EVAL_RESULT_NODE_CAP, pruneEvalResultNodes } from "./runtime";
 import { emptyQuest, rememberAgentModel, rememberModelLadder, saveQuest } from "./storage";
 import type { Quest, QuestStep } from "./types";
+import { questActivePath } from "./utils";
 
 /** A QuestStep with all required fields defaulted; override what a test cares about. */
 function makeTask(partial: Partial<QuestStep>): QuestStep {
@@ -560,6 +561,33 @@ describe("persist onPersist hook", () => {
 			// panel live during orchestrator-direct steps (quest_update etc.).
 			rt.persist(h.ctx, quest);
 			assert.equal(seen.length, 2);
+		} finally {
+			h.cleanup();
+		}
+	});
+	test("a failed save alerts the user and skips shared handoffs", () => {
+		const h = fakeRuntime();
+		try {
+			const notes: Array<{ msg: string; level?: string }> = [];
+			const ctx = {
+				...h.ctx,
+				hasUI: true,
+				ui: {
+					setStatus: () => {},
+					notify: (msg: string, level?: string) => notes.push({ msg, level }),
+				},
+			} as unknown as ExtensionContext;
+			const quest = seedActive(h.rt, h.cwd, [makeTask({ content: "first" })]);
+			rmSync(questActivePath(h.cwd), { force: true });
+			rmSync(todoListPath(h.cwd), { force: true });
+			// A directory where the active quest file belongs makes the save fail.
+			mkdirSync(questActivePath(h.cwd), { recursive: true });
+
+			h.rt.persist(ctx, quest);
+
+			assert.equal(h.rt.getQuest(h.cwd), quest, "in-memory quest stays live");
+			assert.equal(notes.filter((n) => n.level === "error").length, 1);
+			assert.equal(existsSync(todoListPath(h.cwd)), false, "todo not synced");
 		} finally {
 			h.cleanup();
 		}

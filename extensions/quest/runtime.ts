@@ -435,11 +435,16 @@ export function createQuestRuntime(
 	}
 
 	function persist(ctx: ExtensionContext, quest: Quest): void {
-		saveQuest(quest, ctx.cwd);
+		const saved = saveQuest(quest, ctx.cwd);
 		questCache = quest;
 		renderStatus(ctx, quest);
-		writeQuestSessionMeta(ctx.cwd, quest);
-		syncQuestToTodo(quest, ctx.cwd);
+		if (saved) {
+			writeQuestSessionMeta(ctx.cwd, quest);
+			syncQuestToTodo(quest, ctx.cwd);
+		} else if (ctx.hasUI) {
+			// Shared handoffs would advertise a state the active quest file lacks.
+			ctx.ui.notify("Quest state could not be saved to disk; progress may be lost.", "error");
+		}
 		options.onPersist?.(ctx, quest);
 	}
 
