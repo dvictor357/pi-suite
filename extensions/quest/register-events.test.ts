@@ -384,6 +384,47 @@ describe("subagent runtime routing enforcement", () => {
 	});
 });
 
+describe("auto-pilot dialogs answered after a lifecycle change", () => {
+	for (const change of ["pause", "abort", "replace"] as const) {
+		test(`a stale "Retry failed steps" answer after ${change} does nothing`, async () => {
+			const h = harness();
+			try {
+				const quest = seedActive(h);
+				quest.steps[0] = makeStep({ content: "broken step", status: "failed", phase: "failed" });
+				saveQuest(quest, h.cwd);
+				const replacement = change === "replace" ? emptyQuest("Replacement", "new goal") : null;
+				const ui = h.ctx.ui as unknown as Record<string, unknown>;
+				ui.select = async () => {
+					// The user changes the quest while the dialog is open.
+					if (change === "pause") {
+						quest.status = "paused";
+						h.rt.persist(h.ctx, quest);
+					} else {
+						clearActiveQuest(h.cwd);
+						if (replacement) saveQuest(replacement, h.cwd);
+						h.rt.setQuest(replacement);
+					}
+					return "Retry failed steps";
+				};
+
+				await handleAgentEnd(h.pi, h.rt, { messages: [] }, h.ctx);
+
+				assert.equal(quest.steps[0].status, "failed", "stale answer not applied");
+				assert.equal(h.steers.length, 0, "no work dispatched");
+				if (change === "pause") {
+					assert.equal(quest.status, "paused");
+					assert.equal(loadQuest(h.cwd)?.status, "paused");
+				} else {
+					assert.equal(h.rt.getQuest(h.cwd), replacement, "current quest stays in the cache");
+					assert.equal(loadQuest(h.cwd)?.name ?? null, replacement?.name ?? null);
+				}
+			} finally {
+				h.cleanup();
+			}
+		});
+	}
+});
+
 describe("quest acceptance gate", () => {
 	const flagCheck = (cwd: string) =>
 		`${JSON.stringify(process.execPath)} -e 'process.exit(require("fs").existsSync(${JSON.stringify(join(cwd, "flag"))}) ? 0 : 1)'`;
