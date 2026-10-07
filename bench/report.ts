@@ -2,7 +2,15 @@
  * Markdown report over a results file. Pure: takes rows, returns text.
  */
 import { BENCH } from "./config";
-import { aggregate, armKey, groupBy, pairedCompare, scoredResults, type Aggregate } from "./stats";
+import {
+	aggregate,
+	armKey,
+	groupBy,
+	pairedCompare,
+	scoredResults,
+	spendSplit,
+	type Aggregate,
+} from "./stats";
 import type { BenchResult } from "./types";
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
@@ -11,7 +19,7 @@ const ktok = (x: number) => `${(x / 1000).toFixed(1)}k`;
 const secs = (ms: number) => `${Math.round(ms / 1000)}s`;
 
 function armRow(key: string, a: Aggregate): string {
-	return `| ${key} | ${a.passes}/${a.runs} | ${pct(a.passRate)} | ${pct(a.ci[0])}–${pct(a.ci[1])} | ${usd(a.costPerPass)} | ${usd(a.totalCost)} | ${ktok(a.medianTokens)} | ${secs(a.medianDurationMs)} | ${a.timeouts} |`;
+	return `| ${key} | ${a.passes}/${a.runs} | ${pct(a.passRate)} | ${pct(a.ci[0])}–${pct(a.ci[1])} | ${usd(a.costPerPass)} | ${usd(a.totalCost)} | ${ktok(a.medianTokens)} | ${secs(a.medianDurationMs)} | ${a.timeouts} | ${a.autonomous}/${a.runs} | ${usd(a.costPerAutonomous)} | ${a.medianAutonomousMs == null ? "—" : secs(a.medianAutonomousMs)} |`;
 }
 
 export function formatReport(all: readonly BenchResult[]): string {
@@ -28,12 +36,12 @@ export function formatReport(all: readonly BenchResult[]): string {
 		"",
 		`${results.length} scored runs over ${new Set(results.map((r) => r.taskId)).size} tasks` +
 			(broken ? ` (${broken} harness errors excluded)` : "") +
-			`. Pass = every hidden test passes. CI = Wilson ${Math.round(normalConfidence(BENCH.z) * 100)}%.`,
+			`. Pass = every hidden test passes; autonomous = a pass without timing out. CI = Wilson ${Math.round(normalConfidence(BENCH.z) * 100)}%.`,
 		"",
 		"## By arm",
 		"",
-		"| Arm | Passes | Pass % | CI | Cost / pass | Total cost | Median tokens | Median time | Timeouts |",
-		"|-----|--------|--------|----|-------------|------------|---------------|-------------|----------|",
+		"| Arm | Passes | Pass % | CI | Cost / pass | Total cost | Median tokens | Median time | Timeouts | Autonomous | Cost / autonomous | Median autonomous time |",
+		"|-----|--------|--------|----|-------------|------------|---------------|-------------|----------|------------|-------------------|------------------------|",
 		...armKeys.map((k) => armRow(k, aggregate(byArm.get(k)!))),
 	];
 
@@ -68,6 +76,26 @@ export function formatReport(all: readonly BenchResult[]): string {
 				);
 			}
 		}
+	}
+
+	out.push(
+		"",
+		"## Spend split",
+		"",
+		"| Arm | Parent | Sub-agents by role | Quest tiers |",
+		"|-----|--------|--------------------|-------------|",
+	);
+	for (const k of armKeys) {
+		const split = spendSplit(byArm.get(k)!);
+		const roles = Object.entries(split.byRole)
+			.sort(([, a], [, b]) => b - a)
+			.map(([role, cost]) => `${role} ${usd(cost)}`);
+		const tiers = Object.entries(split.tiers)
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([tier, n]) => `${tier} ×${n}`);
+		out.push(
+			`| ${k} | ${usd(split.parent)} | ${roles.join(", ") || "—"} | ${tiers.join(", ") || "—"} |`,
+		);
 	}
 
 	out.push(

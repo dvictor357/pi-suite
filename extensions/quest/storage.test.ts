@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -17,7 +17,7 @@ import {
 	saveQuest,
 } from "./storage";
 import type { SandboxPolicy } from "./types";
-import { questActivePath, questArchiveIndexPath } from "./utils";
+import { questActivePath, questArchiveDir, questArchiveIndexPath } from "./utils";
 
 const tempCwd = (): string => mkdtempSync(join(tmpdir(), "pi-suite-quest-storage-"));
 
@@ -258,6 +258,25 @@ test("loadQuest archives and clears a stale finished active quest", () => {
 	assert.equal(loadQuest(cwd), null);
 	assert.equal(existsSync(questActivePath(cwd)), false);
 	assert.equal(listArchives(1, cwd)[0]?.name, "Finished quest");
+});
+
+test("archiveQuest reports a failed archive write and loadQuest keeps the active quest", () => {
+	const cwd = tempCwd();
+	const quest = emptyQuest("Unarchivable", "archive write fails");
+	quest.status = "done";
+	assert.equal(saveQuest(quest, cwd), true);
+	// A file where the archive directory belongs makes every archive write fail.
+	writeFileSync(questArchiveDir(cwd), "");
+
+	assert.equal(archiveQuest(quest, cwd), null);
+	assert.equal(loadQuest(cwd), null);
+	assert.equal(existsSync(questActivePath(cwd)), true, "active quest survives a failed archive");
+});
+
+test("saveQuest reports a failed active-state write", () => {
+	const cwd = tempCwd();
+	mkdirSync(questActivePath(cwd), { recursive: true });
+	assert.equal(saveQuest(emptyQuest("Unsaved", "write fails"), cwd), false);
 });
 
 test("loadQuest defaults non-sandbox network/package install permissions to true", () => {

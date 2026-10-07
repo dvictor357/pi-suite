@@ -652,10 +652,11 @@ export async function applyAcceptanceCheck(
 	} finally {
 		acceptanceInFlight.delete(ctx.cwd);
 	}
-	// The user may have paused, aborted, or replaced the quest while commands ran:
-	// keep the evidence, but don't complete it or fire work behind their back.
+	// A stale gate must not restore an aborted quest or overwrite its replacement.
+	if (rt.getQuest(ctx.cwd) !== quest) return false;
+	// A paused quest still owns its evidence, but must not complete or fire work.
 	acceptance.evidence = evidence;
-	if (rt.getQuest(ctx.cwd) !== quest || quest.status !== "active") {
+	if (quest.status !== "active") {
 		rt.persist(ctx, quest);
 		return false;
 	}
@@ -693,6 +694,15 @@ export async function applyAcceptanceCheck(
 	return false;
 }
 
+/**
+ * True while the quest that opened a dialog still owns the runtime and is running.
+ * While the user answers, the quest may be paused, aborted, or replaced; acting on
+ * the stale answer would restore it or fire work behind the user's back.
+ */
+function stillDriving(rt: QuestRuntime, ctx: ExtensionContext, quest: Quest): boolean {
+	return rt.getQuest(ctx.cwd) === quest && quest.status === "active";
+}
+
 async function applyVerifying(
 	pi: ExtensionAPI,
 	rt: QuestRuntime,
@@ -712,6 +722,7 @@ async function applyVerifying(
 				`${verifyingTasks.length} step(s) need verification. What now?`,
 				["Verify them now (agent will handle it)", "Skip verification for all", "Pause quest"],
 			);
+			if (!stillDriving(rt, ctx, quest)) return;
 
 			if (action === "Verify them now (agent will handle it)") {
 				rt.setAutoPilotLocked(true);
@@ -825,6 +836,7 @@ async function applyFailedSteps(
 			`${failedTasks.length} step(s) failed. What would you like to do?`,
 			["Retry failed steps", "Skip all failed", "Pause and review"],
 		);
+		if (!stillDriving(rt, ctx, quest)) return;
 
 		if (action === "Retry failed steps") {
 			for (const index of decision.indices) {
@@ -913,6 +925,7 @@ async function applyStall(
 			`Step "${decision.content}" stalled after ${decision.sameStepCount} attempts. What now?`,
 			["Skip this step", "Mark as failed", "Pause quest"],
 		);
+		if (!stillDriving(rt, ctx, quest)) return;
 
 		if (action === "Skip this step") {
 			rt.transitionStep(ctx, quest, decision.index, "skipped", "stalled step skipped");
@@ -1046,6 +1059,7 @@ async function applyReady(
 					`Continue to next step?`,
 				].join("\n"),
 			);
+			if (!stillDriving(rt, ctx, quest)) return;
 
 			if (cont) {
 				quest.stepsSincePause = 0;

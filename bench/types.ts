@@ -45,6 +45,10 @@ export interface RunUsage {
 	subagentRuns: number;
 	/** Portion of `cost` spent inside sub-agents. */
 	subagentCost: number;
+	/** `subagentCost` by sub-agent role (`worker`, `verifier`, …; `unknown` when unlabelled). Absent on old rows. */
+	subagentCostByRole?: Record<string, number>;
+	/** Final quest tier: declared by quest_create, raised by quest_plan. Absent when no quest ran. */
+	questTier?: string;
 	/** Tool calls by name, main agent only. */
 	toolCalls: Record<string, number>;
 	/** Error message of the main agent's last turn when it stopped on a provider error. */

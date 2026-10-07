@@ -18,6 +18,7 @@ export function emptyRunUsage(): RunUsage {
 		turns: 0,
 		subagentRuns: 0,
 		subagentCost: 0,
+		subagentCostByRole: {},
 		toolCalls: {},
 	};
 }
@@ -40,6 +41,17 @@ function addTokens(usage: RunUsage, raw: unknown): number {
 	usage.cost += cost;
 	return cost;
 }
+
+function addSubagent(usage: RunUsage, role: unknown, raw: unknown): void {
+	const cost = addTokens(usage, raw);
+	usage.subagentRuns++;
+	usage.subagentCost += cost;
+	const key = typeof role === "string" && role ? role : "unknown";
+	const byRole = (usage.subagentCostByRole ??= {});
+	byRole[key] = (byRole[key] ?? 0) + cost;
+}
+
+const TIER_RAISED = /Tier raised \w+ → (\w+)/;
 
 /** Apply one parsed event to the running totals. Unknown events are ignored. */
 export function foldEvent(usage: RunUsage, event: unknown): void {
@@ -65,22 +77,30 @@ export function foldEvent(usage: RunUsage, event: unknown): void {
 		}
 		return;
 	}
+	if (e.type === "tool_execution_start" && e.toolName === "quest_create") {
+		const tier = rec(e.args).complexity;
+		if (typeof tier === "string") usage.questTier = tier;
+		return;
+	}
+	if (e.type === "tool_execution_end" && e.toolName === "quest_plan") {
+		const content = rec(e.result).content;
+		for (const part of Array.isArray(content) ? content : []) {
+			const text = rec(part).text;
+			const raised = typeof text === "string" ? TIER_RAISED.exec(text) : null;
+			if (raised) usage.questTier = raised[1];
+		}
+		return;
+	}
 	// quest_delegate runs its sub-agent in-process and reports one `details.usage`.
 	if (e.type === "tool_execution_end" && e.toolName === "quest_delegate") {
-		const u = rec(rec(e.result).details).usage;
-		if (u) {
-			usage.subagentRuns++;
-			usage.subagentCost += addTokens(usage, u);
-		}
+		const details = rec(rec(e.result).details);
+		if (details.usage) addSubagent(usage, details.role, details.usage);
 		return;
 	}
 	if (e.type === "tool_execution_end" && e.toolName === "subagent") {
 		const results = rec(rec(e.result).details).results;
 		if (!Array.isArray(results)) return;
-		for (const r of results) {
-			usage.subagentRuns++;
-			usage.subagentCost += addTokens(usage, rec(r).usage);
-		}
+		for (const r of results) addSubagent(usage, rec(r).agent, rec(r).usage);
 	}
 }
 

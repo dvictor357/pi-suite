@@ -563,11 +563,25 @@ export function registerDelegateTools(pi: ExtensionAPI, rt: QuestRuntime): void 
 			const name = quest.name;
 			const done = quest.steps.filter((t) => t.status === "done").length;
 			const total = quest.steps.length;
+			const { status, completedAt } = quest;
 			if (quest.status !== "done") {
 				quest.status = "done";
 				quest.completedAt = Date.now();
 			}
-			if (archiveQuest(quest, ctx.cwd)) clearActiveQuest(ctx.cwd);
+			if (!archiveQuest(quest, ctx.cwd)) {
+				quest.status = status;
+				quest.completedAt = completedAt;
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Quest "${name}" was not aborted: its archive could not be written. The quest is unchanged.`,
+						},
+					],
+					details: { name, done, total, archived: false },
+				};
+			}
+			clearActiveQuest(ctx.cwd);
 			rt.setQuest(null);
 			rt.claims.clear(ctx.cwd);
 			rt.dispatchGuard.clear(ctx.cwd);
