@@ -12,7 +12,7 @@ import {
 	providersUsed,
 	sandboxSettings,
 } from "./sandbox";
-import { aggregate, armKey, median, pairedCompare, wilson } from "./stats";
+import { aggregate, armKey, median, pairedCompare, spendSplit, wilson } from "./stats";
 import { TASKS } from "./tasks";
 import type { BenchResult } from "./types";
 import { descendantPids, parseTapCounts, runProcess, stripNodeModulesBin } from "./workspace";
@@ -35,8 +35,8 @@ test("usageFromJsonl sums assistant turns, tool calls, and sub-agent usage from 
 			result: {
 				details: {
 					results: [
-						{ usage: { input: 1000, output: 100, cost: 0.02 } },
-						{ usage: { input: 500, output: 50, cost: 0.01 } },
+						{ agent: "worker", usage: { input: 1000, output: 100, cost: 0.02 } },
+						{ agent: "verifier", usage: { input: 500, output: 50, cost: 0.01 } },
 					],
 				},
 			},
@@ -44,7 +44,21 @@ test("usageFromJsonl sums assistant turns, tool calls, and sub-agent usage from 
 		JSON.stringify({
 			type: "tool_execution_end",
 			toolName: "quest_delegate",
-			result: { details: { ok: true, usage: { input: 300, output: 30, cost: 0.005 } } },
+			result: {
+				details: { ok: true, role: "worker", usage: { input: 300, output: 30, cost: 0.005 } },
+			},
+		}),
+		JSON.stringify({
+			type: "tool_execution_start",
+			toolName: "quest_create",
+			args: { complexity: "simple" },
+		}),
+		JSON.stringify({
+			type: "tool_execution_end",
+			toolName: "quest_plan",
+			result: {
+				content: [{ type: "text", text: "Plan saved. Tier raised simple → medium: 4 steps." }],
+			},
 		}),
 		assistant({ input: 200, output: 20, cost: { total: 0.02 } }, [
 			{ type: "toolCall", name: "bash" },
@@ -60,6 +74,27 @@ test("usageFromJsonl sums assistant turns, tool calls, and sub-agent usage from 
 	assert.equal(u.subagentRuns, 3);
 	assert.ok(Math.abs(u.subagentCost - 0.035) < 1e-12);
 	assert.deepEqual(u.toolCalls, { bash: 2, subagent: 1 });
+	assert.ok(Math.abs(u.subagentCostByRole!.worker - 0.025) < 1e-12);
+	assert.equal(u.subagentCostByRole!.verifier, 0.01);
+	assert.equal(u.questTier, "medium", "quest_plan's raise overrides the declared tier");
+});
+
+test("spendSplit separates parent from sub-agent roles and tolerates rows without roles", () => {
+	const withRoles = result({});
+	withRoles.usage = {
+		...withRoles.usage,
+		cost: 0.5,
+		subagentCost: 0.3,
+		subagentCostByRole: { worker: 0.2, verifier: 0.1 },
+		questTier: "complex",
+	};
+	const legacy = result({});
+	legacy.usage = { ...legacy.usage, cost: 0.2, subagentCost: 0.05 };
+	const split = spendSplit([withRoles, legacy]);
+	assert.ok(Math.abs(split.parent - 0.35) < 1e-12);
+	assert.deepEqual(Object.keys(split.byRole).sort(), ["unknown", "verifier", "worker"]);
+	assert.equal(split.byRole.unknown, 0.05);
+	assert.deepEqual(split.tiers, { complex: 1 });
 });
 
 test("usageFromJsonl keeps U+2028 inside a record", () => {
@@ -166,6 +201,7 @@ test("formatReport excludes harness errors and compares arms", () => {
 	assert.match(text, /CI = Wilson 95%/);
 	assert.match(text, /\| suite · m:high \| 1\/1 \| 100% \|/);
 	assert.match(text, /\| 0 \| 1\/1 \| \$0\.1000 \| 1s \|$/m);
+	assert.match(text, /## Spend split/);
 	assert.match(text, /\*\*suite · m:high\*\* vs \*\*plain · m:high\*\*: wins 1, loses 0/);
 	assert.equal(formatReport([]), "No runs recorded.");
 });

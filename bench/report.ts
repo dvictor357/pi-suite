@@ -2,7 +2,15 @@
  * Markdown report over a results file. Pure: takes rows, returns text.
  */
 import { BENCH } from "./config";
-import { aggregate, armKey, groupBy, pairedCompare, scoredResults, type Aggregate } from "./stats";
+import {
+	aggregate,
+	armKey,
+	groupBy,
+	pairedCompare,
+	scoredResults,
+	spendSplit,
+	type Aggregate,
+} from "./stats";
 import type { BenchResult } from "./types";
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
@@ -68,6 +76,26 @@ export function formatReport(all: readonly BenchResult[]): string {
 				);
 			}
 		}
+	}
+
+	out.push(
+		"",
+		"## Spend split",
+		"",
+		"| Arm | Parent | Sub-agents by role | Quest tiers |",
+		"|-----|--------|--------------------|-------------|",
+	);
+	for (const k of armKeys) {
+		const split = spendSplit(byArm.get(k)!);
+		const roles = Object.entries(split.byRole)
+			.sort(([, a], [, b]) => b - a)
+			.map(([role, cost]) => `${role} ${usd(cost)}`);
+		const tiers = Object.entries(split.tiers)
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([tier, n]) => `${tier} ×${n}`);
+		out.push(
+			`| ${k} | ${usd(split.parent)} | ${roles.join(", ") || "—"} | ${tiers.join(", ") || "—"} |`,
+		);
 	}
 
 	out.push(

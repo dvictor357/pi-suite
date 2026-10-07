@@ -76,6 +76,29 @@ export function aggregate(results: readonly BenchResult[]): Aggregate {
 	};
 }
 
+/** Where an arm's money went, and which quest tiers its runs chose. */
+export interface SpendSplit {
+	/** Main-agent (orchestrator) spend: total minus sub-agent spend. */
+	parent: number;
+	/** Sub-agent spend by role; runs recorded before roles were tracked land in `unknown`. */
+	byRole: Record<string, number>;
+	/** Runs per final quest tier; runs without a quest are not counted. */
+	tiers: Record<string, number>;
+}
+
+export function spendSplit(results: readonly BenchResult[]): SpendSplit {
+	const out: SpendSplit = { parent: 0, byRole: {}, tiers: {} };
+	for (const r of results) {
+		out.parent += r.usage.cost - r.usage.subagentCost;
+		const byRole = r.usage.subagentCostByRole ?? { unknown: r.usage.subagentCost };
+		for (const [role, cost] of Object.entries(byRole)) {
+			if (cost) out.byRole[role] = (out.byRole[role] ?? 0) + cost;
+		}
+		if (r.usage.questTier) out.tiers[r.usage.questTier] = (out.tiers[r.usage.questTier] ?? 0) + 1;
+	}
+	return out;
+}
+
 /** Group key for an arm on a model — the unit two configurations are compared on. */
 export function armKey(r: Pick<BenchResult, "arm" | "model" | "thinking" | "suiteRev">): string {
 	return `${r.arm}${r.suiteRev ? `@${r.suiteRev}` : ""} · ${r.model}:${r.thinking}`;
