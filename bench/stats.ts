@@ -1,6 +1,6 @@
 /**
  * Pure aggregation over bench results: pass rates with Wilson intervals,
- * cost per pass, and a paired per-task comparison between two arms.
+ * cost per pass, autonomous success, and a paired per-task comparison between two arms.
  */
 import { BENCH } from "./config";
 import type { BenchResult } from "./types";
@@ -40,12 +40,26 @@ export interface Aggregate {
 	medianTokens: number;
 	medianDurationMs: number;
 	timeouts: number;
+	/**
+	 * Passes the agent finished on its own, without hitting the timeout. A timed-out run
+	 * whose hidden tests pass is still correct code, but not an autonomous delivery.
+	 */
+	autonomous: number;
+	/** Total spend (every run, failures included) divided by autonomous successes. */
+	costPerAutonomous: number | null;
+	/** Median wall time of autonomous successes; null when there were none. */
+	medianAutonomousMs: number | null;
+}
+
+export function isAutonomousSuccess(r: BenchResult): boolean {
+	return r.grade.passed && !r.timedOut;
 }
 
 export function aggregate(results: readonly BenchResult[]): Aggregate {
 	const runs = results.length;
 	const passes = results.filter((r) => r.grade.passed).length;
 	const totalCost = results.reduce((s, r) => s + r.usage.cost, 0);
+	const autonomous = results.filter(isAutonomousSuccess);
 	return {
 		runs,
 		passes,
@@ -56,6 +70,9 @@ export function aggregate(results: readonly BenchResult[]): Aggregate {
 		medianTokens: median(results.map((r) => r.usage.input + r.usage.output + r.usage.cacheRead)),
 		medianDurationMs: median(results.map((r) => r.durationMs)),
 		timeouts: results.filter((r) => r.timedOut).length,
+		autonomous: autonomous.length,
+		costPerAutonomous: autonomous.length ? totalCost / autonomous.length : null,
+		medianAutonomousMs: autonomous.length ? median(autonomous.map((r) => r.durationMs)) : null,
 	};
 }
 

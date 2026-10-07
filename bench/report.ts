@@ -11,7 +11,7 @@ const ktok = (x: number) => `${(x / 1000).toFixed(1)}k`;
 const secs = (ms: number) => `${Math.round(ms / 1000)}s`;
 
 function armRow(key: string, a: Aggregate): string {
-	return `| ${key} | ${a.passes}/${a.runs} | ${pct(a.passRate)} | ${pct(a.ci[0])}–${pct(a.ci[1])} | ${usd(a.costPerPass)} | ${usd(a.totalCost)} | ${ktok(a.medianTokens)} | ${secs(a.medianDurationMs)} | ${a.timeouts} |`;
+	return `| ${key} | ${a.passes}/${a.runs} | ${pct(a.passRate)} | ${pct(a.ci[0])}–${pct(a.ci[1])} | ${usd(a.costPerPass)} | ${usd(a.totalCost)} | ${ktok(a.medianTokens)} | ${secs(a.medianDurationMs)} | ${a.timeouts} | ${a.autonomous}/${a.runs} | ${usd(a.costPerAutonomous)} | ${a.medianAutonomousMs == null ? "—" : secs(a.medianAutonomousMs)} |`;
 }
 
 export function formatReport(all: readonly BenchResult[]): string {
@@ -28,12 +28,12 @@ export function formatReport(all: readonly BenchResult[]): string {
 		"",
 		`${results.length} scored runs over ${new Set(results.map((r) => r.taskId)).size} tasks` +
 			(broken ? ` (${broken} harness errors excluded)` : "") +
-			`. Pass = every hidden test passes. CI = Wilson ${Math.round(normalConfidence(BENCH.z) * 100)}%.`,
+			`. Pass = every hidden test passes; autonomous = a pass without timing out. CI = Wilson ${Math.round(normalConfidence(BENCH.z) * 100)}%.`,
 		"",
 		"## By arm",
 		"",
-		"| Arm | Passes | Pass % | CI | Cost / pass | Total cost | Median tokens | Median time | Timeouts |",
-		"|-----|--------|--------|----|-------------|------------|---------------|-------------|----------|",
+		"| Arm | Passes | Pass % | CI | Cost / pass | Total cost | Median tokens | Median time | Timeouts | Autonomous | Cost / autonomous | Median autonomous time |",
+		"|-----|--------|--------|----|-------------|------------|---------------|-------------|----------|------------|-------------------|------------------------|",
 		...armKeys.map((k) => armRow(k, aggregate(byArm.get(k)!))),
 	];
 

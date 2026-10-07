@@ -124,6 +124,25 @@ test("aggregate charges failed runs' spend to cost per pass", () => {
 	assert.equal(aggregate([result({ grade: fail })]).costPerPass, null);
 });
 
+test("a timed-out pass stays a correctness pass but is not an autonomous success", () => {
+	const a = aggregate([
+		result({ durationMs: 1000 }),
+		result({ timedOut: true, agentExitCode: null, durationMs: 9000 }),
+		result({ grade: fail }),
+	]);
+	assert.equal(a.passes, 2);
+	assert.equal(a.timeouts, 1);
+	assert.equal(a.autonomous, 1);
+	// All three runs' spend is charged to the single autonomous success.
+	assert.ok(Math.abs(a.costPerAutonomous! - 0.3) < 1e-12);
+	assert.equal(a.medianAutonomousMs, 1000);
+
+	const none = aggregate([result({ timedOut: true })]);
+	assert.equal(none.autonomous, 0);
+	assert.equal(none.costPerAutonomous, null);
+	assert.equal(none.medianAutonomousMs, null);
+});
+
 test("pairedCompare counts per-task wins and skips unshared tasks", () => {
 	const rows = [
 		result({ taskId: "t1", arm: "plain", grade: fail }),
@@ -146,6 +165,7 @@ test("formatReport excludes harness errors and compares arms", () => {
 	assert.match(text, /2 scored runs over 1 tasks \(1 harness errors excluded\)/);
 	assert.match(text, /CI = Wilson 95%/);
 	assert.match(text, /\| suite · m:high \| 1\/1 \| 100% \|/);
+	assert.match(text, /\| 0 \| 1\/1 \| \$0\.1000 \| 1s \|$/m);
 	assert.match(text, /\*\*suite · m:high\*\* vs \*\*plain · m:high\*\*: wins 1, loses 0/);
 	assert.equal(formatReport([]), "No runs recorded.");
 });
